@@ -1,65 +1,112 @@
-import Image from "next/image";
+import Link from "next/link";
+import Button from "@/components/ui/Button";
+import Card from "@/components/ui/Card";
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className="min-h-screen bg-gradient-to-br from-primary/5 to-secondary/10">
+      {/* Hero Section */}
+      <div className="max-w-4xl mx-auto px-6 py-20 text-center">
+        <h1 className="text-5xl font-bold text-foreground mb-4">
+          💎 CRM Cẩm Thạch Thu Bình
+        </h1>
+        <p className="text-xl text-muted-foreground mb-8">
+          Hệ thống quản lý khách hàng hiện đại, đơn giản và hiệu quả
+        </p>
+
+        <div className="flex gap-4 justify-center mb-12">
+          <Link href="/dashboard">
+            <Button variant="primary" size="lg">
+              🚀 Bắt đầu ngay
+            </Button>
+          </Link>
+          <Link href="/customers">
+            <Button variant="secondary" size="lg">
+              👥 Xem khách hàng
+            </Button>
+          </Link>
+        </div>
+      </div>
+
+      {/* Features Section */}
+      <div className="max-w-6xl mx-auto px-6 py-12">
+        <h2 className="text-3xl font-bold text-foreground mb-8 text-center">
+          ✨ Tính năng chính
+        </h2>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <Card>
+            <h3 className="text-lg font-semibold text-foreground mb-2">
+              👥 Quản lý khách hàng
+            </h3>
+            <p className="text-muted-foreground">
+              Lưu trữ và quản lý thông tin khách hàng một cách centralized, dễ tìm kiếm
+            </p>
+          </Card>
+
+          <Card>
+            <h3 className="text-lg font-semibold text-foreground mb-2">
+              🔍 Tìm kiếm và lọc
+            </h3>
+            <p className="text-muted-foreground">
+              Tìm kiếm nhanh chóng theo tên, mã khách, số điện thoại hoặc loại khách
+            </p>
+          </Card>
+
+          <Card>
+            <h3 className="text-lg font-semibold text-foreground mb-2">
+              💎 VIP Management
+            </h3>
+            <p className="text-muted-foreground">
+              Phân loại khách VIP và khách thường để quản lý hiệu quả hơn
+            </p>
+          </Card>
+
+          <Card>
+            <h3 className="text-lg font-semibold text-foreground mb-2">
+              📞 Thông tin liên hệ
+            </h3>
+            <p className="text-muted-foreground">
+              Lưu đầy đủ thông tin liên hệ: điện thoại, Facebook, Zalo...
+            </p>
+          </Card>
+
+          <Card>
+            <h3 className="text-lg font-semibold text-foreground mb-2">
+              📊 Thống kê
+            </h3>
+            <p className="text-muted-foreground">
+              Dashboard hiển thị thống kê tổng quan về khách hàng và hoạt động
+            </p>
+          </Card>
+
+          <Card>
+            <h3 className="text-lg font-semibold text-foreground mb-2">
+              📝 Ghi chú
+            </h3>
+            <p className="text-muted-foreground">
+              Thêm ghi chú chi tiết về mỗi khách hàng để theo dõi quan hệ
+            </p>
+          </Card>
+        </div>
+      </div>
+
+      {/* CTA Section */}
+      <div className="bg-card py-12 mt-12">
+        <div className="max-w-4xl mx-auto px-6 text-center">
+          <h2 className="text-2xl font-bold text-foreground mb-4">
+            Sẵn sàng để bắt đầu?
+          </h2>
+          <p className="text-muted-foreground mb-6">
+            Đăng nhập vào hệ thống để bắt đầu quản lý khách hàng của bạn ngay hôm nay
           </p>
+          <Link href="/dashboard">
+            <Button variant="primary" size="lg">
+              Vào Dashboard
+            </Button>
+          </Link>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      </div>
     </div>
   );
 }
