@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Customer } from "@/types/customer";
 import { CustomerPurchaseSummary } from "@/types/purchase";
-import { Edit2, Trash2, MapPin, Phone, Gem, Users } from "lucide-react";
+import { Edit2, Trash2, MapPin, Phone, Gem, Users, Flag } from "lucide-react";
 import Link from "next/link";
 import Badge from "@/components/ui/Badge";
 import AlertDialog from "@/components/ui/AlertDialog";
@@ -114,6 +114,12 @@ export default function CustomerTable({
                       <div className="flex items-center gap-1.5 text-muted-foreground">
                         <MapPin className="w-3.5 h-3.5 shrink-0" />
                         <span className="truncate max-w-[220px]">{customer.address}</span>
+                      </div>
+                    )}
+                    {customer.country && (
+                      <div className="flex items-center gap-1.5 text-muted-foreground">
+                        <Flag className="w-3.5 h-3.5 shrink-0" />
+                        {customer.country}
                       </div>
                     )}
                   </div>

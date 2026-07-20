@@ -37,7 +37,6 @@ import {
   getPurchaseReportData,
   getRevenueByBatch,
 } from "@/lib/reports/reports.service";
-import { getOrdersRevenueForRange } from "@/lib/orders/order.service";
 
 const currency = new Intl.NumberFormat("vi-VN", {
   style: "currency",
@@ -64,12 +63,6 @@ export default function ReportsPage() {
   const [purchaseFilter, setPurchaseFilter] = useState<DateFilterOption>("this_month");
   const [purchaseFrom, setPurchaseFrom] = useState("");
   const [purchaseTo, setPurchaseTo] = useState("");
-  // Tổng doanh thu (the single Total Revenue figure only) is sourced from
-  // Orders via the same getOrdersRevenueForRange already used by Dashboard
-  // (ORDERS_SPEC.md §5 Revenue Recognition: Completed AND Paid) — not
-  // duplicated logic. By Source/By Salesperson/Top Customers/Monthly
-  // Revenue below stay on purchaseData (customer_purchases), unchanged.
-  const [ordersRevenue, setOrdersRevenue] = useState<number | null>(null);
 
   const [revenueByBatch, setRevenueByBatch] = useState<BatchRevenueRow[] | null>(null);
   const [batchFilter, setBatchFilter] = useState<DateFilterOption>("this_month");
@@ -88,7 +81,6 @@ export default function ReportsPage() {
   useEffect(() => {
     const range = getDateRange(purchaseFilter, purchaseFrom, purchaseTo);
     getPurchaseReportData(range).then(setPurchaseData);
-    getOrdersRevenueForRange(range.start, range.end).then(setOrdersRevenue);
   }, [purchaseFilter, purchaseFrom, purchaseTo]);
 
   // Revenue by Batch - the only Lô hàng report the Date Filter governs.
@@ -276,9 +268,9 @@ export default function ReportsPage() {
         </div>
         <StatCard
           title="Tổng doanh thu"
-          value={ordersRevenue !== null ? currency.format(ordersRevenue) : "—"}
+          value={purchaseData !== null ? currency.format(purchaseData.totalRevenue) : "—"}
           icon={<Wallet className="w-5 h-5 text-primary" />}
-          placeholder={ordersRevenue === null}
+          placeholder={purchaseData === null}
         />
         {purchaseData === null ? (
           <div className="flex justify-center items-center h-32">

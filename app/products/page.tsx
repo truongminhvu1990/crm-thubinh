@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, RefreshCw, X } from "lucide-react";
+import { Plus, RefreshCw, X, Download, Upload } from "lucide-react";
 import { Product } from "@/types/product";
 import {
   getProducts,
@@ -12,10 +12,12 @@ import {
   findProductByCode,
   findProductBySku,
 } from "@/lib/product.service";
+import { buildProductImportTemplate } from "@/lib/productImportExport";
 import { PRODUCT_STATUS } from "@/lib/product.constants";
 import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
 import ProductTable from "@/components/product/ProductTable";
 import ProductModal from "@/components/product/ProductModal";
+import ProductImportModal from "@/components/product/ProductImportModal";
 import Button from "@/components/ui/Button";
 import SearchInput from "@/components/ui/SearchInput";
 import AlertDialog from "@/components/ui/AlertDialog";
@@ -42,6 +44,7 @@ export default function ProductsPage() {
   const [formError, setFormError] = useState("");
   const [duplicateProduct, setDuplicateProduct] = useState<Product | null>(null);
   const [duplicateField, setDuplicateField] = useState<"product_code" | "sku">("product_code");
+  const [importModalOpen, setImportModalOpen] = useState(false);
   const sourceOptions = useMasterDataOptions("product_source");
   const salespersonOptions = useMasterDataOptions("salesperson");
   const categoryOptions = useMasterDataOptions("product_category");
@@ -230,6 +233,16 @@ export default function ProductsPage() {
     await performSaveProduct();
   }
 
+  async function handleDownloadTemplate() {
+    const blob = await buildProductImportTemplate();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "mau-nhap-san-pham.xlsx";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function handleDeleteProduct(product: Product) {
     setIsLoading(true);
     try {
@@ -357,6 +370,14 @@ export default function ProductsPage() {
               <RefreshCw className="w-4 h-4" />
               <span className="hidden sm:inline">Làm mới</span>
             </Button>
+            <Button variant="secondary" size="md" onClick={handleDownloadTemplate}>
+              <Download className="w-4 h-4" />
+              <span className="hidden sm:inline">Tải mẫu Excel</span>
+            </Button>
+            <Button variant="secondary" size="md" onClick={() => setImportModalOpen(true)}>
+              <Upload className="w-4 h-4" />
+              <span className="hidden sm:inline">Nhập Excel</span>
+            </Button>
             <Button variant="primary" size="md" onClick={handleAddProduct} className="whitespace-nowrap">
               <Plus className="w-4 h-4" />
               Thêm sản phẩm
@@ -397,6 +418,12 @@ export default function ProductsPage() {
         onOpenChange={(open) => !open && setDuplicateProduct(null)}
         onCancel={handleOpenDuplicateProfile}
         onConfirm={handleContinueCreate}
+      />
+
+      <ProductImportModal
+        open={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onImported={loadProducts}
       />
     </div>
   );

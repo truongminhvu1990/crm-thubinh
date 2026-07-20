@@ -11,7 +11,6 @@ import {
   getPurchaseReportData,
   PurchaseReportData,
 } from "@/lib/reports/reports.service";
-import { getOrdersRevenueForRange } from "@/lib/orders/order.service";
 import Card from "@/components/ui/Card";
 import StatCard from "@/components/ui/StatCard";
 import SalesSummary from "@/components/dashboard/SalesSummary";
@@ -27,25 +26,22 @@ export default function Dashboard() {
   const [productTotal, setProductTotal] = useState(0);
   const [batchTotal, setBatchTotal] = useState(0);
   const [purchaseData, setPurchaseData] = useState<PurchaseReportData | null>(null);
-  const [ordersRevenue, setOrdersRevenue] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
   async function loadStats() {
     setIsLoading(true);
     try {
       const thisMonth = getDateRange("this_month");
-      const [customers, products, batches, purchases, revenue] = await Promise.all([
+      const [customers, products, batches, purchases] = await Promise.all([
         getCustomerStats(),
         getProductReportData(),
         getBatchStaticReportData(),
         getPurchaseReportData(thisMonth),
-        getOrdersRevenueForRange(thisMonth.start, thisMonth.end),
       ]);
       setCustomerStats(customers);
       setProductTotal(products.total);
       setBatchTotal(batches.totalBatches);
       setPurchaseData(purchases);
-      setOrdersRevenue(revenue);
     } catch (error) {
       console.error("Failed to load dashboard stats:", error);
     } finally {
@@ -62,6 +58,9 @@ export default function Dashboard() {
   const now = new Date();
   const currentMonthLabel = `Tháng ${now.getMonth() + 1}/${now.getFullYear()}`;
   const revenueLabel = `Doanh thu ${currentMonthLabel.toLowerCase()}`;
+  // Single source of truth: customer_purchases (via getPurchaseReportData) -
+  // no Orders dependency for Dashboard revenue.
+  const monthRevenue = purchaseData?.totalRevenue ?? 0;
 
   const currency = new Intl.NumberFormat("vi-VN", {
     style: "currency",
@@ -92,7 +91,7 @@ export default function Dashboard() {
         <Link href="/reports">
           <StatCard
             title={revenueLabel}
-            value={currency.format(ordersRevenue)}
+            value={currency.format(monthRevenue)}
             icon={<Wallet className="w-8 h-8 text-emerald-600" />}
             color="bg-emerald-100"
           />
@@ -149,7 +148,7 @@ export default function Dashboard() {
 
       {/* Sales Summary */}
       <div className="mb-6">
-        <SalesSummary data={purchaseData} monthLabel={currentMonthLabel} revenue={ordersRevenue} />
+        <SalesSummary data={purchaseData} monthLabel={currentMonthLabel} />
       </div>
 
       {/* Dashboard integration with existing Reports */}

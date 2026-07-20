@@ -13,11 +13,9 @@ const currency = new Intl.NumberFormat("vi-VN", {
 interface Props {
   data: PurchaseReportData | null;
   monthLabel: string;
-  /** Orders-sourced revenue (ORDERS_SPEC.md §5 Revenue Recognition),
-   * overriding `data.totalRevenue` for the "Doanh thu tháng này" figure only
-   * — keeps it consistent with the Dashboard's top revenue card, which
-   * reads the same source. Leading Source/Salesperson still come from
-   * `data` (Reports' existing customer_purchases-based source), untouched. */
+  /** Optional override for the "Doanh thu tháng này" figure; falls back to
+   * `data.totalRevenue` (customer_purchases - single source of truth for
+   * Dashboard/Reports revenue). No caller currently overrides this. */
   revenue?: number;
 }
 

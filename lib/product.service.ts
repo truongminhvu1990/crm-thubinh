@@ -385,3 +385,37 @@ export async function deleteProduct(id: string) {
 
   return error;
 }
+
+/** Batched duplicate check for Quick Import - one query for every product
+ * code in the file, instead of one round trip per row. */
+export async function findExistingProductCodes(codes: string[]): Promise<Set<string>> {
+  if (codes.length === 0) return new Set();
+
+  const { data, error } = await supabase.from("products").select("product_code").in("product_code", codes);
+
+  if (error || !data) {
+    if (error) console.error("Error checking existing product codes:", error);
+    return new Set();
+  }
+
+  return new Set((data as { product_code: string }[]).map((r) => r.product_code));
+}
+
+/** Quick Import bulk insert - one INSERT for every row that already passed
+ * row validation and duplicate checks, reusing the same writable-field
+ * filter as addProduct so imported rows can never write a non-writable
+ * column (available/reserved/sold, batch_id, etc.). */
+export async function bulkAddProducts(products: Partial<Product>[]) {
+  if (products.length === 0) return { data: [], error: null };
+
+  const rows = products.map((p) => pickWritableFields(p, { skipEmpty: true }));
+
+  const { data, error } = await supabase.from("products").insert(rows).select();
+
+  if (error) {
+    console.error("Error bulk adding products:", error);
+    return { data: null, error };
+  }
+
+  return { data, error: null };
+}
