@@ -162,23 +162,17 @@ export async function deletePurchase(id: string, productId?: string | null) {
 }
 
 /**
- * One query for every customer's purchase aggregates (count, total revenue,
- * last purchase date), computed client-side from customer_purchases - no
- * per-customer round trip, and nothing here is stored/duplicated back onto
- * the customers table.
+ * BUG-006: the one place "revenue per customer" is summed from
+ * customer_purchases rows. Shared by getPurchaseSummaries (Customers list,
+ * all-time) and getCustomerRevenue (Customer Detail, date-filterable) below,
+ * so the two can never sum rows differently, only over a different row set.
  */
-export async function getPurchaseSummaries(): Promise<Map<string, CustomerPurchaseSummary>> {
-  const { data, error } = await supabase
-    .from("customer_purchases")
-    .select("customer_id, sale_price, sale_date");
-
+export function aggregateCustomerRevenue(
+  rows: Pick<CustomerPurchase, "customer_id" | "sale_price" | "sale_date">[]
+): Map<string, CustomerPurchaseSummary> {
   const summaries = new Map<string, CustomerPurchaseSummary>();
-  if (error || !data) {
-    if (error) console.error("Error fetching purchase summaries:", error);
-    return summaries;
-  }
 
-  for (const row of data as Pick<CustomerPurchase, "customer_id" | "sale_price" | "sale_date">[]) {
+  for (const row of rows) {
     const existing = summaries.get(row.customer_id) || {
       count: 0,
       totalRevenue: 0,
@@ -193,4 +187,56 @@ export async function getPurchaseSummaries(): Promise<Map<string, CustomerPurcha
   }
 
   return summaries;
+}
+
+/**
+ * One query for every customer's ALL-TIME purchase aggregates (count, total
+ * revenue, last purchase date) - backs the Customers list "Doanh thu" column
+ * and its revenue-threshold filter. Nothing here is stored/duplicated back
+ * onto the customers table.
+ */
+export async function getPurchaseSummaries(): Promise<Map<string, CustomerPurchaseSummary>> {
+  const { data, error } = await supabase
+    .from("customer_purchases")
+    .select("customer_id, sale_price, sale_date");
+
+  if (error || !data) {
+    if (error) console.error("Error fetching purchase summaries:", error);
+    return new Map();
+  }
+
+  return aggregateCustomerRevenue(data as Pick<CustomerPurchase, "customer_id" | "sale_price" | "sale_date">[]);
+}
+
+/**
+ * Single customer's purchase aggregates, optionally bounded to [range.start,
+ * range.end) on sale_date - backs Customer Detail's revenue figure. Passing
+ * `null` means All Time (no date bound applied at all, not a wide hardcoded
+ * range) - the same real absence-of-filter semantics as getPurchaseSummaries
+ * above, just scoped to one customer instead of every customer.
+ */
+export async function getCustomerRevenue(
+  customerId: string,
+  range: { start: string; end: string } | null
+): Promise<CustomerPurchaseSummary> {
+  let query = supabase
+    .from("customer_purchases")
+    .select("customer_id, sale_price, sale_date")
+    .eq("customer_id", customerId);
+
+  if (range) {
+    query = query.gte("sale_date", range.start).lt("sale_date", range.end);
+  }
+
+  const { data, error } = await query;
+
+  if (error || !data) {
+    if (error) console.error("Error fetching customer revenue:", error);
+    return { count: 0, totalRevenue: 0, lastPurchaseDate: null };
+  }
+
+  const summaries = aggregateCustomerRevenue(
+    data as Pick<CustomerPurchase, "customer_id" | "sale_price" | "sale_date">[]
+  );
+  return summaries.get(customerId) || { count: 0, totalRevenue: 0, lastPurchaseDate: null };
 }

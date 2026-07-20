@@ -11,6 +11,7 @@ import Button from "@/components/ui/Button";
 import AlertDialog from "@/components/ui/AlertDialog";
 import CustomerModal from "@/components/customer/CustomerModal";
 import CustomerProfileHeader from "@/components/customer/CustomerProfileHeader";
+import CustomerRevenueSummary from "@/components/customer/CustomerRevenueSummary";
 import CustomerNotesTimeline from "@/components/customer/CustomerNotesTimeline";
 import CustomerFollowUp from "@/components/customer/CustomerFollowUp";
 import CustomerJadePreferences from "@/components/customer/CustomerJadePreferences";
@@ -96,6 +97,7 @@ export default function CustomerProfilePage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
+            <CustomerRevenueSummary customer={customer} />
             <CustomerNotesTimeline customer={customer} onUpdate={setCustomer} />
             <CustomerPurchaseHistory customer={customer} />
             <CustomerJadePreferences customer={customer} />
