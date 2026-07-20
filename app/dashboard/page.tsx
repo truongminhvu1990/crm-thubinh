@@ -5,18 +5,22 @@ import Link from "next/link";
 import { Users, Gem, Package, TrendingUp, Calendar, Wallet } from "lucide-react";
 import { getCustomerStats } from "@/lib/customer.service";
 import {
-  getDateRange,
   getProductReportData,
   getBatchStaticReportData,
   getPurchaseReportData,
   PurchaseReportData,
 } from "@/lib/reports/reports.service";
+import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
 import Card from "@/components/ui/Card";
 import StatCard from "@/components/ui/StatCard";
+import GlobalDateFilter from "@/components/shared/GlobalDateFilter";
+import PageViewingLabel from "@/components/shared/PageViewingLabel";
 import SalesSummary from "@/components/dashboard/SalesSummary";
 import ReportsIntegration from "@/components/dashboard/ReportsIntegration";
 
 export default function Dashboard() {
+  const { range, label } = useGlobalDateFilter();
+
   const [customerStats, setCustomerStats] = useState({
     total: 0,
     vip: 0,
@@ -28,36 +32,29 @@ export default function Dashboard() {
   const [purchaseData, setPurchaseData] = useState<PurchaseReportData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  async function loadStats() {
-    setIsLoading(true);
-    try {
-      const thisMonth = getDateRange("this_month");
-      const [customers, products, batches, purchases] = await Promise.all([
-        getCustomerStats(),
-        getProductReportData(),
-        getBatchStaticReportData(),
-        getPurchaseReportData(thisMonth),
-      ]);
-      setCustomerStats(customers);
-      setProductTotal(products.total);
-      setBatchTotal(batches.totalBatches);
-      setPurchaseData(purchases);
-    } catch (error) {
-      console.error("Failed to load dashboard stats:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
   useEffect(() => {
-    loadStats();
-  }, []);
+    let cancelled = false;
+    setIsLoading(true);
+    Promise.all([getCustomerStats(), getProductReportData(), getBatchStaticReportData(), getPurchaseReportData(range)])
+      .then(([customers, products, batches, purchases]) => {
+        if (cancelled) return;
+        setCustomerStats(customers);
+        setProductTotal(products.total);
+        setBatchTotal(batches.totalBatches);
+        setPurchaseData(purchases);
+      })
+      .catch((error) => console.error("Failed to load dashboard stats:", error))
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
 
-  // Always the real current month - never a stored/hardcoded value, so
-  // this label and the revenue query above both roll over automatically.
-  const now = new Date();
-  const currentMonthLabel = `Tháng ${now.getMonth() + 1}/${now.getFullYear()}`;
-  const revenueLabel = `Doanh thu ${currentMonthLabel.toLowerCase()}`;
+  // Revenue label now follows the Global Date Filter (Sprint v1.0.2)
+  // instead of always saying "this month".
+  const revenueLabel = `Doanh thu (${label})`;
   // Single source of truth: customer_purchases (via getPurchaseReportData) -
   // no Orders dependency for Dashboard revenue.
   const monthRevenue = purchaseData?.totalRevenue ?? 0;
@@ -79,11 +76,17 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-background pb-8">
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-foreground">
-          📊 Dashboard CRM Cẩm Thạch Thu Bình
-        </h1>
-        <p className="text-muted-foreground mt-2">Chào mừng bạn quay lại!</p>
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">
+            📊 Dashboard CRM Cẩm Thạch Thu Bình
+          </h1>
+          <p className="text-muted-foreground mt-2">Chào mừng bạn quay lại!</p>
+          <div className="mt-1">
+            <PageViewingLabel />
+          </div>
+        </div>
+        <GlobalDateFilter />
       </div>
 
       {/* Revenue - its own row so the formatted currency string always has room */}
@@ -148,7 +151,7 @@ export default function Dashboard() {
 
       {/* Sales Summary */}
       <div className="mb-6">
-        <SalesSummary data={purchaseData} monthLabel={currentMonthLabel} />
+        <SalesSummary data={purchaseData} monthLabel={label} />
       </div>
 
       {/* Dashboard integration with existing Reports */}

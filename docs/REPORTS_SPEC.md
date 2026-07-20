@@ -2,10 +2,21 @@
 
 **Sprint:** 3
 **Module:** Reports
-**Status:** Draft — Revision 2, Product Owner Review applied (PARTIAL PASS) — awaiting further Product Owner review.
-**Phase:** Business design only. No code, no SQL, no migrations, no UI were written for this document.
+**Status:** Draft — Revision 3, Sprint v1.0.2 (Global Date Filter) applied per explicit Product Owner-approved task.
+**Phase:** Increment 1 is built and live. This revision documents a targeted, pre-approved feature addition, not a re-design.
 
-**Revision 2 changelog (this pass, Product Owner Review — 5 scoped decisions):**
+**Revision 3 changelog (Sprint v1.0.2 — Global Date Filter, APPROVED):**
+Dashboard and Reports now share exactly one Date Filter: one component (`components/shared/GlobalDateFilter.tsx`), one state (`useGlobalDateFilter()`, provided once in `AppShell` so it survives client-side navigation between the two pages without a reload), and one range/label utility (`lib/dateFilter.ts`). Changing the filter on either screen updates both.
+
+**Decision 3 narrowed (Product Owner-approved, not a full reversal):** "Dashboard = Overview, Reports = Details" still holds for what each page *shows*. It no longer holds for the Date Filter itself — that one piece of state and its option/range/label logic is now explicitly shared infrastructure between the two pages. Reports' own report computations (`getPurchaseReportData`, `getRevenueByBatch`, and every current-state count) are untouched — still computed by Reports itself, still reading `customer_purchases`/`products`/`product_batches` directly.
+
+**Decision 4 narrowed — new option added.** The Date Filter is now **Today / This Week / This Month / This Year / All Time / Custom Range** (was 5 options, now 6). "All Time" means no `sale_date` bound is applied at all (`lib/dateFilter.ts`'s `getDateRange()` returns `null`, not a hardcoded wide range) — `getPurchaseReportData`/`getRevenueByBatch` skip their `.gte/.lt` filter entirely when `range` is `null`.
+
+**Decision 5 narrowed (same pattern as the BUG-006 exception).** `DateFilterOption`/`DateRange`/`getDateRange` moved out of this module into neutral `lib/dateFilter.ts`; `reports.service.ts` re-exports them so its own file and every existing importer keep working unchanged. This is option/range plumbing, not business logic — every report's actual aggregation rule (§2) is unchanged and still lives only in `reports.service.ts`.
+
+**Out of scope for this revision, explicitly not touched:** customer revenue logic (Customer Detail/List — `purchase.service.ts`), Product Import, Orders, Customer Purchases CRUD, and every current-state count (§3.1/§3.2/§3.5's non-Date-Filter rows) — those stay exactly as locked.
+
+**Revision 2 changelog (Product Owner Review — 5 scoped decisions):**
 1. **Legacy page demoted.** The existing `/reports` page/services are **Legacy** — explicitly **not** the Business Source of Truth. This document (`docs/REPORTS_SPEC.md`) is the sole Business Design. Removed all "adopt as baseline" / "carry forward as-is" framing from Revision 1 §0/§2/§4.
 2. **Business Reports only — locked.** No AI, no Prediction, no Forecast, anywhere in Reports. Made explicit in §1 and Explicitly Out of Scope.
 3. **Dashboard vs. Reports altitude — locked.** Dashboard = Overview. Reports = Details. No overlap: Reports does not reproduce Dashboard's overview cards, and does not call Dashboard's underlying functions.
@@ -30,7 +41,7 @@ Dependency note (carried from Revision 1, unchanged): Orders is currently **bloc
 | **Batch** (LOCKED) | Read only, direct table reads. No write, no field change. |
 | **Orders** (BLOCKED) | No dependency — see §3.4. |
 | **Inventory** (Sprint 2, Draft) | **No dependency (Decision 5).** Reports does not call `lib/inventory.service.ts` or any Inventory code. If Reports needs a stock/batch breakdown, it computes it independently from Product/Batch tables. |
-| **Dashboard** | **Locked altitude split (Decision 3): Dashboard = Overview, Reports = Details.** Reports does not call Dashboard's functions (`getCustomerStats()`, `getCurrentMonthRevenue()`) and does not reproduce Dashboard's overview cards. |
+| **Dashboard** | **Locked altitude split (Decision 3): Dashboard = Overview, Reports = Details.** Reports does not call Dashboard's functions and does not reproduce Dashboard's overview cards. **Exception (Revision 3 / Sprint v1.0.2):** the Date Filter itself (component/state/range utility) is now shared with Dashboard — see Revision 3 changelog. |
 
 ---
 
@@ -93,7 +104,7 @@ Reads `product_batches` and `products` directly (join on `batch_id`), and `custo
 
 ## 4. Date Filter (Locked)
 
-Options, locked exactly: **Today, This Week, This Month, This Year, Custom Range.**
+Options, locked exactly: **Today, This Week, This Month, This Year, All Time, Custom Range.** ("All Time" added in Revision 3 / Sprint v1.0.2 — no `sale_date` bound applied.)
 
 Applies to every report keyed on `customer_purchases.sale_date`: Revenue by Source, Revenue by Salesperson, Top Customers, Revenue by Period (§3.3), and Revenue by Batch (§3.5).
 

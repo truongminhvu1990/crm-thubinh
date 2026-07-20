@@ -1,19 +1,18 @@
 import { supabase } from "@/lib/supabase";
+import { DateFilterOption, DateRange, getDateRange } from "@/lib/dateFilter";
 
 // This module intentionally reads Supabase tables directly rather than
 // importing customer.service.ts / product.service.ts / purchase.service.ts /
 // report.service.ts / batchReport.service.ts / inventory.service.ts - Reports
 // has no shared business logic with any other module (REPORTS_SPEC.md
-// Decision 5, LOCKED).
+// Decision 5, LOCKED). The Date Filter option set/range math is neutral,
+// shared infrastructure (lib/dateFilter.ts, Sprint v1.0.2 - Global Date
+// Filter) re-exported here so every existing import of DateFilterOption/
+// DateRange/getDateRange from this module keeps working unchanged.
+export type { DateFilterOption, DateRange };
+export { getDateRange };
 
 const UNSPECIFIED = "Chưa xác định";
-
-export type DateFilterOption = "today" | "this_week" | "this_month" | "this_year" | "custom";
-
-export interface DateRange {
-  start: string; // inclusive, YYYY-MM-DD
-  end: string; // exclusive, YYYY-MM-DD
-}
 
 export interface CountBreakdown {
   label: string;
@@ -103,48 +102,6 @@ function toDateStr(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-function addDaysToDateStr(dateStr: string, days: number): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  return toDateStr(new Date(y, m - 1, d + days));
-}
-
-/**
- * Computes the [start, end) range for the locked Date Filter options
- * (REPORTS_SPEC.md §4 / REPORTS_UI.md §1.2). This Week starts on Monday.
- * Custom Range treats `to` as inclusive (end = to + 1 day).
- */
-export function getDateRange(option: DateFilterOption, customFrom?: string, customTo?: string): DateRange {
-  const now = new Date();
-
-  if (option === "custom") {
-    const start = customFrom || toDateStr(now);
-    const end = customTo ? addDaysToDateStr(customTo, 1) : addDaysToDateStr(start, 1);
-    return { start, end };
-  }
-
-  if (option === "today") {
-    const start = toDateStr(now);
-    return { start, end: addDaysToDateStr(start, 1) };
-  }
-
-  if (option === "this_week") {
-    const day = now.getDay(); // 0 = Sunday .. 6 = Saturday
-    const diffToMonday = day === 0 ? 6 : day - 1;
-    const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diffToMonday);
-    const start = toDateStr(monday);
-    return { start, end: addDaysToDateStr(start, 7) };
-  }
-
-  if (option === "this_year") {
-    return { start: `${now.getFullYear()}-01-01`, end: `${now.getFullYear() + 1}-01-01` };
-  }
-
-  // this_month
-  const start = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
-  const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  return { start, end: `${nextMonth.getFullYear()}-${pad(nextMonth.getMonth() + 1)}-01` };
-}
-
 function groupCount<T>(rows: T[], key: (row: T) => string | null | undefined): CountBreakdown[] {
   const map = new Map<string, number>();
   for (const row of rows) {
@@ -223,12 +180,14 @@ interface PurchaseRow {
  * (REPORTS_UI.md Decision 2) - the range narrows which rows are included,
  * the bucketing granularity does not change.
  */
-export async function getPurchaseReportData(range: DateRange): Promise<PurchaseReportData> {
-  const { data, error } = await supabase
+export async function getPurchaseReportData(range: DateRange | null): Promise<PurchaseReportData> {
+  let query = supabase
     .from("customer_purchases")
-    .select("customer_id, sale_price, sale_date, source, salesperson, customer:customers(full_name)")
-    .gte("sale_date", range.start)
-    .lt("sale_date", range.end);
+    .select("customer_id, sale_price, sale_date, source, salesperson, customer:customers(full_name)");
+  if (range) {
+    query = query.gte("sale_date", range.start).lt("sale_date", range.end);
+  }
+  const { data, error } = await query;
 
   const empty: PurchaseReportData = { totalRevenue: 0, bySource: [], bySalesperson: [], topCustomers: [], byPeriod: [] };
   if (error || !data) {
@@ -379,14 +338,15 @@ export async function getBatchStaticReportData(): Promise<BatchStaticReportData>
 }
 
 /** Revenue by Batch - the one Batch report that is a Date Filter target. */
-export async function getRevenueByBatch(range: DateRange): Promise<BatchRevenueRow[]> {
+export async function getRevenueByBatch(range: DateRange | null): Promise<BatchRevenueRow[]> {
+  let purchasesQuery = supabase.from("customer_purchases").select("sale_price, product:products!inner(batch_id)");
+  if (range) {
+    purchasesQuery = purchasesQuery.gte("sale_date", range.start).lt("sale_date", range.end);
+  }
+
   const [batchesRes, purchasesRes] = await Promise.all([
     supabase.from("product_batches").select("id, batch_code"),
-    supabase
-      .from("customer_purchases")
-      .select("sale_price, product:products!inner(batch_id)")
-      .gte("sale_date", range.start)
-      .lt("sale_date", range.end),
+    purchasesQuery,
   ]);
 
   if (batchesRes.error || !batchesRes.data) {

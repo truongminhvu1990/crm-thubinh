@@ -20,19 +20,19 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import StatCard from "@/components/ui/StatCard";
-import ReportsDateFilter from "@/components/reports/ReportsDateFilter";
+import GlobalDateFilter from "@/components/shared/GlobalDateFilter";
+import PageViewingLabel from "@/components/shared/PageViewingLabel";
 import ReportsTable, { ReportsTableRow } from "@/components/reports/ReportsTable";
 import { formatDate } from "@/lib/utils";
+import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
 import {
   BatchStaticReportData,
   BatchRevenueRow,
   CustomerReportData,
-  DateFilterOption,
   ProductReportData,
   PurchaseReportData,
   getBatchStaticReportData,
   getCustomerReportData,
-  getDateRange,
   getProductReportData,
   getPurchaseReportData,
   getRevenueByBatch,
@@ -55,19 +55,14 @@ function breakdownRows(rows: { label: string; count: number }[]): ReportsTableRo
 }
 
 export default function ReportsPage() {
+  const { range } = useGlobalDateFilter();
+
   const [customerData, setCustomerData] = useState<CustomerReportData | null>(null);
   const [productData, setProductData] = useState<ProductReportData | null>(null);
   const [batchStatic, setBatchStatic] = useState<BatchStaticReportData | null>(null);
 
   const [purchaseData, setPurchaseData] = useState<PurchaseReportData | null>(null);
-  const [purchaseFilter, setPurchaseFilter] = useState<DateFilterOption>("this_month");
-  const [purchaseFrom, setPurchaseFrom] = useState("");
-  const [purchaseTo, setPurchaseTo] = useState("");
-
   const [revenueByBatch, setRevenueByBatch] = useState<BatchRevenueRow[] | null>(null);
-  const [batchFilter, setBatchFilter] = useState<DateFilterOption>("this_month");
-  const [batchFrom, setBatchFrom] = useState("");
-  const [batchTo, setBatchTo] = useState("");
 
   // Initial load - everything not gated behind a Date Filter loads once.
   useEffect(() => {
@@ -76,18 +71,17 @@ export default function ReportsPage() {
     getBatchStaticReportData().then(setBatchStatic);
   }, []);
 
-  // Doanh thu section - Date Filter governs all 4 of its reports at once
-  // (REPORTS_SPEC.md §4).
+  // Doanh thu section - the Global Date Filter governs all 4 of its reports
+  // at once (REPORTS_SPEC.md §4, Sprint v1.0.2).
   useEffect(() => {
-    const range = getDateRange(purchaseFilter, purchaseFrom, purchaseTo);
     getPurchaseReportData(range).then(setPurchaseData);
-  }, [purchaseFilter, purchaseFrom, purchaseTo]);
+  }, [range]);
 
-  // Revenue by Batch - the only Lô hàng report the Date Filter governs.
+  // Revenue by Batch - the only Lô hàng report the Date Filter governs, same
+  // shared range as the Doanh thu section above.
   useEffect(() => {
-    const range = getDateRange(batchFilter, batchFrom, batchTo);
     getRevenueByBatch(range).then(setRevenueByBatch);
-  }, [batchFilter, batchFrom, batchTo]);
+  }, [range]);
 
   const initialLoading = customerData === null || productData === null || batchStatic === null;
 
@@ -167,11 +161,17 @@ export default function ReportsPage() {
 
   return (
     <div className="pb-8 space-y-8">
-      <div className="mb-2">
-        <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">Báo cáo</h1>
-        <p className="text-muted-foreground mt-1.5 text-sm">
-          Báo cáo chi tiết theo khách hàng, sản phẩm, doanh thu và lô hàng.
-        </p>
+      <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">Báo cáo</h1>
+          <p className="text-muted-foreground mt-1.5 text-sm">
+            Báo cáo chi tiết theo khách hàng, sản phẩm, doanh thu và lô hàng.
+          </p>
+          <div className="mt-1.5">
+            <PageViewingLabel />
+          </div>
+        </div>
+        <GlobalDateFilter />
       </div>
 
       {/* Khách hàng */}
@@ -250,22 +250,10 @@ export default function ReportsPage() {
 
       {/* Doanh thu */}
       <section className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-            <Wallet className="w-5 h-5 text-primary" />
-            Doanh thu
-          </h2>
-          <ReportsDateFilter
-            value={purchaseFilter}
-            customFrom={purchaseFrom}
-            customTo={purchaseTo}
-            onChange={setPurchaseFilter}
-            onCustomChange={(from, to) => {
-              setPurchaseFrom(from);
-              setPurchaseTo(to);
-            }}
-          />
-        </div>
+        <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+          <Wallet className="w-5 h-5 text-primary" />
+          Doanh thu
+        </h2>
         <StatCard
           title="Tổng doanh thu"
           value={purchaseData !== null ? currency.format(purchaseData.totalRevenue) : "—"}
@@ -322,18 +310,6 @@ export default function ReportsPage() {
         </h2>
         <StatCard title="Tổng lô hàng" value={batchStatic!.totalBatches} icon={<Package className="w-5 h-5 text-primary" />} />
 
-        <div className="flex justify-end">
-          <ReportsDateFilter
-            value={batchFilter}
-            customFrom={batchFrom}
-            customTo={batchTo}
-            onChange={setBatchFilter}
-            onCustomChange={(from, to) => {
-              setBatchFrom(from);
-              setBatchTo(to);
-            }}
-          />
-        </div>
         <ReportsTable
           icon={<Coins className="w-5 h-5 text-primary" />}
           title="Doanh thu theo lô hàng"
