@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -13,19 +14,66 @@ import {
   TrendingUp,
   BookOpen,
   Settings,
+  CalendarClock,
+  Percent,
+  ScrollText,
+  ShieldCheck,
+  Megaphone,
+  Filter,
+  Cake,
+  Zap,
+  Radio,
+  Gift,
+  Ticket,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getFollowUpSummaryCounts } from "@/lib/customer.service";
+import SidebarGroup, { SidebarLeaf } from "@/components/shared/SidebarGroup";
 
-const LINKS = [
+interface NavLeaf extends SidebarLeaf {
+  children?: undefined;
+}
+
+interface NavGroup {
+  label: string;
+  icon: typeof LayoutDashboard;
+  children: SidebarLeaf[];
+}
+
+type NavEntry = NavLeaf | NavGroup;
+
+function isGroup(entry: NavEntry): entry is NavGroup {
+  return "children" in entry && Array.isArray(entry.children);
+}
+
+const LINKS: NavEntry[] = [
   { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard", enabled: true },
   { href: "/customers", icon: Users, label: "Khách hàng", enabled: true },
+  { href: "/follow-up", icon: CalendarClock, label: "Follow-up Center", enabled: true },
   { href: "/products", icon: Gem, label: "Sản phẩm", enabled: true },
   { href: "/batches", icon: Package, label: "Lô hàng", enabled: true },
   { href: "/inventory", icon: Boxes, label: "Tồn kho", enabled: true },
   { href: "/orders", icon: ReceiptText, label: "Đơn hàng", enabled: true },
   { href: "/reports", icon: Wallet, label: "Báo cáo", enabled: true },
+  { href: "/reports/sales-ledger", icon: ScrollText, label: "Sổ bán hàng", enabled: true },
+  { href: "/data-verification", icon: ShieldCheck, label: "Xác minh dữ liệu", enabled: true },
+  { href: "/commissions", icon: Percent, label: "Hoa hồng", enabled: true },
   { href: "/market-intelligence", icon: TrendingUp, label: "Thị trường", enabled: true },
+  {
+    label: "Marketing",
+    icon: Megaphone,
+    children: [
+      { href: "/marketing", icon: LayoutDashboard, label: "Dashboard", enabled: true },
+      { href: "/marketing/segments", icon: Filter, label: "Customer Segments", enabled: true },
+      { href: "/marketing/campaigns", icon: Megaphone, label: "Campaigns", enabled: true },
+      { href: "/marketing/birthdays", icon: Cake, label: "Birthday Center", enabled: true },
+      { href: "/marketing/automation", icon: Zap, label: "Automation", enabled: true },
+      { href: "/marketing/broadcast", icon: Radio, label: "Broadcast", enabled: true },
+      { href: "/marketing/loyalty", icon: Gift, label: "Loyalty", enabled: true },
+      { href: "/marketing/voucher", icon: Ticket, label: "Voucher", enabled: true },
+    ],
+  },
   { href: "/knowledge-vault", icon: BookOpen, label: "Kho kiến thức", enabled: true },
   { href: "/settings", icon: Settings, label: "Cài đặt", enabled: true },
 ];
@@ -37,6 +85,40 @@ interface Props {
 
 export default function Sidebar({ open, onClose }: Props) {
   const pathname = usePathname();
+  const [overdueCount, setOverdueCount] = useState(0);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => {
+    // Auto-expand a group on first render if the current route is one of
+    // its children (e.g. landing directly on /marketing/campaigns).
+    const initial = new Set<string>();
+    for (const entry of LINKS) {
+      if (isGroup(entry) && entry.children.some((c) => pathname?.startsWith(c.href))) {
+        initial.add(entry.label);
+      }
+    }
+    return initial;
+  });
+
+  function toggleGroup(label: string) {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  }
+
+  // Refetch whenever the route changes so the badge stays reasonably fresh
+  // after completing/rescheduling follow-ups on /follow-up or a customer's
+  // detail page (this component persists across navigation in AppShell).
+  useEffect(() => {
+    let cancelled = false;
+    getFollowUpSummaryCounts().then((counts) => {
+      if (!cancelled) setOverdueCount(counts.overdue);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
 
   return (
     <>
@@ -77,7 +159,23 @@ export default function Sidebar({ open, onClose }: Props) {
         </div>
 
         <nav className="space-y-0.5 flex-1 overflow-y-auto">
-          {LINKS.map(({ href, icon: Icon, label, enabled }) => {
+          {LINKS.map((entry) => {
+            if (isGroup(entry)) {
+              return (
+                <SidebarGroup
+                  key={entry.label}
+                  label={entry.label}
+                  icon={entry.icon}
+                  items={entry.children}
+                  expanded={expandedGroups.has(entry.label)}
+                  onToggle={() => toggleGroup(entry.label)}
+                  activeHref={pathname}
+                  onNavigate={onClose}
+                />
+              );
+            }
+
+            const { href, icon: Icon, label, enabled } = entry;
             const active = pathname?.startsWith(href);
 
             if (!enabled) {
@@ -98,20 +196,34 @@ export default function Sidebar({ open, onClose }: Props) {
               );
             }
 
+            const showOverdueBadge = href === "/follow-up" && overdueCount > 0;
+
             return (
               <Link
                 key={href}
                 href={href}
                 onClick={onClose}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-150 touch-manipulation",
+                  "flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-150 touch-manipulation",
                   active
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-foreground"
                 )}
               >
-                <Icon size={18} strokeWidth={1.75} />
-                {label}
+                <span className="flex items-center gap-3">
+                  <Icon size={18} strokeWidth={1.75} />
+                  {label}
+                </span>
+                {showOverdueBadge && (
+                  <span
+                    className={cn(
+                      "text-[11px] font-semibold px-1.5 py-0.5 rounded-full min-w-[20px] text-center",
+                      active ? "bg-white/20 text-primary-foreground" : "bg-destructive/90 text-white"
+                    )}
+                  >
+                    {overdueCount}
+                  </span>
+                )}
               </Link>
             );
           })}

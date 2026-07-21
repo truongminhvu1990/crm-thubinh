@@ -13,6 +13,16 @@ import {
   UpdateOrderItemInput,
 } from "@/types/order";
 import { computeLineTotal } from "./order.rules";
+import { Staff } from "@/types/staff";
+import { applyDataScopeByName } from "@/lib/permission/dataScope";
+
+/** Data Scope Rollout (Sprint v4.1), Package 2 - the shape `findAllOrders`/
+ * `findOrderById` need to resolve Own/Team scope; optional everywhere it's
+ * used so the existing `OrderReadRepository` interface (no staff
+ * parameter) stays satisfied and every other caller's contract is
+ * unchanged (a function with an extra optional parameter still satisfies
+ * an interface method declared with fewer parameters). */
+export type ScopingStaff = Pick<Staff, "id" | "role" | "role_id" | "team_id" | "full_name">;
 
 /** Data-layer error thrown by every write method below on a Supabase error —
  * bridges Supabase's `{data, error}` tuple style to the throw-or-resolve
@@ -39,11 +49,22 @@ const WITH_PRODUCT = "*, product:products(id, product_name, product_code, certif
 export type OrderWithItemCount = Order & { order_items: { count: number }[] };
 
 /** Every order, newest first, with its customer joined and its item count
- * embedded via PostgREST's aggregate count — avoids one round trip per row. */
-export async function findAllOrders(): Promise<OrderWithItemCount[]> {
-  const { data, error } = await supabase
+ * embedded via PostgREST's aggregate count — avoids one round trip per row.
+ *
+ * Data Scope Rollout (Sprint v4.1), Package 2 - `staff` is optional and,
+ * when provided, Own/Team is applied via `applyDataScopeByName` (Orders
+ * has no uuid staff-reference column - `sales_owner` is text, matched to
+ * `staff.full_name` case-insensitively and trimmed, DATA_SCOPE_ROLLOUT_
+ * DATABASE.md §2 rule 3 / Decision 43). Applied during query construction,
+ * before the request is sent - never a post-fetch filter. */
+export async function findAllOrders(staff?: ScopingStaff): Promise<OrderWithItemCount[]> {
+  let query = supabase
     .from("orders")
-    .select(`${WITH_CUSTOMER}, order_items(count)`)
+    .select(`${WITH_CUSTOMER}, order_items(count)`);
+
+  if (staff) query = (await applyDataScopeByName(query, staff, "orders", "sales_owner")).query;
+
+  const { data, error } = await query
     .order("order_date", { ascending: false })
     .order("created_at", { ascending: false });
 
@@ -55,14 +76,17 @@ export async function findAllOrders(): Promise<OrderWithItemCount[]> {
   return data as unknown as OrderWithItemCount[];
 }
 
-export async function findOrderById(id: string): Promise<Order | null> {
-  const { data, error } = await supabase
-    .from("orders")
-    .select(WITH_CUSTOMER)
-    .eq("id", id)
-    .single();
+export async function findOrderById(id: string, staff?: ScopingStaff): Promise<Order | null> {
+  let query = supabase.from("orders").select(WITH_CUSTOMER).eq("id", id);
+
+  if (staff) query = (await applyDataScopeByName(query, staff, "orders", "sales_owner")).query;
+
+  const { data, error } = await query.single();
 
   if (error) {
+    // Scope-excluded and genuinely nonexistent orders both land here as the
+    // same "no matching row" outcome, deliberately (DATA_SCOPE_ROLLOUT_UI.md
+    // §3: out-of-scope access reads as "not found," never "forbidden").
     console.error("Error fetching order:", error);
     return null;
   }

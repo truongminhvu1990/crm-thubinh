@@ -9,6 +9,7 @@ import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
 import OrderTable from "@/components/order/OrderTable";
 import Button from "@/components/ui/Button";
 import SearchInput from "@/components/ui/SearchInput";
+import ScopeIndicator from "@/components/shared/ScopeIndicator";
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState<OrderListItem[]>([]);
@@ -114,8 +115,9 @@ export default function OrdersPage() {
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">Đơn hàng</h1>
-          <p className="text-muted-foreground mt-1.5 text-sm">
+          <p className="text-muted-foreground mt-1.5 text-sm flex items-center gap-2 flex-wrap">
             {orders.length} đơn hàng · Hiển thị {filteredOrders.length}
+            <ScopeIndicator resource="orders" />
           </p>
         </div>
         <Link href="/orders/new">

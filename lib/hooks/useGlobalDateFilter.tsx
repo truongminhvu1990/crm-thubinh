@@ -25,7 +25,15 @@ const GlobalDateFilterContext = createContext<GlobalDateFilterValue | null>(null
 
 const DEFAULT_OPTION: DateFilterOption = "this_month";
 const STORAGE_KEY = "crm-thubinh:globalDateFilter";
-const VALID_OPTIONS: DateFilterOption[] = ["today", "this_week", "this_month", "this_year", "all_time", "custom"];
+const VALID_OPTIONS: DateFilterOption[] = [
+  "today",
+  "this_week",
+  "this_month",
+  "this_quarter",
+  "this_year",
+  "all_time",
+  "custom",
+];
 
 interface StoredFilter {
   option: DateFilterOption;
@@ -89,9 +97,19 @@ export function GlobalDateFilterProvider({ children }: { children: ReactNode }) 
     };
 
     const setCustomRange = (from: string, to: string) => {
+      // Always switches option to "custom" too (not just the dates) - the
+      // UI already only ever calls this while option is already "custom"
+      // (the date inputs only render then), so this is a no-op there. It
+      // also makes the call safe for a caller like a report drill-down
+      // link that sets a custom range and expects "custom" to become the
+      // active option in the very same synchronous batch - without this,
+      // setOption("custom") followed immediately by setCustomRange(...)
+      // would persist the *previous* option to storage, since both
+      // closures capture this render's now-stale `option` value.
+      setOptionState("custom");
       setCustomFromState(from);
       setCustomToState(to);
-      writeStoredFilter({ option, customFrom: from, customTo: to });
+      writeStoredFilter({ option: "custom", customFrom: from, customTo: to });
     };
 
     return {

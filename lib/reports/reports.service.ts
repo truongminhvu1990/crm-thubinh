@@ -1,5 +1,7 @@
 import { supabase } from "@/lib/supabase";
 import { DateFilterOption, DateRange, getDateRange } from "@/lib/dateFilter";
+import { getCurrentStaff } from "@/lib/permission";
+import { applyDataScopeWithFallback } from "@/lib/permission/dataScope";
 
 // This module intentionally reads Supabase tables directly rather than
 // importing customer.service.ts / product.service.ts / purchase.service.ts /
@@ -180,6 +182,12 @@ interface PurchaseRow {
  * (REPORTS_UI.md Decision 2) - the range narrows which rows are included,
  * the bucketing granularity does not change.
  */
+/** Data Scope Rollout (Sprint v4.1), Package 5 - Dashboard's revenue widget
+ * reads Customer Purchases (not Orders, per this module's own header
+ * comment: "no Orders dependency for Dashboard revenue"), so it inherits
+ * Customer Purchases' resolved scope (DATA_SCOPE_ROLLOUT_UI.md §6), the
+ * same resolution Package 3/4 already apply - never a separately-invented
+ * Dashboard-only rule. */
 export async function getPurchaseReportData(range: DateRange | null): Promise<PurchaseReportData> {
   let query = supabase
     .from("customer_purchases")
@@ -187,6 +195,10 @@ export async function getPurchaseReportData(range: DateRange | null): Promise<Pu
   if (range) {
     query = query.gte("sale_date", range.start).lt("sale_date", range.end);
   }
+
+  const staff = await getCurrentStaff();
+  if (staff) query = (await applyDataScopeWithFallback(query, staff, "revenue", "salesperson_id", "salesperson")).query;
+
   const { data, error } = await query;
 
   const empty: PurchaseReportData = { totalRevenue: 0, bySource: [], bySalesperson: [], topCustomers: [], byPeriod: [] };

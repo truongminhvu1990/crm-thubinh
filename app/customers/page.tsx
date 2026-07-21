@@ -4,18 +4,21 @@ import { useEffect, useState } from "react";
 import { Plus, RefreshCw, Gem, Download, Upload, X } from "lucide-react";
 import { Customer } from "@/types/customer";
 import { CustomerPurchaseSummary } from "@/types/purchase";
-import { getCustomers, addCustomer, updateCustomer, deleteCustomer } from "@/lib/customer.service";
+import { getCustomers, addCustomer, updateCustomer, deleteCustomer, parseMultiValue } from "@/lib/customer.service";
 import { getPurchaseSummaries } from "@/lib/purchase.service";
 import { REVENUE_FILTERS } from "@/lib/purchase.constants";
+import { FOLLOWUP_FILTERS, getFollowUpUrgency } from "@/lib/customer.constants";
 import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
+import { useTagOptions } from "@/lib/hooks/useTagOptions";
 import { useCustomerSaveFlow } from "@/lib/hooks/useCustomerSaveFlow";
 import { exportCustomersToCsv } from "@/lib/customerImportExport";
-import CustomerTable from "@/components/customer/CustomerTable";
+import CustomerTable, { FollowUpSortDir } from "@/components/customer/CustomerTable";
 import CustomerModal from "@/components/customer/CustomerModal";
 import CustomerImportModal from "@/components/customer/CustomerImportModal";
 import Button from "@/components/ui/Button";
 import SearchInput from "@/components/ui/SearchInput";
 import AlertDialog from "@/components/ui/AlertDialog";
+import ScopeIndicator from "@/components/shared/ScopeIndicator";
 
 const EMPTY_CUSTOMER: Partial<Customer> = {
   customer_code: "",
@@ -34,6 +37,9 @@ export default function CustomersPage() {
   const [revenueFilter, setRevenueFilter] = useState<string>("ALL");
   const [marketFilter, setMarketFilter] = useState<string>("ALL");
   const [countryFilter, setCountryFilter] = useState<string>("ALL");
+  const [tagFilter, setTagFilter] = useState<string>("ALL");
+  const [followupFilter, setFollowupFilter] = useState<string>("ALL");
+  const [followUpSort, setFollowUpSort] = useState<FollowUpSortDir>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -41,6 +47,7 @@ export default function CustomersPage() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const marketOptions = useMasterDataOptions("market");
   const countryOptions = useMasterDataOptions("country");
+  const tagOptions = useTagOptions("customer_tag");
 
   const saveFlow = useCustomerSaveFlow((data) =>
     isEditing && currentCustomer.id ? updateCustomer(currentCustomer.id, data) : addCustomer(data)
@@ -51,14 +58,27 @@ export default function CustomersPage() {
     filterType !== "ALL" ||
     revenueFilter !== "ALL" ||
     marketFilter !== "ALL" ||
-    countryFilter !== "ALL";
+    countryFilter !== "ALL" ||
+    tagFilter !== "ALL" ||
+    followupFilter !== "ALL";
 
   async function loadCustomers() {
     setIsLoading(true);
     const [data, summaries] = await Promise.all([getCustomers(), getPurchaseSummaries()]);
     setCustomers(data);
     setPurchaseSummaries(summaries);
-    filterCustomers(data, summaries, searchTerm, filterType, revenueFilter, marketFilter, countryFilter);
+    filterCustomers(
+      data,
+      summaries,
+      searchTerm,
+      filterType,
+      revenueFilter,
+      marketFilter,
+      countryFilter,
+      tagFilter,
+      followupFilter,
+      followUpSort
+    );
     setIsLoading(false);
   }
 
@@ -69,7 +89,10 @@ export default function CustomersPage() {
     type: string,
     revenue: string,
     market: string,
-    country: string
+    country: string,
+    tag: string,
+    followup: string,
+    sortDir: FollowUpSortDir
   ) {
     let filtered = data;
 
@@ -104,32 +127,73 @@ export default function CustomersPage() {
       filtered = filtered.filter((c) => c.country === country);
     }
 
+    if (tag !== "ALL") {
+      filtered = filtered.filter((c) => parseMultiValue(c.customer_tags).includes(tag));
+    }
+
+    if (followup !== "ALL") {
+      filtered = filtered.filter((c) => {
+        const urgency = getFollowUpUrgency(c.next_followup_date);
+        if (followup === "OVERDUE") return urgency === "overdue";
+        if (followup === "TODAY") return urgency === "today";
+        if (followup === "NEXT_7_DAYS") return urgency === "today" || urgency === "soon";
+        if (followup === "NONE") return urgency === "none";
+        return true;
+      });
+    }
+
+    if (sortDir) {
+      filtered = [...filtered].sort((a, b) => {
+        if (!a.next_followup_date && !b.next_followup_date) return 0;
+        if (!a.next_followup_date) return 1;
+        if (!b.next_followup_date) return -1;
+        const diff = new Date(a.next_followup_date).getTime() - new Date(b.next_followup_date).getTime();
+        return sortDir === "asc" ? diff : -diff;
+      });
+    }
+
     setFilteredCustomers(filtered);
   }
 
   function handleSearchChange(value: string) {
     setSearchTerm(value);
-    filterCustomers(customers, purchaseSummaries, value, filterType, revenueFilter, marketFilter, countryFilter);
+    filterCustomers(customers, purchaseSummaries, value, filterType, revenueFilter, marketFilter, countryFilter, tagFilter, followupFilter, followUpSort);
   }
 
   function handleFilterChange(value: string) {
     setFilterType(value);
-    filterCustomers(customers, purchaseSummaries, searchTerm, value, revenueFilter, marketFilter, countryFilter);
+    filterCustomers(customers, purchaseSummaries, searchTerm, value, revenueFilter, marketFilter, countryFilter, tagFilter, followupFilter, followUpSort);
   }
 
   function handleRevenueFilterChange(value: string) {
     setRevenueFilter(value);
-    filterCustomers(customers, purchaseSummaries, searchTerm, filterType, value, marketFilter, countryFilter);
+    filterCustomers(customers, purchaseSummaries, searchTerm, filterType, value, marketFilter, countryFilter, tagFilter, followupFilter, followUpSort);
   }
 
   function handleMarketFilterChange(value: string) {
     setMarketFilter(value);
-    filterCustomers(customers, purchaseSummaries, searchTerm, filterType, revenueFilter, value, countryFilter);
+    filterCustomers(customers, purchaseSummaries, searchTerm, filterType, revenueFilter, value, countryFilter, tagFilter, followupFilter, followUpSort);
   }
 
   function handleCountryFilterChange(value: string) {
     setCountryFilter(value);
-    filterCustomers(customers, purchaseSummaries, searchTerm, filterType, revenueFilter, marketFilter, value);
+    filterCustomers(customers, purchaseSummaries, searchTerm, filterType, revenueFilter, marketFilter, value, tagFilter, followupFilter, followUpSort);
+  }
+
+  function handleTagFilterChange(value: string) {
+    setTagFilter(value);
+    filterCustomers(customers, purchaseSummaries, searchTerm, filterType, revenueFilter, marketFilter, countryFilter, value, followupFilter, followUpSort);
+  }
+
+  function handleFollowupFilterChange(value: string) {
+    setFollowupFilter(value);
+    filterCustomers(customers, purchaseSummaries, searchTerm, filterType, revenueFilter, marketFilter, countryFilter, tagFilter, value, followUpSort);
+  }
+
+  function handleToggleFollowUpSort() {
+    const next: FollowUpSortDir = followUpSort === null ? "asc" : followUpSort === "asc" ? "desc" : null;
+    setFollowUpSort(next);
+    filterCustomers(customers, purchaseSummaries, searchTerm, filterType, revenueFilter, marketFilter, countryFilter, tagFilter, followupFilter, next);
   }
 
   function handleClearFilters() {
@@ -138,7 +202,10 @@ export default function CustomersPage() {
     setRevenueFilter("ALL");
     setMarketFilter("ALL");
     setCountryFilter("ALL");
-    filterCustomers(customers, purchaseSummaries, "", "ALL", "ALL", "ALL", "ALL");
+    setTagFilter("ALL");
+    setFollowupFilter("ALL");
+    setFollowUpSort(null);
+    filterCustomers(customers, purchaseSummaries, "", "ALL", "ALL", "ALL", "ALL", "ALL", "ALL", null);
   }
 
   async function handleSaveCustomer() {
@@ -209,8 +276,9 @@ export default function CustomersPage() {
           <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">
             Khách hàng
           </h1>
-          <p className="text-muted-foreground mt-1.5 text-sm">
+          <p className="text-muted-foreground mt-1.5 text-sm flex items-center gap-2 flex-wrap">
             {customers.length} khách hàng · Hiển thị {filteredCustomers.length}
+            <ScopeIndicator resource="customers" />
           </p>
         </div>
         <div className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-amber-100 text-amber-800 text-sm font-medium">
@@ -280,6 +348,31 @@ export default function CustomersPage() {
               ))}
             </select>
 
+            <select
+              value={tagFilter}
+              onChange={(e) => handleTagFilterChange(e.target.value)}
+              className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="ALL">Tất cả tags</option>
+              {tagOptions.options.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={followupFilter}
+              onChange={(e) => handleFollowupFilterChange(e.target.value)}
+              className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+            >
+              {FOLLOWUP_FILTERS.map((f) => (
+                <option key={f.value} value={f.value}>
+                  {f.value === "ALL" ? "Mọi lịch follow-up" : f.label}
+                </option>
+              ))}
+            </select>
+
             {hasActiveFilters && (
               <Button variant="secondary" size="md" onClick={handleClearFilters}>
                 <X className="w-4 h-4" />
@@ -312,6 +405,8 @@ export default function CustomersPage() {
         onEdit={handleEditCustomer}
         onDelete={handleDeleteCustomer}
         isLoading={isLoading}
+        followUpSort={followUpSort}
+        onToggleFollowUpSort={handleToggleFollowUpSort}
       />
 
       <CustomerModal

@@ -10,6 +10,7 @@ interface Props {
   color?: string;
   placeholder?: boolean;
   hint?: string;
+  badge?: ReactNode;
 }
 
 export default function StatCard({
@@ -19,12 +20,16 @@ export default function StatCard({
   color = "bg-primary/10 text-primary",
   placeholder = false,
   hint,
+  badge,
 }: Props) {
   return (
     <Card>
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-muted-foreground text-sm">{title}</p>
+          <p className="text-muted-foreground text-sm flex items-center gap-2 flex-wrap">
+            {title}
+            {badge}
+          </p>
           <p
             className={`text-2xl font-bold mt-2 ${
               placeholder ? "text-muted-foreground/50" : "text-foreground"

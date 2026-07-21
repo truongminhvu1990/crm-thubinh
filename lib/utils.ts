@@ -28,6 +28,23 @@ export function formatDate(date: string | Date): string {
   return d.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
+/** Automation List's "Last Run" column (MARKETING_AUTOMATION_UI.md §3.2,
+ * "2 giờ trước") - a small, generically useful relative-time formatter, not
+ * automation-specific, so it lives alongside formatDate rather than in a
+ * module-scoped file. */
+export function formatRelativeTime(date: string | Date): string {
+  const d = typeof date === "string" ? new Date(date) : date;
+  const diffMs = Date.now() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "Vừa xong";
+  if (diffMin < 60) return `${diffMin} phút trước`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour} giờ trước`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 30) return `${diffDay} ngày trước`;
+  return formatDate(d);
+}
+
 /** crypto.randomUUID() isn't available in every runtime (older browsers,
  * and some engines restrict it to secure contexts) - use it when present,
  * otherwise build an RFC4122 v4 UUID from crypto.getRandomValues (or

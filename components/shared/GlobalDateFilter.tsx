@@ -15,6 +15,7 @@ const OPTIONS: { value: DateFilterOption; label: string }[] = [
   { value: "today", label: "Hôm nay" },
   { value: "this_week", label: "Tuần này" },
   { value: "this_month", label: "Tháng này" },
+  { value: "this_quarter", label: "Quý này" },
   { value: "this_year", label: "Năm này" },
   { value: "all_time", label: "Toàn thời gian" },
   { value: "custom", label: "Tùy chọn" },

@@ -1,4 +1,9 @@
-export type TagCategory = "favorite_color" | "jade_type" | "purchase_purpose" | "product_jade_grade";
+export type TagCategory =
+  | "favorite_color"
+  | "jade_type"
+  | "purchase_purpose"
+  | "product_jade_grade"
+  | "customer_tag";
 
 export interface TagOption {
   id: string;

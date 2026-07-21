@@ -19,6 +19,7 @@ import { GENDER_OPTIONS, JADE_ORIGINS } from "@/lib/customer.constants";
 import { HCM_DISTRICTS, HANOI_DISTRICTS } from "@/lib/location.constants";
 import { parseMultiValue, serializeMultiValue } from "@/lib/customer.service";
 import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
+import { useStaffOptions } from "@/lib/hooks/useStaffOptions";
 import { useTagOptions } from "@/lib/hooks/useTagOptions";
 import CreatableSelect from "@/components/ui/CreatableSelect";
 import CreatableMultiSelect from "@/components/ui/CreatableMultiSelect";
@@ -57,6 +58,7 @@ export default function CustomerForm({
   const purpose = useTagOptions("purchase_purpose", customer.purpose);
   const stageOptions = useMasterDataOptions("customer_stage", customer.vip_level);
   const salespersonOptions = useMasterDataOptions("salesperson", customer.assigned_salesperson);
+  const staffOptions = useStaffOptions();
   const countryOptions = useMasterDataOptions("country", customer.country);
   const marketOptions = useMasterDataOptions("market", customer.province);
 
@@ -291,21 +293,29 @@ export default function CustomerForm({
 
       <div className="grid grid-cols-2 gap-4">
         <Select
-          label="Nhân viên phụ trách"
+          label="Nhân viên phụ trách (cũ)"
           placeholder="Chọn nhân viên"
           options={salespersonOptions}
           value={customer.assigned_salesperson || ""}
           onChange={(e) => updateField("assigned_salesperson", e.target.value)}
         />
 
-        <Input
-          label="Sản phẩm xem gần nhất"
-          placeholder="VD: Vòng ngọc bích size 15"
-          value={customer.last_viewed_product || ""}
-          onChange={(e) => updateField("last_viewed_product", e.target.value)}
-          icon={<Eye className="w-4 h-4" />}
+        <Select
+          label="Nhân viên phụ trách"
+          placeholder="Chọn nhân viên"
+          options={staffOptions}
+          value={customer.assigned_staff_id || ""}
+          onChange={(e) => updateField("assigned_staff_id", e.target.value)}
         />
       </div>
+
+      <Input
+        label="Sản phẩm xem gần nhất"
+        placeholder="VD: Vòng ngọc bích size 15"
+        value={customer.last_viewed_product || ""}
+        onChange={(e) => updateField("last_viewed_product", e.target.value)}
+        icon={<Eye className="w-4 h-4" />}
+      />
     </div>
   );
 }

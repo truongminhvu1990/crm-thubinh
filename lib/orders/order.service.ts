@@ -1,5 +1,5 @@
 import * as orderRepository from "./order.repository";
-import { OrderRepository } from "./order.repository";
+import { OrderRepository, ScopingStaff } from "./order.repository";
 import {
   AddOrderItemInput,
   AddPaymentInput,
@@ -47,9 +47,13 @@ export interface OrderListItem extends Order {
 
 /** List-page read: every order with its customer joined and item count
  * resolved, newest first. Search/filter/sort stay client-side in the page
- * component, same convention as Customer/Product List. */
-export async function getOrderList(): Promise<OrderListItem[]> {
-  const rows = await orderRepository.findAllOrders();
+ * component, same convention as Customer/Product List.
+ *
+ * Data Scope Rollout (Sprint v4.1), Package 2 - `staff` is optional,
+ * threaded straight through to `findAllOrders`, preserving this function's
+ * existing contract for any caller that doesn't pass it. */
+export async function getOrderList(staff?: ScopingStaff): Promise<OrderListItem[]> {
+  const rows = await orderRepository.findAllOrders(staff);
 
   return rows.map((row) => ({
     ...row,
@@ -68,9 +72,12 @@ export interface OrderDetail {
  * and the detailed Order Event Timeline, fetched in parallel (same pattern
  * already used by recomputeAndPersistRollups). Additive to the previous
  * {order, items} shape — existing callers destructuring just those two
- * fields are unaffected. */
-export async function getOrderDetail(id: string): Promise<OrderDetail | null> {
-  const order = await orderRepository.findOrderById(id);
+ * fields are unaffected. `staff` (optional, Package 2) scopes the order
+ * header lookup only - items/payments/events belong to whatever order was
+ * already found, so scoping them again would be redundant, not additional
+ * protection. */
+export async function getOrderDetail(id: string, staff?: ScopingStaff): Promise<OrderDetail | null> {
+  const order = await orderRepository.findOrderById(id, staff);
   if (!order) return null;
 
   const [items, payments, events] = await Promise.all([

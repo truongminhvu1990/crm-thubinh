@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Users, Gem, Package, TrendingUp, Calendar, Wallet } from "lucide-react";
-import { getCustomerStats } from "@/lib/customer.service";
+import { getCustomerStats, getFollowUpSummaryCounts, FollowUpSummaryCounts } from "@/lib/customer.service";
 import {
   getProductReportData,
   getBatchStaticReportData,
@@ -11,12 +11,18 @@ import {
   PurchaseReportData,
 } from "@/lib/reports/reports.service";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
+import { getDashboardCommissionStats } from "@/lib/commission/commission.service";
+import { getTopSalesStaff, TopSalesStaffEntry } from "@/lib/staff.service";
 import Card from "@/components/ui/Card";
 import StatCard from "@/components/ui/StatCard";
 import GlobalDateFilter from "@/components/shared/GlobalDateFilter";
 import PageViewingLabel from "@/components/shared/PageViewingLabel";
 import SalesSummary from "@/components/dashboard/SalesSummary";
 import ReportsIntegration from "@/components/dashboard/ReportsIntegration";
+import FollowUpSummaryCard from "@/components/dashboard/FollowUpSummaryCard";
+import CommissionSummaryCard from "@/components/dashboard/CommissionSummaryCard";
+import TopSalesStaffCard from "@/components/dashboard/TopSalesStaffCard";
+import ScopeIndicator from "@/components/shared/ScopeIndicator";
 
 export default function Dashboard() {
   const { range, label } = useGlobalDateFilter();
@@ -31,6 +37,13 @@ export default function Dashboard() {
   const [batchTotal, setBatchTotal] = useState(0);
   const [purchaseData, setPurchaseData] = useState<PurchaseReportData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [followUpCounts, setFollowUpCounts] = useState<FollowUpSummaryCounts>({
+    overdue: 0,
+    today: 0,
+    next7Days: 0,
+  });
+  const [commissionStats, setCommissionStats] = useState({ thisMonth: 0, outstanding: 0 });
+  const [topSalesStaff, setTopSalesStaff] = useState<TopSalesStaffEntry[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,6 +64,46 @@ export default function Dashboard() {
       cancelled = true;
     };
   }, [range]);
+
+  // Follow-up Summary widget (Sprint v1.1.1) - kept in its own effect, not
+  // part of the range-dependent Promise.all above, since follow-up counts
+  // aren't date-filtered and shouldn't refetch every time the global date
+  // range changes.
+  useEffect(() => {
+    let cancelled = false;
+    getFollowUpSummaryCounts().then((counts) => {
+      if (!cancelled) setFollowUpCounts(counts);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Commission Summary widget (Sprint v1.2.0) - its own effect for the same
+  // reason as Follow-up Summary above: not date-range-dependent, and reads
+  // sales_commissions exclusively (never customer_purchases), per spec.
+  useEffect(() => {
+    let cancelled = false;
+    getDashboardCommissionStats().then((stats) => {
+      if (!cancelled) setCommissionStats(stats);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Top Sales Staff widget (Sprint v2.0.0, Feature 9) - its own effect for
+  // the same reason as Follow-up/Commission Summary above: not date-range-
+  // dependent.
+  useEffect(() => {
+    let cancelled = false;
+    getTopSalesStaff().then((entries) => {
+      if (!cancelled) setTopSalesStaff(entries);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Revenue label now follows the Global Date Filter (Sprint v1.0.2)
   // instead of always saying "this month".
@@ -97,6 +150,7 @@ export default function Dashboard() {
             value={currency.format(monthRevenue)}
             icon={<Wallet className="w-8 h-8 text-emerald-600" />}
             color="bg-emerald-100"
+            badge={<ScopeIndicator resource="revenue" />}
           />
         </Link>
       </div>
@@ -109,6 +163,7 @@ export default function Dashboard() {
             value={customerStats.total}
             icon={<Users className="w-6 h-6 text-primary" />}
             color="bg-primary/10"
+            badge={<ScopeIndicator resource="customers" />}
           />
         </Link>
         <Link href="/customers?type=VIP">
@@ -149,9 +204,20 @@ export default function Dashboard() {
         </Link>
       </div>
 
+      {/* Follow-up Summary (Sprint v1.1.1) + Commission Summary (Sprint v1.2.0) widgets */}
+      <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+        <FollowUpSummaryCard counts={followUpCounts} />
+        <CommissionSummaryCard thisMonth={commissionStats.thisMonth} outstanding={commissionStats.outstanding} />
+      </div>
+
       {/* Sales Summary */}
       <div className="mb-6">
         <SalesSummary data={purchaseData} monthLabel={label} />
+      </div>
+
+      {/* Top Sales Staff (Sprint v2.0.0, Feature 9) */}
+      <div className="mb-6 max-w-2xl">
+        <TopSalesStaffCard entries={topSalesStaff} />
       </div>
 
       {/* Dashboard integration with existing Reports */}

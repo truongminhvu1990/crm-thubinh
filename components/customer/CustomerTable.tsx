@@ -3,13 +3,23 @@
 import { useState } from "react";
 import { Customer } from "@/types/customer";
 import { CustomerPurchaseSummary } from "@/types/purchase";
-import { Edit2, Trash2, MapPin, Phone, Gem, Users, Flag } from "lucide-react";
+import { Edit2, Trash2, MapPin, Phone, Gem, Users, Flag, ArrowUpDown } from "lucide-react";
 import Link from "next/link";
 import Badge from "@/components/ui/Badge";
 import AlertDialog from "@/components/ui/AlertDialog";
 import Avatar from "@/components/ui/Avatar";
 import { getCustomerTier, TIER_BADGE_VARIANT } from "@/lib/purchase.constants";
 import { formatDate } from "@/lib/utils";
+import { parseMultiValue } from "@/lib/customer.service";
+import {
+  CUSTOMER_STATUS_OPTIONS,
+  CUSTOMER_STATUS_BADGE_VARIANT,
+  FOLLOWUP_URGENCY_BADGE_VARIANT,
+  getFollowUpUrgency,
+  labelFor,
+} from "@/lib/customer.constants";
+
+export type FollowUpSortDir = "asc" | "desc" | null;
 
 interface Props {
   customers: Customer[];
@@ -17,6 +27,8 @@ interface Props {
   onEdit: (customer: Customer) => void;
   onDelete: (customer: Customer) => void;
   isLoading?: boolean;
+  followUpSort?: FollowUpSortDir;
+  onToggleFollowUpSort?: () => void;
 }
 
 const currency = new Intl.NumberFormat("vi-VN", {
@@ -31,6 +43,8 @@ export default function CustomerTable({
   onEdit,
   onDelete,
   isLoading = false,
+  followUpSort = null,
+  onToggleFollowUpSort,
 }: Props) {
   const [pendingDelete, setPendingDelete] = useState<Customer | null>(null);
 
@@ -55,7 +69,7 @@ export default function CustomerTable({
 
   return (
     <div className="overflow-x-auto bg-card rounded-xl border border-border shadow-sm">
-      <table className="w-full min-w-[1160px]">
+      <table className="w-full min-w-[1500px]">
         <thead>
           <tr className="border-b border-border">
             <th className="px-5 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -66,6 +80,23 @@ export default function CustomerTable({
             </th>
             <th className="px-5 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Loại
+            </th>
+            <th className="px-5 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Trạng thái
+            </th>
+            <th className="px-5 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Tags
+            </th>
+            <th className="px-5 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              <button
+                onClick={onToggleFollowUpSort}
+                disabled={!onToggleFollowUpSort}
+                className="inline-flex items-center gap-1 hover:text-foreground transition-colors disabled:hover:text-muted-foreground"
+              >
+                Follow-up
+                <ArrowUpDown className="w-3 h-3" />
+                {followUpSort && <span className="normal-case">({followUpSort === "asc" ? "gần nhất" : "xa nhất"})</span>}
+              </button>
             </th>
             <th className="px-5 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Nguồn
@@ -132,6 +163,33 @@ export default function CustomerTable({
                     </Badge>
                   ) : (
                     <span className="text-muted-foreground">Normal</span>
+                  )}
+                </td>
+                <td className="px-5 py-3.5 text-sm">
+                  <Badge variant={CUSTOMER_STATUS_BADGE_VARIANT[customer.customer_status || "New"] || "muted"}>
+                    {labelFor(CUSTOMER_STATUS_OPTIONS, customer.customer_status) || "Mới"}
+                  </Badge>
+                </td>
+                <td className="px-5 py-3.5 text-sm">
+                  <div className="flex flex-wrap gap-1 max-w-[180px]">
+                    {parseMultiValue(customer.customer_tags).length === 0 ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      parseMultiValue(customer.customer_tags).map((t) => (
+                        <Badge key={t} variant="secondary" className="text-[10px] px-1.5 py-0">
+                          {t}
+                        </Badge>
+                      ))
+                    )}
+                  </div>
+                </td>
+                <td className="px-5 py-3.5 text-sm">
+                  {customer.next_followup_date ? (
+                    <Badge variant={FOLLOWUP_URGENCY_BADGE_VARIANT[getFollowUpUrgency(customer.next_followup_date)]}>
+                      {formatDate(customer.next_followup_date)}
+                    </Badge>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
                   )}
                 </td>
                 <td className="px-5 py-3.5 text-sm text-muted-foreground">

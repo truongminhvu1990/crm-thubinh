@@ -18,11 +18,24 @@ import {
   PackageCheck,
   PackageOpen,
   AlertTriangle,
+  LayoutDashboard,
+  RefreshCw,
 } from "lucide-react";
 import StatCard from "@/components/ui/StatCard";
+import Button from "@/components/ui/Button";
 import GlobalDateFilter from "@/components/shared/GlobalDateFilter";
 import PageViewingLabel from "@/components/shared/PageViewingLabel";
 import ReportsTable, { ReportsTableRow } from "@/components/reports/ReportsTable";
+import RevenueDashboardCards from "@/components/reports/RevenueDashboardCards";
+import KpiDashboard from "@/components/reports/KpiDashboard";
+import ProductAnalysisSection from "@/components/reports/ProductAnalysisSection";
+import CategoryAnalysisSection from "@/components/reports/CategoryAnalysisSection";
+import CustomerAnalysisSection from "@/components/reports/CustomerAnalysisSection";
+import StaffAnalysisSection from "@/components/reports/StaffAnalysisSection";
+import RevenueTrendChart from "@/components/reports/RevenueTrendChart";
+import ProfitSection from "@/components/reports/ProfitSection";
+import ScopeIndicator from "@/components/shared/ScopeIndicator";
+import Badge from "@/components/ui/Badge";
 import { formatDate } from "@/lib/utils";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
 import {
@@ -55,7 +68,13 @@ function breakdownRows(rows: { label: string; count: number }[]): ReportsTableRo
 }
 
 export default function ReportsPage() {
-  const { range } = useGlobalDateFilter();
+  const { option, range } = useGlobalDateFilter();
+
+  // Decision 21 (Refresh) - bumping this key remounts the whole BI Center
+  // subtree below, so every section's own mount effect (and its existing
+  // loading-spinner state) reruns and refetches, with no dedicated
+  // refresh-callback plumbing threaded through each section.
+  const [refreshToken, setRefreshToken] = useState(0);
 
   const [customerData, setCustomerData] = useState<CustomerReportData | null>(null);
   const [productData, setProductData] = useState<ProductReportData | null>(null);
@@ -171,14 +190,106 @@ export default function ReportsPage() {
             <PageViewingLabel />
           </div>
         </div>
-        <GlobalDateFilter />
+        <div className="flex items-center gap-2">
+          <GlobalDateFilter />
+          <Button
+            variant="secondary"
+            size="md"
+            onClick={() => setRefreshToken((t) => t + 1)}
+            title="Tải lại toàn bộ dữ liệu BI"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Làm mới
+          </Button>
+        </div>
       </div>
+
+      {/* ============================================================
+          Business Intelligence Center (Sprint v2.2.0)
+          `key={refreshToken}` - see Decision 21 comment above.
+
+          Data Scope Rollout (Sprint v4.1), Package 6/9 - every section below
+          reads reportsBI.service.ts, a `.rpc()`-only module structurally
+          un-scopeable without an unauthorized migration (see that file's own
+          header comment). One static disclosure label covers the whole
+          subtree rather than a per-section ScopeIndicator implying a scope
+          that isn't actually enforced (DATA_SCOPE_ROLLOUT_UI.md §7, §11 - no
+          message may misrepresent what's actually filtered).
+          ============================================================ */}
+
+      <div className="flex items-center gap-2">
+        <Badge variant="muted">Chưa áp dụng phạm vi dữ liệu</Badge>
+      </div>
+
+      <div key={refreshToken} className="space-y-8">
+        <section className="space-y-4">
+          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+            <Wallet className="w-5 h-5 text-primary" />
+            Doanh thu tổng quan
+          </h2>
+          <RevenueDashboardCards />
+        </section>
+
+        <section className="space-y-4">
+          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+            <LayoutDashboard className="w-5 h-5 text-primary" />
+            Bảng chỉ số KPI
+          </h2>
+          <KpiDashboard option={option} range={range} />
+        </section>
+
+        <section className="space-y-4">
+          <RevenueTrendChart range={range} />
+        </section>
+
+        <section className="space-y-4">
+          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+            <Gem className="w-5 h-5 text-primary" />
+            Phân tích sản phẩm
+          </h2>
+          <ProductAnalysisSection range={range} />
+        </section>
+
+        <section className="space-y-4">
+          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+            <Layers className="w-5 h-5 text-primary" />
+            Phân tích danh mục
+          </h2>
+          <CategoryAnalysisSection range={range} />
+        </section>
+
+        <section className="space-y-4">
+          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+            <Users className="w-5 h-5 text-primary" />
+            Phân tích khách hàng
+          </h2>
+          <CustomerAnalysisSection range={range} />
+        </section>
+
+        <section className="space-y-4">
+          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+            <UserCheck className="w-5 h-5 text-primary" />
+            Phân tích nhân viên kinh doanh
+          </h2>
+          <StaffAnalysisSection range={range} />
+        </section>
+
+        <section className="space-y-4">
+          <ProfitSection range={range} />
+        </section>
+      </div>
+
+      {/* ============================================================
+          Legacy breakdown reports (Sprint v1.0.x) - unchanged, kept below
+          the BI Center rather than removed since nothing in this sprint's
+          scope asked for them to go away.
+          ============================================================ */}
 
       {/* Khách hàng */}
       <section className="space-y-4">
         <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
           <Users className="w-5 h-5 text-primary" />
-          Khách hàng
+          Khách hàng (chi tiết)
         </h2>
         <StatCard title="Tổng khách hàng" value={customerData!.total} icon={<Users className="w-5 h-5 text-primary" />} />
         <ReportsTable
@@ -253,6 +364,7 @@ export default function ReportsPage() {
         <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
           <Wallet className="w-5 h-5 text-primary" />
           Doanh thu
+          <ScopeIndicator resource="revenue" />
         </h2>
         <StatCard
           title="Tổng doanh thu"

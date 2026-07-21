@@ -14,6 +14,7 @@ import CustomerProfileHeader from "@/components/customer/CustomerProfileHeader";
 import CustomerRevenueSummary from "@/components/customer/CustomerRevenueSummary";
 import CustomerNotesTimeline from "@/components/customer/CustomerNotesTimeline";
 import CustomerFollowUp from "@/components/customer/CustomerFollowUp";
+import CustomerVipCare from "@/components/customer/CustomerVipCare";
 import CustomerJadePreferences from "@/components/customer/CustomerJadePreferences";
 import CustomerMatchingProducts from "@/components/customer/CustomerMatchingProducts";
 import CustomerPurchaseHistory from "@/components/customer/CustomerPurchaseHistory";
@@ -97,6 +98,7 @@ export default function CustomerProfilePage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
+            <CustomerVipCare customer={customer} onUpdate={setCustomer} />
             <CustomerRevenueSummary customer={customer} />
             <CustomerNotesTimeline customer={customer} onUpdate={setCustomer} />
             <CustomerPurchaseHistory customer={customer} />

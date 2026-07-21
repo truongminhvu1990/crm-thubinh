@@ -1,13 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrderDetail } from "@/lib/orders/order.service";
+import { getCurrentStaffFromRequest } from "@/lib/permission/serverAuth";
 import { orderService } from "../_service";
 import { handleOrderServiceError } from "../_errors";
 
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+/** Data Scope Rollout (Sprint v4.1), Package 2 - see app/api/orders/route.ts
+ * for the same reasoning. An out-of-scope order id resolves to the exact
+ * same 404 a genuinely nonexistent id already produces (DATA_SCOPE_ROLLOUT_
+ * UI.md §3 - "not found," never a distinguishable "forbidden"). */
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
   try {
-    const detail = await getOrderDetail(id);
+    const staff = await getCurrentStaffFromRequest(request);
+    if (!staff) {
+      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    }
+
+    const detail = await getOrderDetail(id, staff);
 
     if (!detail) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });

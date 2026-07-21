@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, Power, ArrowUp, ArrowDown, Settings as SettingsIcon } from "lucide-react";
+import Link from "next/link";
+import { Plus, Pencil, Trash2, Power, ArrowUp, ArrowDown, Settings as SettingsIcon, UserCog, ShieldCheck, Gauge, ChevronRight } from "lucide-react";
 import { MasterDataCategory, MasterDataItem } from "@/types/masterData";
 import {
   getMasterDataItems,
@@ -178,6 +179,54 @@ export default function SettingsPage() {
         </h1>
         <p className="text-muted-foreground mt-1.5 text-sm">Dữ liệu dùng chung (Master Data)</p>
       </div>
+
+      <Link
+        href="/settings/staff"
+        className="mb-6 flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 sm:p-5 hover:border-primary/40 hover:bg-muted/30 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-lg bg-primary/10">
+            <UserCog className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <p className="font-semibold text-foreground">Nhân viên</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Quản lý nhân viên, vai trò và phân công khách hàng</p>
+          </div>
+        </div>
+        <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />
+      </Link>
+
+      <Link
+        href="/settings/permissions"
+        className="mb-6 flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 sm:p-5 hover:border-primary/40 hover:bg-muted/30 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-lg bg-primary/10">
+            <ShieldCheck className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <p className="font-semibold text-foreground">Phân quyền</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Vai trò, quyền, phạm vi dữ liệu và trường nhạy cảm</p>
+          </div>
+        </div>
+        <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />
+      </Link>
+
+      <Link
+        href="/settings/production-readiness"
+        className="mb-6 flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 sm:p-5 hover:border-primary/40 hover:bg-muted/30 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-lg bg-primary/10">
+            <Gauge className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <p className="font-semibold text-foreground">Sẵn sàng vận hành</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Ops Console — triển khai, sao lưu, giám sát và checklist phát hành</p>
+          </div>
+        </div>
+        <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />
+      </Link>
 
       <div className="mb-6 space-y-3">
         <div>

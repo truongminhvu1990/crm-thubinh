@@ -41,7 +41,21 @@ export interface Customer {
 
   // Sales
   assigned_salesperson?: string;
+  /** Staff Management (Sprint v2.0.0), Feature 4 - the structured "one
+   * primary staff" assignment. `assigned_salesperson` (free text) is kept
+   * untouched alongside this for backward compatibility. */
+  assigned_staff_id?: string | null;
   last_viewed_product?: string;
+
+  // VIP Care
+  /** Comma-separated tags (VIP, Potential, Wholesale, Retail, Important, Follow Up, custom...). Use parseMultiValue/serializeMultiValue. */
+  customer_tags?: string | null;
+  /** Single-select VIP Care pipeline status. See CUSTOMER_STATUS_OPTIONS in lib/customer.constants.ts. */
+  customer_status?: string | null;
+  /** Scheduled next follow-up date. */
+  next_followup_date?: string | null;
+  /** Note attached to the scheduled follow-up. */
+  followup_note?: string | null;
 }
 
 export interface CustomerNote {
@@ -49,4 +63,6 @@ export interface CustomerNote {
   content: string;
   created_at: string;
   updated_at?: string;
+  /** Timeline event kind. Absent/"note" = a manually written note (legacy behavior). */
+  type?: "note" | "status_changed" | "tag_added" | "tag_removed" | "followup_updated";
 }
