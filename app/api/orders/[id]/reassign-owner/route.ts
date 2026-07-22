@@ -21,6 +21,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     );
     return NextResponse.json(order);
   } catch (error) {
-    return handleOrderServiceError(error);
+    return handleOrderServiceError(error, request.headers.get("x-vercel-id") ?? crypto.randomUUID());
   }
 }

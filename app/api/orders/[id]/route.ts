@@ -25,7 +25,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     return NextResponse.json(detail);
   } catch (error) {
-    return handleOrderServiceError(error);
+    return handleOrderServiceError(error, request.headers.get("x-vercel-id") ?? crypto.randomUUID());
   }
 }
 
@@ -47,7 +47,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     );
     return NextResponse.json(order);
   } catch (error) {
-    return handleOrderServiceError(error);
+    return handleOrderServiceError(error, request.headers.get("x-vercel-id") ?? crypto.randomUUID());
   }
 }
 
@@ -63,6 +63,6 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     await orderService.deleteOrder(id, detail.order.created_by);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
-    return handleOrderServiceError(error);
+    return handleOrderServiceError(error, _request.headers.get("x-vercel-id") ?? crypto.randomUUID());
   }
 }

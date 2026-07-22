@@ -18,6 +18,6 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     const events = await getOrderEvents(id);
     return NextResponse.json(events);
   } catch (error) {
-    return handleOrderServiceError(error);
+    return handleOrderServiceError(error, _request.headers.get("x-vercel-id") ?? crypto.randomUUID());
   }
 }

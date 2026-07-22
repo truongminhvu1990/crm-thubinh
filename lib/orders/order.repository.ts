@@ -24,18 +24,48 @@ import { applyDataScopeByName } from "@/lib/permission/dataScope";
  * an interface method declared with fewer parameters). */
 export type ScopingStaff = Pick<Staff, "id" | "role" | "role_id" | "team_id" | "full_name">;
 
+/** Observability-only: which table each operation name touches, so
+ * OrderRepositoryError can report `table` without changing every throw
+ * call site above. Kept in sync with the `.from(...)` call inside each
+ * function of the same name. */
+const OPERATION_TABLE: Record<string, string> = {
+  generateOrderNumber: "orders",
+  createOrder: "orders",
+  updateOrder: "orders",
+  deleteOrder: "orders",
+  reserveOrder: "orders",
+  cancelReservation: "orders",
+  completeOrder: "orders",
+  markOrderLost: "orders",
+  reassignSalesOwner: "orders",
+  updateOrderRollups: "orders",
+  addOrderItem: "order_items",
+  updateOrderItem: "order_items",
+  removeOrderItem: "order_items",
+  reserveProduct: "products",
+  releaseProduct: "products",
+  markProductSold: "products",
+  addPayment: "payments",
+  appendOrderEvent: "order_events",
+};
+
 /** Data-layer error thrown by every write method below on a Supabase error —
  * bridges Supabase's `{data, error}` tuple style to the throw-or-resolve
  * contract order.service.ts's orchestration already expects (see
  * ORDERS_SUPABASE_PLAN.md §4). Distinct from the Service layer's
  * OrderNotFoundError/OrderValidationError/OrderRuleViolationError. */
 export class OrderRepositoryError extends Error {
+  /** Table the failing operation targets — looked up from OPERATION_TABLE,
+   * observability-only, does not affect message/response shape. */
+  public readonly table: string;
+
   constructor(
     public readonly operation: string,
-    public readonly cause: { message: string; code?: string }
+    public readonly cause: { message: string; code?: string; details?: string; hint?: string }
   ) {
     super(`OrderRepository.${operation} failed: ${cause.message}`);
     this.name = "OrderRepositoryError";
+    this.table = OPERATION_TABLE[operation] ?? "unknown";
   }
 }
 

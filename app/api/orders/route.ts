@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     const orders = await getOrderList(staff);
     return NextResponse.json(orders);
   } catch (error) {
-    return handleOrderServiceError(error);
+    return handleOrderServiceError(error, request.headers.get("x-vercel-id") ?? crypto.randomUUID());
   }
 }
 
@@ -35,6 +35,6 @@ export async function POST(request: NextRequest) {
     const order = await orderService.createOrder(input, input.created_by);
     return NextResponse.json(order, { status: 201 });
   } catch (error) {
-    return handleOrderServiceError(error);
+    return handleOrderServiceError(error, request.headers.get("x-vercel-id") ?? crypto.randomUUID());
   }
 }

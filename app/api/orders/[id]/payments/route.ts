@@ -18,6 +18,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const payment = await orderService.addPayment({ ...body, order_id: id }, detail.order.created_by);
     return NextResponse.json(payment, { status: 201 });
   } catch (error) {
-    return handleOrderServiceError(error);
+    return handleOrderServiceError(error, request.headers.get("x-vercel-id") ?? crypto.randomUUID());
   }
 }

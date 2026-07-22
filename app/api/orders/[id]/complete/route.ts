@@ -17,6 +17,6 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
     const order = await orderService.completeOrder(id, detail.order.created_by);
     return NextResponse.json(order);
   } catch (error) {
-    return handleOrderServiceError(error);
+    return handleOrderServiceError(error, _request.headers.get("x-vercel-id") ?? crypto.randomUUID());
   }
 }
