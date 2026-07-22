@@ -222,6 +222,21 @@ async function generateOrderNumber(): Promise<string> {
     .like("order_number", `${prefix}%`);
 
   if (error) {
+    // TEMPORARY DEBUG INSTRUMENTATION — remove after investigation.
+    console.error("DEBUG generateOrderNumber raw error", {
+      typeofError: typeof error,
+      isErrorInstance: error instanceof Error,
+      constructorName: (error as { constructor?: { name?: string } })?.constructor?.name,
+      keys: error && typeof error === "object" ? Object.keys(error) : null,
+      jsonStringify: (() => {
+        try {
+          return JSON.stringify(error);
+        } catch {
+          return "<JSON.stringify threw>";
+        }
+      })(),
+      stringForm: String(error),
+    });
     throw new OrderRepositoryError("generateOrderNumber", error);
   }
 
