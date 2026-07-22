@@ -1,5 +1,4 @@
 import { supabase } from "@/lib/supabase";
-import { createClient as createDebugSupabaseClient } from "@supabase/supabase-js"; // TEMPORARY DEBUG INSTRUMENTATION — remove after investigation.
 import {
   AddOrderItemInput,
   AddPaymentInput,
@@ -217,55 +216,16 @@ async function generateOrderNumber(): Promise<string> {
   const datePart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
   const prefix = `OD-${datePart}-`;
 
-  // TEMPORARY DEBUG INSTRUMENTATION — remove after investigation. Scoped to
-  // this one query only, via a throwaway client with a wrapped `fetch` —
-  // does not touch the shared `supabase` client or any other call site.
-  // Captures the raw HTTP response (status/statusText/url/method) at the
-  // moment it arrives, before PostgrestBuilder.processResponse inspects it.
-  const debugClient = createDebugSupabaseClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      global: {
-        fetch: async (input, init) => {
-          const res = await fetch(input, init);
-          console.error("DEBUG generateOrderNumber raw HTTP response", {
-            status: res.status,
-            statusText: res.statusText,
-            url: res.url,
-            method: init?.method ?? "GET",
-          });
-          return res;
-        },
-      },
-    }
-  );
-
-  const { count, error } = await debugClient
+  const { data, error } = await supabase
     .from("orders")
-    .select("id", { count: "exact", head: true })
+    .select("id")
     .like("order_number", `${prefix}%`);
 
   if (error) {
-    // TEMPORARY DEBUG INSTRUMENTATION — remove after investigation.
-    console.error("DEBUG generateOrderNumber raw error", {
-      typeofError: typeof error,
-      isErrorInstance: error instanceof Error,
-      constructorName: (error as { constructor?: { name?: string } })?.constructor?.name,
-      keys: error && typeof error === "object" ? Object.keys(error) : null,
-      jsonStringify: (() => {
-        try {
-          return JSON.stringify(error);
-        } catch {
-          return "<JSON.stringify threw>";
-        }
-      })(),
-      stringForm: String(error),
-    });
     throw new OrderRepositoryError("generateOrderNumber", error);
   }
 
-  const sequence = (count ?? 0) + 1;
+  const sequence = (data?.length ?? 0) + 1;
   return `${prefix}${String(sequence).padStart(6, "0")}`;
 }
 
