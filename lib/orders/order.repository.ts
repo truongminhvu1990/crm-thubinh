@@ -288,19 +288,27 @@ export async function updateOrder(id: string, changes: Partial<Order>): Promise<
 }
 
 /**
- * Deletes an order — restricted to `order_status = 'Draft'` directly in the
- * query's WHERE clause, matching ORDERS_DATABASE.md §7's framing of order
- * deletion as "a data-integrity backstop, not a supported workflow": nothing
- * (reservation, payment, completion) has happened yet on a Draft order, so
- * this is the one status where a hard delete carries no data-integrity risk.
- * No UI exposes this — repository capability only, per this increment's
- * scope. Silently deletes 0 rows (no error) if the order isn't Draft or
- * doesn't exist, matching this codebase's existing deleteCustomer/
- * deleteProduct behavior of returning the (possibly null) Supabase error
- * rather than asserting a row was actually affected.
+ * Deletes an order — restricted to `order_status = 'Draft'` AND
+ * `payment_status = 'Unpaid'` directly in the query's WHERE clause, matching
+ * ORDERS_DATABASE.md §7's framing of order deletion as "a data-integrity
+ * backstop, not a supported workflow": a Draft order with no payment logged
+ * is the one state where a hard delete carries no data-integrity risk.
+ * order_items/payments/order_events all cascade-delete via their FK
+ * (`ON DELETE CASCADE` to orders.id, ORDERS_DATABASE.md §2) — this single
+ * DELETE is sufficient, no separate per-table delete is needed. Defense in
+ * depth alongside the Service layer's validateOrderDeletion check (same
+ * rule, not a new one). Silently deletes 0 rows (no error) if the order
+ * doesn't match both conditions or doesn't exist, matching this codebase's
+ * existing deleteCustomer/deleteProduct behavior of returning the (possibly
+ * null) Supabase error rather than asserting a row was actually affected.
  */
 export async function deleteOrder(id: string): Promise<void> {
-  const { error } = await supabase.from("orders").delete().eq("id", id).eq("order_status", "Draft");
+  const { error } = await supabase
+    .from("orders")
+    .delete()
+    .eq("id", id)
+    .eq("order_status", "Draft")
+    .eq("payment_status", "Unpaid");
 
   if (error) {
     console.error("Error deleting order:", error);
@@ -703,9 +711,8 @@ export interface OrderWriteRepository {
   /** Generic field update — see ORDER_WRITABLE_FIELDS for scope. Added this
    * increment, additive only (no existing signature changed). */
   updateOrder(id: string, changes: Partial<Order>): Promise<Order>;
-  /** Draft-only, per this increment's scope — see the implementation's
-   * doc comment for why this is safe as a repository-level capability
-   * without a corresponding UI action. */
+  /** Draft + Unpaid only — see the implementation's doc comment for the
+   * full guard rationale. */
   deleteOrder(id: string): Promise<void>;
   /** Dedicated, narrow status-transition methods — not a generic status
    * setter (per this increment's explicit instruction). */

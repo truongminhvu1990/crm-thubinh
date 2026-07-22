@@ -135,16 +135,27 @@ export function validateMarkOrderLostTransition(status: OrderStatus): string | n
 
 /** ORDERS_DATABASE.md §7: order deletion is "a data-integrity backstop, not
  * a supported workflow" - restricted to Draft, the one status where nothing
- * (reservation, payment, completion) has happened yet. Same restriction
- * already applied at the repository layer's WHERE clause (order.repository.ts
- * deleteOrder) - this is the Service-layer check for the same rule, not a
- * new one. */
-export function canDeleteOrder(status: OrderStatus): boolean {
-  return status === "Draft";
+ * (reservation, completion) has happened yet. Also blocked once any payment
+ * has been logged, even on a still-Draft order (a Draft order can receive a
+ * deposit — see canAddPayment) - hard-deleting the order would cascade-delete
+ * that payment record via the FK, destroying money-received history with no
+ * trace. `paymentStatus !== "Unpaid"` is used as the "has any payment" check
+ * rather than a separate payments count: Unpaid is only ever derived from a
+ * payments sum of 0 (derivePaymentStatus), and payments.amount is itself
+ * CHECK-constrained > 0, so Unpaid and "zero payments exist" are exactly
+ * equivalent — this reuses the same rollup field canAddPayment already
+ * reads instead of adding an I/O-bearing check to this pure-rules file.
+ * Same restrictions already applied at the repository layer's WHERE clause
+ * (order.repository.ts deleteOrder) - this is the Service-layer check for
+ * the same rule, not a new one. */
+export function canDeleteOrder(status: OrderStatus, paymentStatus: PaymentStatus): boolean {
+  return status === "Draft" && paymentStatus === "Unpaid";
 }
 
-export function validateOrderDeletion(status: OrderStatus): string | null {
-  return canDeleteOrder(status) ? null : "Chỉ có thể xóa đơn hàng ở trạng thái Nháp";
+export function validateOrderDeletion(status: OrderStatus, paymentStatus: PaymentStatus): string | null {
+  if (status !== "Draft") return "Chỉ có thể xóa đơn hàng ở trạng thái Nháp";
+  if (paymentStatus !== "Unpaid") return "Không thể xóa đơn hàng đã có thanh toán";
+  return null;
 }
 
 // ---------------------------------------------------------------------------

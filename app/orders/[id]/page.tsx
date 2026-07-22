@@ -199,7 +199,7 @@ export default function OrderDetailPage() {
 
   const { order, items, payments, events } = detail;
   const isEditable = canEditOrderItems(order.order_status);
-  const isDeletable = canDeleteOrder(order.order_status);
+  const isDeletable = canDeleteOrder(order.order_status, order.payment_status);
   const isCompletable = canCompleteOrder(order.order_status);
   const isLosable = canMarkOrderLost(order.order_status);
   const completeBlockedReason = isCompletable ? validateOrderHasItems(items.length) : null;

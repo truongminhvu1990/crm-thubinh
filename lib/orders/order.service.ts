@@ -326,7 +326,7 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
     async deleteOrder(orderId) {
       const order = await requireOrder(repository, orderId);
 
-      const deletionError = validateOrderDeletion(order.order_status);
+      const deletionError = validateOrderDeletion(order.order_status, order.payment_status);
       if (deletionError) {
         throw new OrderRuleViolationError(deletionError);
       }
