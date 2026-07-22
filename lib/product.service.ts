@@ -213,17 +213,25 @@ const WRITABLE_FIELDS: (keyof Product)[] = [
   "salesperson",
   "video",
   "batch_id",
-  // available/reserved/sold are read-only in the app today - display only,
-  // sourced from the current database values until the Orders module
-  // becomes their sole writer. Not included here on purpose.
+  // available/reserved/sold stay read-only for updates - sourced from the
+  // current database values, with products.status as the trusted ongoing
+  // signal (INVENTORY_WRITE_PATH_AUDIT.md). Not included here on purpose.
 ];
+
+/** Additive to WRITABLE_FIELDS, creation-only: batch management is optional
+ * (Business decision), so a product with no batch needs a way to declare
+ * its starting stock. `available` may be set once, at creation, via
+ * addProduct's CREATE_WRITABLE_FIELDS below - deliberately excluded from
+ * WRITABLE_FIELDS itself so updateProduct/bulkAddProducts still can't touch
+ * it post-creation; ongoing tracking stays status-driven. */
+const CREATE_WRITABLE_FIELDS: (keyof Product)[] = [...WRITABLE_FIELDS, "available"];
 
 function pickWritableFields(
   product: Partial<Product>,
-  { skipEmpty = false }: { skipEmpty?: boolean } = {}
+  { skipEmpty = false, fields = WRITABLE_FIELDS }: { skipEmpty?: boolean; fields?: (keyof Product)[] } = {}
 ): Partial<Product> {
   const filteredData: Record<string, unknown> = {};
-  WRITABLE_FIELDS.forEach((field) => {
+  fields.forEach((field) => {
     const value = product[field];
     if (value === undefined) return;
     if (skipEmpty && value === "") return;
@@ -342,7 +350,7 @@ export async function findProductBySku(
 }
 
 export async function addProduct(product: Partial<Product>) {
-  const filteredData = pickWritableFields(product, { skipEmpty: true });
+  const filteredData = pickWritableFields(product, { skipEmpty: true, fields: CREATE_WRITABLE_FIELDS });
 
   const { data, error } = await supabase
     .from("products")

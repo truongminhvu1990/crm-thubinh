@@ -4,7 +4,7 @@ import { Product } from "@/types/product";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
 import CreatableSelect from "@/components/ui/CreatableSelect";
-import { Tag, Wallet, MapPin, FileText, Truck, Video, Scale } from "lucide-react";
+import { Tag, Wallet, MapPin, FileText, Truck, Video, Scale, PackageCheck } from "lucide-react";
 import { PRODUCT_STATUS } from "@/lib/product.constants";
 import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
 import { useTagOptions } from "@/lib/hooks/useTagOptions";
@@ -136,13 +136,26 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
           onChange={(e) => updateField("source", e.target.value)}
         />
         <Select
-          label="Lô hàng"
-          placeholder="Chọn lô hàng"
+          label="Lô hàng (không bắt buộc)"
+          placeholder="Không thuộc lô hàng nào"
           options={batchOptions}
           value={product.batch_id || ""}
           onChange={(e) => setProduct({ ...product, batch_id: e.target.value || null })}
         />
       </div>
+
+      {!product.id && (
+        <Input
+          id="product-available"
+          label="Tồn kho ban đầu"
+          type="number"
+          placeholder="1"
+          min={0}
+          value={product.available ?? ""}
+          onChange={(e) => updateNumberField("available", e.target.value)}
+          icon={<PackageCheck className="w-4 h-4" />}
+        />
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <Input
