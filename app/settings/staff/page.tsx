@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Plus, RefreshCw } from "lucide-react";
 import { Staff } from "@/types/staff";
-import { getStaffList, addStaff, updateStaff, deleteStaff, getNextStaffCode } from "@/lib/staff.service";
+import { getStaffList, addStaff, updateStaff, deleteStaff, getNextStaffCode, getStaffByEmail } from "@/lib/staff.service";
 import { permissionApi } from "@/lib/permission/permissionCenterApi";
 import StaffTable from "@/components/staff/StaffTable";
 import StaffModal from "@/components/staff/StaffModal";
@@ -70,6 +70,22 @@ export default function StaffPage() {
       setErrors({ full_name: "Vui lòng nhập họ tên" });
       return;
     }
+    // Production Authentication Hotfix V2, Package 3 - email is now
+    // required and must be unique. This is a UX pre-check only, not the
+    // enforcement boundary - addStaff()/updateStaff() (lib/staff.service.ts)
+    // validate the same rules server-side, and staff_email_unique
+    // (20260730_staff_email_unique_index.sql) enforces uniqueness at the
+    // DB layer, so bypassing this check (or a race with another save)
+    // still can't produce a duplicate.
+    if (!currentStaff.email?.trim()) {
+      setErrors({ email: "Vui lòng nhập email" });
+      return;
+    }
+    const existingByEmail = await getStaffByEmail(currentStaff.email.trim());
+    if (existingByEmail && existingByEmail.id !== currentStaff.id) {
+      setErrors({ email: "Email đã tồn tại" });
+      return;
+    }
 
     setIsSaving(true);
     try {
@@ -79,10 +95,16 @@ export default function StaffPage() {
           : await addStaff(currentStaff);
 
       if (result.error) {
-        const isDuplicate = (result.error as { code?: string }).code === "23505";
-        setErrors({
-          staff_code: isDuplicate ? "Mã nhân viên đã tồn tại" : "Lỗi khi lưu, vui lòng thử lại",
-        });
+        const errorCode = (result.error as { code?: string }).code;
+        if (errorCode === "EMAIL_REQUIRED") {
+          setErrors({ email: "Vui lòng nhập email" });
+        } else if (errorCode === "EMAIL_DUPLICATE") {
+          setErrors({ email: "Email đã tồn tại" });
+        } else if (errorCode === "23505") {
+          setErrors({ staff_code: "Mã nhân viên đã tồn tại" });
+        } else {
+          setErrors({ staff_code: "Lỗi khi lưu, vui lòng thử lại" });
+        }
         return;
       }
 

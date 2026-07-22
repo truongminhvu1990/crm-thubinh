@@ -20,6 +20,11 @@ export interface Staff {
    * above (kept untouched). Prefer this when set; fall back to `role`
    * otherwise (lib/permission/permissionCenter.service.ts resolveRoleForStaff). */
   role_id?: string | null;
+  /** Production Authentication Hotfix V2, Package 1 - links this row to its
+   * auth.users account. Preferred over `email` when set
+   * (lib/permission/serverAuth.ts getCurrentStaffFromRequest); may be null
+   * for rows not yet linked (Package 5, Backward Compatibility). */
+  auth_user_id?: string | null;
   created_at?: string;
   updated_at?: string;
 }

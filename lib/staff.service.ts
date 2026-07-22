@@ -70,6 +70,52 @@ export async function getStaffByName(fullName: string): Promise<Staff | null> {
   return data as Staff | null;
 }
 
+/** Production Authentication Hotfix V2, Package 3 - backs email-uniqueness
+ * validation both in the UI (app/settings/staff/page.tsx handleSaveStaff)
+ * and, as of the same hotfix's follow-up, inside addStaff()/updateStaff()
+ * themselves (see validateStaffEmail below). Case-insensitive (`ilike`
+ * with no wildcards - Postgres's case-insensitive exact-match operator),
+ * matching the case-insensitive `staff_email_unique` partial unique index
+ * (20260730_staff_email_unique_index.sql) this backs at the DB layer. */
+export async function getStaffByEmail(email: string): Promise<Staff | null> {
+  const { data, error } = await supabase.from("staff").select("*").ilike("email", email).maybeSingle();
+
+  if (error) {
+    console.error("Error resolving staff by email:", error);
+    return null;
+  }
+  return data as Staff | null;
+}
+
+export interface StaffServiceError {
+  code: "EMAIL_REQUIRED" | "EMAIL_DUPLICATE";
+  message: string;
+}
+
+/** Production Authentication Hotfix V2 - email validation moved into the
+ * service layer (this codebase's write boundary for Staff, called directly
+ * by every client component - the "Staff API" in an architecture with no
+ * dedicated Next.js API route for staff writes). Runs before any DB write
+ * so a caller that bypasses a page's own pre-check (a future API route, a
+ * script, a modified client, or - today - app/settings/staff/[id]/page.tsx,
+ * which has no pre-check of its own) still can't create or update a staff
+ * row with a missing or duplicate email. "Never rely on UI validation
+ * only." */
+async function validateStaffEmail(
+  email: string | null | undefined,
+  excludeStaffId?: string
+): Promise<StaffServiceError | null> {
+  const trimmed = email?.trim();
+  if (!trimmed) {
+    return { code: "EMAIL_REQUIRED", message: "Email là bắt buộc" };
+  }
+  const existing = await getStaffByEmail(trimmed);
+  if (existing && existing.id !== excludeStaffId) {
+    return { code: "EMAIL_DUPLICATE", message: "Email đã tồn tại" };
+  }
+  return null;
+}
+
 /** Same "prefix + running number" convention as getNextBatchCode()
  * (lib/productBatch.service.ts). */
 export async function getNextStaffCode(): Promise<string> {
@@ -88,7 +134,25 @@ export async function getNextStaffCode(): Promise<string> {
   return `NV${maxN + 1}`;
 }
 
+/** Staff Creation. Stores `email` as a plain column - validated required
+ * and unique server-side, in this function, before any write (Production
+ * Authentication Hotfix V2 - "move email validation into the Staff API,
+ * never rely on UI validation only"; app/settings/staff/page.tsx's own
+ * pre-check is UX-only now, not the enforcement boundary). Does NOT create
+ * a Supabase Auth account or populate `auth_user_id`.
+ *
+ * TODO(future Auth integration, Production Authentication Hotfix V2
+ * Package 6): creating a linked Auth account requires the Supabase Admin
+ * API (`auth.admin.createUser`), which requires a service_role key this
+ * project does not have configured today. Until that exists, a new staff
+ * row's `auth_user_id` stays NULL, and that staff member resolves via the
+ * email fallback in getCurrentStaffFromRequest()
+ * (lib/permission/serverAuth.ts) until either that future feature runs or
+ * 20260730_staff_link_auth_user.sql-style linking is re-run. */
 export async function addStaff(staff: Partial<Staff>) {
+  const emailError = await validateStaffEmail(staff.email);
+  if (emailError) return { data: null, error: emailError };
+
   const filteredData = pickWritableFields(staff);
 
   const { data, error } = await supabase.from("staff").insert(filteredData).select().single();
@@ -102,7 +166,13 @@ export async function addStaff(staff: Partial<Staff>) {
   return { data: data as Staff, error: null };
 }
 
+/** Same server-side email validation as addStaff() above, excluding this
+ * row's own id from the duplicate check so saving a staff member without
+ * changing their email doesn't flag itself as a duplicate. */
 export async function updateStaff(id: string, staff: Partial<Staff>) {
+  const emailError = await validateStaffEmail(staff.email, id);
+  if (emailError) return { data: null, error: emailError };
+
   const filteredData = pickWritableFields(staff);
 
   const { data, error } = await supabase.from("staff").update(filteredData).eq("id", id).select().single();

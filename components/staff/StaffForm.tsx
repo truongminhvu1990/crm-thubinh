@@ -65,11 +65,12 @@ export default function StaffForm({ staff, setStaff, errors = {} }: Props) {
           icon={<Phone className="w-4 h-4" />}
         />
         <Input
-          label="Email"
+          label="Email *"
           type="email"
           placeholder="email@example.com"
           value={staff.email || ""}
           onChange={(e) => updateField("email", e.target.value)}
+          error={errors.email}
           icon={<Mail className="w-4 h-4" />}
         />
       </div>

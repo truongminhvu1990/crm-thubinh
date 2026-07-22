@@ -105,7 +105,21 @@ export default function StaffDetailPage() {
     setIsSaving(true);
     try {
       const { data, error } = await updateStaff(staff.id, editStaff);
-      if (error) throw error;
+      if (error) {
+        // Production Authentication Hotfix V2 - updateStaff() now validates
+        // email required/unique server-side (this page never had its own
+        // pre-check); surface those two cases distinctly rather than the
+        // generic message below.
+        const errorCode = (error as { code?: string }).code;
+        if (errorCode === "EMAIL_REQUIRED") {
+          alert("Vui lòng nhập email");
+        } else if (errorCode === "EMAIL_DUPLICATE") {
+          alert("Email đã tồn tại");
+        } else {
+          throw error;
+        }
+        return;
+      }
       if (data) {
         let finalStaff = data;
         // User Role Assignment (Decision 10, PERMISSION_UI.md §8) - written

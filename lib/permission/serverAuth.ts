@@ -10,6 +10,20 @@ import { staffHasPermission } from "./permissionCenter.service";
  * Required so Permission Center's own write endpoints can resolve "who is
  * calling" without trusting anything the client sends in the request body -
  * "All permission enforcement must happen server-side" (Requirements). */
+/** Production Authentication Hotfix V2, Package 2 - transitional, two-
+ * priority resolution (`staff.auth_user_id` added by
+ * 20260730_staff_auth_user_id.sql):
+ *   1. `auth_user_id` (stable, doesn't depend on `staff.email` ever
+ *      matching `auth.users.email` exactly) - the fix for the confirmed
+ *      Production 401 root cause.
+ *   2. `email`, unchanged, for any staff row not yet linked (Package 5,
+ *      Backward Compatibility - 20260730_staff_link_auth_user.sql links
+ *      what it safely can, but doesn't guarantee every row).
+ *   3. Neither resolves -> null, which `requirePermissionCenterAccess`
+ *      below turns into 401, exactly as before.
+ * This is explicitly transitional, not a redesign - once every staff row
+ * is reliably linked (Package 6, future Auth-creation work), the email
+ * fallback can be retired in a later, separate change. */
 export async function getCurrentStaffFromRequest(request: NextRequest): Promise<Staff | null> {
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -30,14 +44,30 @@ export async function getCurrentStaffFromRequest(request: NextRequest): Promise<
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user?.email) return null;
+  if (!user) return null;
 
-  const { data, error } = await supabase.from("staff").select("*").eq("email", user.email).maybeSingle();
-  if (error) {
-    console.error("Error resolving current staff member (server):", error);
+  const { data: byAuthUserId, error: authUserIdError } = await supabase
+    .from("staff")
+    .select("*")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+  if (authUserIdError) {
+    console.error("Error resolving current staff member by auth_user_id (server):", authUserIdError);
+  }
+  if (byAuthUserId) return byAuthUserId as Staff;
+
+  if (!user.email) return null;
+
+  const { data: byEmail, error: emailError } = await supabase
+    .from("staff")
+    .select("*")
+    .eq("email", user.email)
+    .maybeSingle();
+  if (emailError) {
+    console.error("Error resolving current staff member by email (server):", emailError);
     return null;
   }
-  return data as Staff | null;
+  return byEmail as Staff | null;
 }
 
 /** Gate for every Permission Center write endpoint (Package 12). Reuses the
