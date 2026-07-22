@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { createClient as createDebugSupabaseClient } from "@supabase/supabase-js"; // TEMPORARY DEBUG INSTRUMENTATION — remove after investigation.
 import {
   AddOrderItemInput,
   AddPaymentInput,
@@ -216,7 +217,31 @@ async function generateOrderNumber(): Promise<string> {
   const datePart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
   const prefix = `OD-${datePart}-`;
 
-  const { count, error } = await supabase
+  // TEMPORARY DEBUG INSTRUMENTATION — remove after investigation. Scoped to
+  // this one query only, via a throwaway client with a wrapped `fetch` —
+  // does not touch the shared `supabase` client or any other call site.
+  // Captures the raw HTTP response (status/statusText/url/method) at the
+  // moment it arrives, before PostgrestBuilder.processResponse inspects it.
+  const debugClient = createDebugSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      global: {
+        fetch: async (input, init) => {
+          const res = await fetch(input, init);
+          console.error("DEBUG generateOrderNumber raw HTTP response", {
+            status: res.status,
+            statusText: res.statusText,
+            url: res.url,
+            method: init?.method ?? "GET",
+          });
+          return res;
+        },
+      },
+    }
+  );
+
+  const { count, error } = await debugClient
     .from("orders")
     .select("id", { count: "exact", head: true })
     .like("order_number", `${prefix}%`);
