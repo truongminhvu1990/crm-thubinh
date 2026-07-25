@@ -53,3 +53,5 @@ next-env.d.ts
 /artifacts/report/
 /blob-report/
 /playwright/.cache/
+# Supabase CLI cache
+supabase/.temp/
