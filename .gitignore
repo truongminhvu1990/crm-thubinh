@@ -55,3 +55,4 @@ next-env.d.ts
 /playwright/.cache/
 # Supabase CLI cache
 supabase/.temp/
+git restore supabase/.temp
