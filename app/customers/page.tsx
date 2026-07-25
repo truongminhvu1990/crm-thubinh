@@ -100,9 +100,9 @@ export default function CustomersPage() {
       const searchLower = search.toLowerCase();
       filtered = filtered.filter(
         (c) =>
-          c.full_name.toLowerCase().includes(searchLower) ||
-          c.customer_code.toLowerCase().includes(searchLower) ||
-          c.phone.includes(search)
+          (c.full_name ?? "").toLowerCase().includes(searchLower) ||
+          (c.customer_code ?? "").toLowerCase().includes(searchLower) ||
+          (c.phone ?? "").includes(search)
       );
     }
 

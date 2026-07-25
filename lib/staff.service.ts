@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import { Staff } from "@/types/staff";
 import { Customer } from "@/types/customer";
 import { logActivity } from "./activityLog.service";
+import { DateRange } from "./dateFilter";
 
 const WRITABLE_FIELDS: (keyof Staff)[] = [
   "staff_code",
@@ -307,11 +308,22 @@ export interface TopSalesStaffEntry {
  * injectable-dependency pattern as every other wave; defaults to the
  * browser Supabase client. Threaded into getStaffList() too so every query
  * this function makes goes through the same client. */
-export async function getTopSalesStaff(limit = 5, client: SupabaseClient = supabase): Promise<TopSalesStaffEntry[]> {
+export async function getTopSalesStaff(
+  limit = 5,
+  client: SupabaseClient = supabase,
+  range: DateRange | null = null
+): Promise<TopSalesStaffEntry[]> {
+  let purchasesQuery = client.from("customer_purchases").select("salesperson_id, salesperson, sale_price");
+  let commissionsQuery = client.from("sales_commissions").select("salesperson_id, salesperson, commission_amount");
+  if (range) {
+    purchasesQuery = purchasesQuery.gte("sale_date", range.start).lt("sale_date", range.end);
+    commissionsQuery = commissionsQuery.gte("created_at", range.start).lt("created_at", range.end);
+  }
+
   const [staffList, purchasesRes, commissionsRes] = await Promise.all([
     getStaffList(undefined, client),
-    client.from("customer_purchases").select("salesperson_id, salesperson, sale_price"),
-    client.from("sales_commissions").select("salesperson_id, salesperson, commission_amount"),
+    purchasesQuery,
+    commissionsQuery,
   ]);
 
   const purchases =

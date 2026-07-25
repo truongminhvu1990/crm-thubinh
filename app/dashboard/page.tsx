@@ -109,12 +109,13 @@ export default function Dashboard() {
     };
   }, []);
 
-  // Top Sales Staff widget (Sprint v2.0.0, Feature 9) - its own effect for
-  // the same reason as Follow-up/Commission Summary above: not date-range-
-  // dependent.
+  // Top Sales Staff widget (Sprint v2.0.0, Feature 9) - revenue ranking
+  // reads customer_purchases (see getTopSalesStaff), so it must respect the
+  // Global Date Filter the same as the other revenue-based widgets above.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/dashboard/top-sales-staff")
+    const topSalesStaffParams = range ? `?start=${range.start}&end=${range.end}` : "";
+    fetch(`/api/dashboard/top-sales-staff${topSalesStaffParams}`)
       .then((res) => (res.ok ? (res.json() as Promise<TopSalesStaffEntry[]>) : []))
       .then((entries) => {
         if (!cancelled) setTopSalesStaff(entries);
@@ -122,7 +123,7 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [range]);
 
   // Revenue label now follows the Global Date Filter (Sprint v1.0.2)
   // instead of always saying "this month".

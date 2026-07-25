@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --import tsx --experimental-test-module-mocks --test"
+    "test": "node --import tsx --experimental-test-module-mocks --test",
+    "backfill:orders": "node --env-file-if-exists=.env.local --import tsx scripts/backfill-orders.ts"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.19",
