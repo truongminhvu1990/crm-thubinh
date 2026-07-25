@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import { Layers } from "lucide-react";
 import { DateRange } from "@/lib/dateFilter";
-import { getCategoryAnalysis } from "@/lib/reports/reportsBI.service";
 import { buildSalesLedgerHref } from "@/lib/reports/drilldown";
 import { currency, formatPercent, NO_SALES_DATA_MESSAGE } from "@/lib/reports/format";
+import { rangeSearchParams } from "@/lib/reports/reportsApiClient";
 import { CategoryAnalysisRow } from "@/types/reportsBI";
 import AnalysisTable, { AnalysisColumn } from "@/components/reports/AnalysisTable";
 import ExportButtons from "@/components/reports/ExportButtons";
@@ -28,10 +28,12 @@ export default function CategoryAnalysisSection({ range }: Props) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    getCategoryAnalysis(range).then((data) => {
-      setRows(data);
-      setIsLoading(false);
-    });
+    fetch(`/api/reports/bi/category-analysis?${rangeSearchParams(range)}`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => {
+        setRows(data);
+        setIsLoading(false);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range?.start, range?.end]);
 

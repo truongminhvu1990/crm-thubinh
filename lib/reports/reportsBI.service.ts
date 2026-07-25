@@ -1,3 +1,4 @@
+import { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { DateRange } from "@/lib/dateFilter";
 import {
@@ -62,8 +63,13 @@ import {
 
 const TOP_N_DEFAULT = 10;
 
-export async function getRevenuePeriods(): Promise<RevenuePeriodRow[]> {
-  const { data, error } = await supabase.rpc("reports_revenue_periods");
+/** `client` defaults to the browser Supabase client so every existing
+ * caller keeps its exact current behavior unchanged. Backend API Foundation
+ * (Package 4C, Wave 4) passes a server client instead, from
+ * app/api/reports/**. Every `.rpc()` call/param below is unchanged - only
+ * which client issues the call differs. */
+export async function getRevenuePeriods(client: SupabaseClient = supabase): Promise<RevenuePeriodRow[]> {
+  const { data, error } = await client.rpc("reports_revenue_periods");
   if (error || !data) {
     if (error) console.error("Error fetching revenue periods:", error);
     return [];
@@ -78,8 +84,8 @@ export async function getRevenuePeriods(): Promise<RevenuePeriodRow[]> {
 
 const EMPTY_REVENUE_SUMMARY: RevenueSummary = { revenue: 0, transactions: 0, avg_sale: 0 };
 
-export async function getRevenueSummary(range: DateRange | null): Promise<RevenueSummary> {
-  const { data, error } = await supabase.rpc("reports_revenue_summary", {
+export async function getRevenueSummary(range: DateRange | null, client: SupabaseClient = supabase): Promise<RevenueSummary> {
+  const { data, error } = await client.rpc("reports_revenue_summary", {
     p_start: range?.start ?? null,
     p_end: range?.end ?? null,
   });
@@ -97,9 +103,10 @@ export async function getRevenueSummary(range: DateRange | null): Promise<Revenu
 
 export async function getProductAnalysis(
   range: DateRange | null,
-  limit: number = TOP_N_DEFAULT
+  limit: number = TOP_N_DEFAULT,
+  client: SupabaseClient = supabase
 ): Promise<ProductAnalysisRow[]> {
-  const { data, error } = await supabase.rpc("reports_product_analysis", {
+  const { data, error } = await client.rpc("reports_product_analysis", {
     p_start: range?.start ?? null,
     p_end: range?.end ?? null,
     p_limit: limit,
@@ -117,8 +124,11 @@ export async function getProductAnalysis(
   }));
 }
 
-export async function getCategoryAnalysis(range: DateRange | null): Promise<CategoryAnalysisRow[]> {
-  const { data, error } = await supabase.rpc("reports_category_analysis", {
+export async function getCategoryAnalysis(
+  range: DateRange | null,
+  client: SupabaseClient = supabase
+): Promise<CategoryAnalysisRow[]> {
+  const { data, error } = await client.rpc("reports_category_analysis", {
     p_start: range?.start ?? null,
     p_end: range?.end ?? null,
   });
@@ -136,8 +146,8 @@ export async function getCategoryAnalysis(range: DateRange | null): Promise<Cate
 
 const EMPTY_CUSTOMER_SUMMARY: CustomerSummary = { new_customers: 0, returning_customers: 0, avg_purchase: 0 };
 
-export async function getCustomerSummary(range: DateRange | null): Promise<CustomerSummary> {
-  const { data, error } = await supabase.rpc("reports_customer_summary", {
+export async function getCustomerSummary(range: DateRange | null, client: SupabaseClient = supabase): Promise<CustomerSummary> {
+  const { data, error } = await client.rpc("reports_customer_summary", {
     p_start: range?.start ?? null,
     p_end: range?.end ?? null,
   });
@@ -155,9 +165,10 @@ export async function getCustomerSummary(range: DateRange | null): Promise<Custo
 
 export async function getTopCustomers(
   range: DateRange | null,
-  limit: number = TOP_N_DEFAULT
+  limit: number = TOP_N_DEFAULT,
+  client: SupabaseClient = supabase
 ): Promise<TopCustomerRow[]> {
-  const { data, error } = await supabase.rpc("reports_top_customers", {
+  const { data, error } = await client.rpc("reports_top_customers", {
     p_start: range?.start ?? null,
     p_end: range?.end ?? null,
     p_limit: limit,
@@ -177,9 +188,10 @@ export async function getTopCustomers(
 
 export async function getStaffAnalysis(
   range: DateRange | null,
-  limit: number = TOP_N_DEFAULT
+  limit: number = TOP_N_DEFAULT,
+  client: SupabaseClient = supabase
 ): Promise<StaffAnalysisRow[]> {
-  const { data, error } = await supabase.rpc("reports_staff_analysis", {
+  const { data, error } = await client.rpc("reports_staff_analysis", {
     p_start: range?.start ?? null,
     p_end: range?.end ?? null,
     p_limit: limit,
@@ -199,9 +211,10 @@ export async function getStaffAnalysis(
 
 export async function getRevenueTrend(
   range: DateRange | null,
-  granularity: RevenueTrendGranularity
+  granularity: RevenueTrendGranularity,
+  client: SupabaseClient = supabase
 ): Promise<RevenueTrendPoint[]> {
-  const { data, error } = await supabase.rpc("reports_revenue_trend", {
+  const { data, error } = await client.rpc("reports_revenue_trend", {
     p_start: range?.start ?? null,
     p_end: range?.end ?? null,
     p_granularity: granularity,
@@ -243,14 +256,15 @@ function buildComparison(current: number, previous: number | null): ComparisonVa
 
 export async function getKpiDashboard(
   range: DateRange | null,
-  previousRange: DateRange | null
+  previousRange: DateRange | null,
+  client: SupabaseClient = supabase
 ): Promise<KpiDashboardData> {
   const [revenue, customers, topProducts, staffRows, topCustomers] = await Promise.all([
-    getRevenueSummary(range),
-    getCustomerSummary(range),
-    getProductAnalysis(range, 1),
-    getStaffAnalysis(range, 1000),
-    getTopCustomers(range, 1),
+    getRevenueSummary(range, client),
+    getCustomerSummary(range, client),
+    getProductAnalysis(range, 1, client),
+    getStaffAnalysis(range, 1000, client),
+    getTopCustomers(range, 1, client),
   ]);
   const commission = staffRows.reduce((sum, s) => sum + s.commission, 0);
 
@@ -259,9 +273,9 @@ export async function getKpiDashboard(
   let prevCommission: number | null = null;
   if (previousRange) {
     const [pr, pc, prevStaffRows] = await Promise.all([
-      getRevenueSummary(previousRange),
-      getCustomerSummary(previousRange),
-      getStaffAnalysis(previousRange, 1000),
+      getRevenueSummary(previousRange, client),
+      getCustomerSummary(previousRange, client),
+      getStaffAnalysis(previousRange, 1000, client),
     ]);
     prevRevenue = pr;
     prevCustomers = pc;

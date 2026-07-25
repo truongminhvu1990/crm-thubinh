@@ -7,6 +7,7 @@ import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
 import { useStaffOptions } from "@/lib/hooks/useStaffOptions";
 import SearchInput from "@/components/ui/SearchInput";
 import Button from "@/components/ui/Button";
+import CurrencyInput from "@/components/ui/CurrencyInput";
 
 const SORT_OPTIONS: { value: SalesLedgerSortField; label: string }[] = [
   { value: "sale_date", label: "Ngày bán" },
@@ -55,6 +56,7 @@ export default function SalesLedgerFilters({ filters, onChange }: Props) {
       <div className="flex flex-col lg:flex-row gap-3">
         <div className="flex-1 min-w-0">
           <SearchInput
+            data-testid="sales-ledger-search-input"
             placeholder="Tìm theo khách hàng, mã hoặc tên sản phẩm..."
             value={filters.search || ""}
             onChange={(e) => update({ search: e.target.value || undefined })}
@@ -134,19 +136,17 @@ export default function SalesLedgerFilters({ filters, onChange }: Props) {
           ))}
         </select>
 
-        <input
-          type="number"
+        <CurrencyInput
           placeholder="Giá trị từ..."
-          value={filters.minAmount ?? ""}
-          onChange={(e) => update({ minAmount: e.target.value ? Number(e.target.value) : undefined })}
-          className={`${inputClass} w-32`}
+          value={filters.minAmount}
+          onChange={(value) => update({ minAmount: value })}
+          className="w-32"
         />
-        <input
-          type="number"
+        <CurrencyInput
           placeholder="Giá trị đến..."
-          value={filters.maxAmount ?? ""}
-          onChange={(e) => update({ maxAmount: e.target.value ? Number(e.target.value) : undefined })}
-          className={`${inputClass} w-32`}
+          value={filters.maxAmount}
+          onChange={(value) => update({ maxAmount: value })}
+          className="w-32"
         />
 
         <select

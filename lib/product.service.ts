@@ -1,3 +1,4 @@
+import { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import { Product } from "@/types/product";
 import { Customer } from "@/types/customer";
@@ -241,12 +242,13 @@ function pickWritableFields(
 }
 
 function buildProductsQuery(
+  client: SupabaseClient,
   select: string,
   searchTerm?: string,
   category?: string,
   status?: string
 ) {
-  let query = supabase.from("products").select(select);
+  let query = client.from("products").select(select);
 
   if (searchTerm) {
     query = query.or(
@@ -265,16 +267,24 @@ function buildProductsQuery(
   return query.order("created_at", { ascending: false });
 }
 
+/** `client` defaults to the browser Supabase client so every existing caller
+ * (Inventory, Jade Intelligence, Market Intelligence, Orders' product
+ * picker, ...) keeps its exact current behavior unchanged. Backend API
+ * Foundation (Package 4C, Wave 1) passes a server client instead, from
+ * app/api/products/**, so Products' own pages stop reading Postgres
+ * directly - no other consumer needs to change. */
 export async function getProducts(
   searchTerm?: string,
   category?: string,
-  status?: string
+  status?: string,
+  client: SupabaseClient = supabase
 ): Promise<Product[]> {
   // The batch/images joins depend on migrations that may not have run yet
   // (product_batches, product_images) - PostgREST errors the whole query
   // if either relationship can't be resolved, so fall back to a join-less
   // fetch on error rather than breaking the product list entirely.
   let { data, error } = await buildProductsQuery(
+    client,
     "*, batch:product_batches(batch_code), images:product_images(id, image_url, sort_order)",
     searchTerm,
     category,
@@ -282,7 +292,7 @@ export async function getProducts(
   );
 
   if (error) {
-    ({ data, error } = await buildProductsQuery("*", searchTerm, category, status));
+    ({ data, error } = await buildProductsQuery(client, "*", searchTerm, category, status));
   }
 
   if (error) {
@@ -293,8 +303,8 @@ export async function getProducts(
   return data as unknown as Product[];
 }
 
-export async function getProductById(id: string): Promise<Product | null> {
-  const { data, error } = await supabase
+export async function getProductById(id: string, client: SupabaseClient = supabase): Promise<Product | null> {
+  const { data, error } = await client
     .from("products")
     .select("*")
     .eq("id", id)

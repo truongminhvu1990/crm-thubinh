@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { TrendingUp } from "lucide-react";
 import Card from "@/components/ui/Card";
 import { DateRange } from "@/lib/dateFilter";
-import { getRevenueTrend } from "@/lib/reports/reportsBI.service";
 import { currency, NO_SALES_DATA_MESSAGE } from "@/lib/reports/format";
+import { rangeSearchParams } from "@/lib/reports/reportsApiClient";
 import { formatDate } from "@/lib/utils";
 import { RevenueTrendGranularity, RevenueTrendPoint } from "@/types/reportsBI";
 import ExportButtons from "@/components/reports/ExportButtons";
@@ -62,11 +62,13 @@ export default function RevenueTrendChart({ range }: Props) {
   }, []);
 
   useEffect(() => {
-    getRevenueTrend(range, granularity).then((points) => {
-      setData(points);
-      setIsLoading(false);
-      setHoverIndex(null);
-    });
+    fetch(`/api/reports/bi/revenue-trend?${rangeSearchParams(range)}&granularity=${granularity}`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((points) => {
+        setData(points);
+        setIsLoading(false);
+        setHoverIndex(null);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range?.start, range?.end, granularity]);
 

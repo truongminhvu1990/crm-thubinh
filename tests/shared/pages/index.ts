@@ -1,0 +1,10 @@
+export { BasePage } from "./BasePage";
+export { LoginPage } from "./LoginPage";
+export { DashboardPage } from "./DashboardPage";
+export { CustomerPage } from "./CustomerPage";
+export { ProductPage } from "./ProductPage";
+export { OrderPage } from "./OrderPage";
+export { ReportPage } from "./ReportPage";
+export { SalesLedgerPage } from "./SalesLedgerPage";
+export { StaffPage } from "./StaffPage";
+export { PermissionPage } from "./PermissionPage";

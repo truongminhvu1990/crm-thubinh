@@ -4,6 +4,7 @@ import { Wallet, Percent, MapPin, FileText, Truck, Tag, UserCheck } from "lucide
 import { Product } from "@/types/product";
 import Card from "@/components/ui/Card";
 import InfoItem from "@/components/ui/InfoItem";
+import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
 
 interface Props {
   product: Product;
@@ -15,9 +16,17 @@ const currency = new Intl.NumberFormat("vi-VN", {
   maximumFractionDigits: 0,
 });
 
+// Simple Profit Calculation Package, Part 6: Owner/Manager see Cost
+// Price + Selling Price + Profit; Sales see Selling Price only. Profit is
+// computed here, in memory, from the two existing fields already on
+// `product` - never stored, never a new field.
 export default function ProductBusinessInfo({ product }: Props) {
+  const canViewCostAndProfit = useIsOwnerOrManager();
+  const hasProfit = canViewCostAndProfit && typeof product.cost_price === "number" && typeof product.sale_price === "number";
+  const profit = hasProfit ? product.sale_price! - product.cost_price! : null;
+
   const hasAny =
-    typeof product.cost_price === "number" ||
+    (canViewCostAndProfit && typeof product.cost_price === "number") ||
     typeof product.sale_price === "number" ||
     !!product.discount ||
     product.location ||
@@ -37,7 +46,7 @@ export default function ProductBusinessInfo({ product }: Props) {
         <p className="text-sm text-muted-foreground text-center py-6">Chưa có thông tin kinh doanh.</p>
       ) : (
         <div className="grid grid-cols-2 gap-4">
-          {typeof product.cost_price === "number" && (
+          {canViewCostAndProfit && typeof product.cost_price === "number" && (
             <InfoItem icon={<Wallet className="w-4 h-4" />} label="Giá vốn">
               {currency.format(product.cost_price)}
             </InfoItem>
@@ -46,6 +55,12 @@ export default function ProductBusinessInfo({ product }: Props) {
           {typeof product.sale_price === "number" && (
             <InfoItem icon={<Wallet className="w-4 h-4" />} label="Giá bán">
               {currency.format(product.sale_price)}
+            </InfoItem>
+          )}
+
+          {profit !== null && (
+            <InfoItem icon={<Wallet className="w-4 h-4" />} label="Lãi / Lỗ">
+              {currency.format(profit)}
             </InfoItem>
           )}
 

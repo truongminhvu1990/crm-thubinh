@@ -89,6 +89,7 @@ export default function CampaignListPage() {
           </p>
         </div>
         <Button
+          data-testid="marketing-campaign-add-button"
           onClick={() => {
             setEditingCampaign(null);
             setModalOpen(true);
@@ -102,6 +103,7 @@ export default function CampaignListPage() {
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="flex-1">
           <SearchInput
+            data-testid="marketing-campaign-search-input"
             placeholder="Tìm theo tên chiến dịch..."
             value={search}
             onChange={(e) => {

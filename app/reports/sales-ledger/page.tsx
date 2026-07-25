@@ -4,9 +4,11 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Download, ShieldCheck } from "lucide-react";
 import { SalesLedgerFilters as Filters, SalesLedgerRow, SalesLedgerSummary as Summary } from "@/types/salesLedger";
-import { getSalesLedgerPage, getSalesLedgerSummary, withGlobalDateRange, getAllFilteredRowsForExport } from "@/lib/salesLedger/salesLedger.service";
+import { withGlobalDateRange, getAllFilteredRowsForExport } from "@/lib/salesLedger/salesLedger.service";
 import { exportSalesLedgerToExcel } from "@/lib/salesLedger/salesLedgerExport";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
+import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
+import { getProductById } from "@/lib/product.service";
 import { exclusiveEndToInclusiveTo } from "@/lib/reports/drilldown";
 import GlobalDateFilter from "@/components/shared/GlobalDateFilter";
 import PageViewingLabel from "@/components/shared/PageViewingLabel";
@@ -23,6 +25,31 @@ const DEFAULT_FILTERS: Filters = {
   sortDirection: "desc",
   page: 1,
 };
+
+const EMPTY_SUMMARY: Summary = { totalTransactions: 0, totalRevenue: 0, totalCommission: 0, averageSale: 0 };
+
+function buildSalesLedgerQuery(filters: Filters): string {
+  const params = new URLSearchParams();
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  if (filters.search) params.set("search", filters.search);
+  if (filters.customer) params.set("customer", filters.customer);
+  if (filters.salespersonId) params.set("salespersonId", filters.salespersonId);
+  if (filters.productCode) params.set("productCode", filters.productCode);
+  if (filters.productName) params.set("productName", filters.productName);
+  if (filters.productCategory) params.set("productCategory", filters.productCategory);
+  if (filters.minAmount !== undefined) params.set("minAmount", String(filters.minAmount));
+  if (filters.maxAmount !== undefined) params.set("maxAmount", String(filters.maxAmount));
+  if (filters.commissionStatus) params.set("commissionStatus", filters.commissionStatus);
+  if (filters.entrySource) params.set("entrySource", filters.entrySource);
+  if (filters.createdBy) params.set("createdBy", filters.createdBy);
+  if (filters.updatedBy) params.set("updatedBy", filters.updatedBy);
+  if (filters.duplicateOnly) params.set("duplicateOnly", "true");
+  params.set("sortField", filters.sortField);
+  params.set("sortDirection", filters.sortDirection);
+  params.set("page", String(filters.page));
+  return params.toString();
+}
 
 export default function SalesLedgerPage() {
   return (
@@ -77,6 +104,15 @@ function SalesLedgerPageInner() {
   const [isLoading, setIsLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
 
+  // Simple Profit Calculation Package, Part 5: Owner/Manager see Cost/
+  // Profit per row; Sales don't. Cost isn't on the sales_ledger view itself
+  // (only sale_amount/commission), so it's looked up from the existing
+  // products table for just the current page's rows - bounded to at most
+  // SALES_LEDGER_PAGE_SIZE distinct products, computed in memory, nothing
+  // stored, nothing added to the view/query.
+  const canViewCostAndProfit = useIsOwnerOrManager();
+  const [costByProductId, setCostByProductId] = useState<Map<string, number>>(new Map());
+
   // Data Verification Center (Sprint v2.3.0), Feature 1 - Normal Mode is
   // the default and looks/behaves exactly as before; toggling this on only
   // reveals additional filters/columns, it never changes what Normal Mode
@@ -108,10 +144,13 @@ function SalesLedgerPageInner() {
 
   async function load() {
     setIsLoading(true);
-    const [page, summaryData] = await Promise.all([getSalesLedgerPage(filters), getSalesLedgerSummary(filters)]);
-    setRows(page.rows);
-    setTotalCount(page.totalCount);
-    setSummary(summaryData);
+    const res = await fetch(`/api/sales-ledger?${buildSalesLedgerQuery(filters)}`);
+    const data: { rows: SalesLedgerRow[]; totalCount: number; summary: Summary } = res.ok
+      ? await res.json()
+      : { rows: [], totalCount: 0, summary: EMPTY_SUMMARY };
+    setRows(data.rows);
+    setTotalCount(data.totalCount);
+    setSummary(data.summary);
     setIsLoading(false);
   }
 
@@ -119,6 +158,30 @@ function SalesLedgerPageInner() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(localFilters), range?.start, range?.end]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!canViewCostAndProfit || rows.length === 0) {
+      queueMicrotask(() => {
+        if (!cancelled) setCostByProductId(new Map());
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    (async () => {
+      const uniqueProductIds = Array.from(new Set(rows.map((r) => r.product_id).filter((id): id is string => !!id)));
+      const products = await Promise.all(uniqueProductIds.map((id) => getProductById(id)));
+      const map = new Map<string, number>();
+      for (const p of products) {
+        if (p && typeof p.cost_price === "number") map.set(p.id!, p.cost_price);
+      }
+      if (!cancelled) setCostByProductId(map);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canViewCostAndProfit, rows]);
 
   async function handleExport() {
     setIsExporting(true);
@@ -155,6 +218,7 @@ function SalesLedgerPageInner() {
         <div className="flex items-center gap-2">
           <GlobalDateFilter />
           <Button
+            data-testid="sales-ledger-verification-mode-button"
             variant={verificationMode ? "primary" : "secondary"}
             size="md"
             onClick={() => setVerificationMode((v) => !v)}
@@ -163,7 +227,13 @@ function SalesLedgerPageInner() {
             <ShieldCheck className="w-4 h-4" />
             {verificationMode ? "Chế độ xác minh: BẬT" : "Chế độ xác minh"}
           </Button>
-          <Button variant="secondary" size="md" onClick={handleExport} disabled={isExporting || rows.length === 0}>
+          <Button
+            data-testid="report-export-button"
+            variant="secondary"
+            size="md"
+            onClick={handleExport}
+            disabled={isExporting || rows.length === 0}
+          >
             <Download className="w-4 h-4" />
             {isExporting ? "Đang xuất..." : "Xuất Excel"}
           </Button>
@@ -176,7 +246,13 @@ function SalesLedgerPageInner() {
 
       {verificationMode && <VerificationFilters filters={localFilters} onChange={setLocalFilters} />}
 
-      <SalesLedgerTable rows={rows} isLoading={isLoading} verificationMode={verificationMode} />
+      <SalesLedgerTable
+        rows={rows}
+        isLoading={isLoading}
+        verificationMode={verificationMode}
+        canViewCostAndProfit={canViewCostAndProfit}
+        costByProductId={costByProductId}
+      />
 
       <SalesLedgerPagination
         page={localFilters.page}

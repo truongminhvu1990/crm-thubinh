@@ -36,7 +36,13 @@ export default function ExportButtons<T,>({ sheetName, filename, columns, rows }
 
   return (
     <div className="flex items-center gap-2">
-      <Button variant="secondary" size="sm" onClick={handleExport} disabled={isExporting || rows.length === 0}>
+      <Button
+        data-testid="report-export-button"
+        variant="secondary"
+        size="sm"
+        onClick={handleExport}
+        disabled={isExporting || rows.length === 0}
+      >
         <Download className="w-3.5 h-3.5" />
         {isExporting ? "Đang xuất..." : "Xuất Excel"}
       </Button>

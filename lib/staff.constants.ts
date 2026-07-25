@@ -12,11 +12,15 @@ export const STAFF_ROLE_OPTIONS: Option[] = [
 export const STAFF_STATUS_OPTIONS: Option[] = [
   { value: "Active", label: "Đang làm việc" },
   { value: "Inactive", label: "Ngừng làm việc" },
+  { value: "Locked", label: "Bị khóa" },
+  { value: "Archived", label: "Đã lưu trữ" },
 ];
 
 export const STAFF_STATUS_BADGE_VARIANT: Record<StaffStatus, BadgeVariant> = {
   Active: "success",
   Inactive: "muted",
+  Locked: "destructive",
+  Archived: "muted",
 };
 
 export const STAFF_ROLE_BADGE_VARIANT: Record<StaffRole, BadgeVariant> = {

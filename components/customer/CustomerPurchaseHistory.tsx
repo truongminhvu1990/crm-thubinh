@@ -138,7 +138,7 @@ export default function CustomerPurchaseHistory({ customer }: Props) {
         <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
           <ShoppingBag className="w-5 h-5 text-primary" />
           Lịch sử mua hàng
-          <ScopeIndicator resource="revenue" />
+          <ScopeIndicator resource="purchase_history" />
         </h2>
         <Button variant="primary" size="sm" onClick={handleAdd}>
           <Plus className="w-4 h-4" />

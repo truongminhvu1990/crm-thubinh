@@ -108,6 +108,7 @@ export default function RoleListPage() {
           <p className="text-muted-foreground mt-1.5 text-sm">{roles.length} vai trò</p>
         </div>
         <Button
+          data-testid="permission-role-add-button"
           variant="primary"
           onClick={() => {
             setEditingRole(null);
@@ -123,6 +124,7 @@ export default function RoleListPage() {
 
       <div className="mb-4 max-w-sm">
         <SearchInput
+          data-testid="permission-role-search-input"
           placeholder="Tìm theo tên hoặc mã vai trò..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}

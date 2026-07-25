@@ -34,7 +34,7 @@ export default function OrderLineItemsTable({ items, editable = false, onRemove 
 
   return (
     <div className="overflow-x-auto -mx-1">
-      <table className="w-full text-sm">
+      <table data-testid="order-items-table" className="w-full text-sm">
         <thead>
           <tr className="border-b border-border text-xs text-muted-foreground uppercase tracking-wide">
             <th className="text-left font-semibold px-1 py-2">Sản phẩm</th>

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Staff } from "@/types/staff";
-import { Edit2, Trash2, Phone, Users } from "lucide-react";
+import { Edit2, Archive, Phone, Users } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 import AlertDialog from "@/components/ui/AlertDialog";
 import Avatar from "@/components/ui/Avatar";
@@ -19,12 +19,12 @@ import { labelFor } from "@/lib/customer.constants";
 interface Props {
   staffList: Staff[];
   onEdit: (staff: Staff) => void;
-  onDelete: (staff: Staff) => void;
+  onArchive: (staff: Staff) => void;
   isLoading?: boolean;
 }
 
-export default function StaffTable({ staffList, onEdit, onDelete, isLoading = false }: Props) {
-  const [pendingDelete, setPendingDelete] = useState<Staff | null>(null);
+export default function StaffTable({ staffList, onEdit, onArchive, isLoading = false }: Props) {
+  const [pendingArchive, setPendingArchive] = useState<Staff | null>(null);
 
   if (isLoading) {
     return (
@@ -47,7 +47,7 @@ export default function StaffTable({ staffList, onEdit, onDelete, isLoading = fa
 
   return (
     <div className="overflow-x-auto bg-card rounded-xl border border-border shadow-sm">
-      <table className="w-full min-w-[900px]">
+      <table data-testid="staff-table" className="w-full min-w-[900px]">
         <thead>
           <tr className="border-b border-border">
             <th className="px-5 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -119,13 +119,15 @@ export default function StaffTable({ staffList, onEdit, onDelete, isLoading = fa
                   >
                     <Edit2 className="w-4 h-4 text-primary" />
                   </button>
-                  <button
-                    onClick={() => setPendingDelete(staff)}
-                    className="p-2 hover:bg-destructive/10 rounded-lg transition-colors"
-                    title="Xóa"
-                  >
-                    <Trash2 className="w-4 h-4 text-destructive" />
-                  </button>
+                  {staff.status !== "Archived" && (
+                    <button
+                      onClick={() => setPendingArchive(staff)}
+                      className="p-2 hover:bg-destructive/10 rounded-lg transition-colors"
+                      title="Lưu trữ"
+                    >
+                      <Archive className="w-4 h-4 text-destructive" />
+                    </button>
+                  )}
                 </div>
               </td>
             </tr>
@@ -134,17 +136,19 @@ export default function StaffTable({ staffList, onEdit, onDelete, isLoading = fa
       </table>
 
       <AlertDialog
-        open={!!pendingDelete}
-        title="Xóa nhân viên?"
+        testId="staff-archive"
+        open={!!pendingArchive}
+        title="Lưu trữ nhân viên?"
         description={
-          pendingDelete
-            ? `Bạn có chắc muốn xóa "${pendingDelete.full_name}"? Hành động này không thể hoàn tác.`
+          pendingArchive
+            ? `"${pendingArchive.full_name}" sẽ chuyển sang trạng thái Đã lưu trữ. Lịch sử (hoa hồng, khách hàng phụ trách, nhật ký hoạt động) được giữ nguyên - nhân viên không bị xóa.`
             : undefined
         }
-        onOpenChange={(open) => !open && setPendingDelete(null)}
+        confirmLabel="Lưu trữ"
+        onOpenChange={(open) => !open && setPendingArchive(null)}
         onConfirm={() => {
-          if (pendingDelete) onDelete(pendingDelete);
-          setPendingDelete(null);
+          if (pendingArchive) onArchive(pendingArchive);
+          setPendingArchive(null);
         }}
       />
     </div>

@@ -5,9 +5,9 @@ import { UserPlus, Repeat, Scale, Wallet, Trophy } from "lucide-react";
 import Card from "@/components/ui/Card";
 import StatCard from "@/components/ui/StatCard";
 import { DateRange } from "@/lib/dateFilter";
-import { getCustomerSummary, getTopCustomers } from "@/lib/reports/reportsBI.service";
 import { buildSalesLedgerHref } from "@/lib/reports/drilldown";
 import { currency, NO_SALES_DATA_MESSAGE } from "@/lib/reports/format";
+import { rangeSearchParams } from "@/lib/reports/reportsApiClient";
 import { CustomerSummary, TopCustomerRow } from "@/types/reportsBI";
 import AnalysisTable, { AnalysisColumn } from "@/components/reports/AnalysisTable";
 import ExportButtons from "@/components/reports/ExportButtons";
@@ -40,7 +40,11 @@ export default function CustomerAnalysisSection({ range }: Props) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([getCustomerSummary(range), getTopCustomers(range, 10)]).then(([summaryData, topRows]) => {
+    const rq = rangeSearchParams(range);
+    Promise.all([
+      fetch(`/api/reports/bi/customer-summary?${rq}`).then((res) => (res.ok ? res.json() : null)),
+      fetch(`/api/reports/bi/top-customers?${rq}&limit=10`).then((res) => (res.ok ? res.json() : [])),
+    ]).then(([summaryData, topRows]) => {
       setSummary(summaryData);
       setRows(topRows);
       setIsLoading(false);

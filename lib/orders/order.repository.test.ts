@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mock } from "node:test";
+import { BusinessTime } from "@/lib/businessTime";
 
 /**
  * Regression coverage for generateOrderNumber() (private to order.repository.ts,
@@ -62,11 +63,20 @@ test("generateOrderNumber (via createOrder): sequence and query shape", async (t
     created_by: "Jane",
   });
 
-  const today = new Date();
-  const datePart = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, "0")}${String(today.getDate()).padStart(2, "0")}`;
+  // Business Time Migration, Wave 1: both the order number's date prefix and
+  // order_date itself must come from BusinessTime (Vietnam business date),
+  // not a runtime-local `new Date()` - asserting against BusinessTime's own
+  // output (not a second, independently-computed date string) is the point:
+  // this test must not duplicate date logic either.
+  const todayString = BusinessTime.todayString();
+  const datePart = todayString.replace(/-/g, "");
 
   await t.test("computes the next sequence from the row count (3 existing -> 000004)", () => {
     assert.equal(order.order_number, `OD-${datePart}-000004`);
+  });
+
+  await t.test("sets order_date to the Vietnam business date", () => {
+    assert.equal(order.order_date, todayString);
   });
 
   await t.test("issues a plain GET select — no head/count on the counting query", () => {

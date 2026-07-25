@@ -9,5 +9,7 @@ export interface TagOption {
   id: string;
   category: TagCategory;
   value: string;
+  sort_order: number;
+  is_active: boolean;
   created_at?: string;
 }

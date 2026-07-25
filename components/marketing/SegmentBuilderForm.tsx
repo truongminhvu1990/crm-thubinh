@@ -173,8 +173,8 @@ export default function SegmentBuilderForm({ segmentId }: Props) {
     <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-6 items-start">
       <div className="space-y-6">
         <Card className="space-y-4">
-          <Input label="Tên phân khúc" value={name} onChange={(e) => setName(e.target.value)} placeholder="VD: Khách hàng VIP" />
-          <Input label="Mô tả" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Mô tả (tùy chọn)" />
+          <Input data-testid="marketing-segment-name-input" label="Tên phân khúc" value={name} onChange={(e) => setName(e.target.value)} placeholder="VD: Khách hàng VIP" />
+          <Input data-testid="marketing-segment-description-input" label="Mô tả" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Mô tả (tùy chọn)" />
 
           {!isEditing && (
             <div>
@@ -237,6 +237,7 @@ export default function SegmentBuilderForm({ segmentId }: Props) {
             <h3 className="font-semibold text-foreground">Khách hàng trong phân khúc</h3>
             <div className="relative">
               <SearchInput
+                data-testid="marketing-segment-member-search-input"
                 placeholder="Tìm khách hàng theo tên, mã, SĐT..."
                 value={memberSearch}
                 onChange={(e) => setMemberSearch(e.target.value)}
@@ -281,10 +282,10 @@ export default function SegmentBuilderForm({ segmentId }: Props) {
         )}
 
         <div className="flex gap-3">
-          <Button onClick={handleSave} isLoading={isSaving} disabled={!name.trim()}>
+          <Button data-testid="marketing-segment-save-button" onClick={handleSave} isLoading={isSaving} disabled={!name.trim()}>
             Lưu
           </Button>
-          <Button variant="secondary" onClick={() => router.back()}>
+          <Button data-testid="marketing-segment-cancel-button" variant="secondary" onClick={() => router.back()}>
             Hủy
           </Button>
         </div>

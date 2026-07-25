@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import { Gem } from "lucide-react";
 import { DateRange } from "@/lib/dateFilter";
-import { getProductAnalysis } from "@/lib/reports/reportsBI.service";
 import { buildSalesLedgerHref } from "@/lib/reports/drilldown";
 import { currency, formatPercent, NO_SALES_DATA_MESSAGE } from "@/lib/reports/format";
+import { rangeSearchParams } from "@/lib/reports/reportsApiClient";
 import { ProductAnalysisRow } from "@/types/reportsBI";
 import AnalysisTable, { AnalysisColumn } from "@/components/reports/AnalysisTable";
 import ExportButtons from "@/components/reports/ExportButtons";
@@ -41,10 +41,12 @@ export default function ProductAnalysisSection({ range }: Props) {
     // first load) - a range change just updates rows in place once the new
     // data arrives, rather than re-entering a loading state and flashing
     // the spinner over already-visible data.
-    getProductAnalysis(range, 10).then((data) => {
-      setRows(data);
-      setIsLoading(false);
-    });
+    fetch(`/api/reports/bi/product-analysis?${rangeSearchParams(range)}&limit=10`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => {
+        setRows(data);
+        setIsLoading(false);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range?.start, range?.end]);
 

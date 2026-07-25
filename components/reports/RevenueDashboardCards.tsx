@@ -5,7 +5,6 @@ import Link from "next/link";
 import Card from "@/components/ui/Card";
 import { getDateRange } from "@/lib/dateFilter";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
-import { getRevenuePeriods, getRevenueSummary } from "@/lib/reports/reportsBI.service";
 import { buildSalesLedgerHref } from "@/lib/reports/drilldown";
 import { currency, NO_SALES_DATA_MESSAGE } from "@/lib/reports/format";
 import { RevenuePeriodKey, RevenuePeriodRow, RevenueSummary } from "@/types/reportsBI";
@@ -72,7 +71,9 @@ export default function RevenueDashboardCards() {
   const [customSummary, setCustomSummary] = useState<RevenueSummary | null>(null);
 
   useEffect(() => {
-    getRevenuePeriods().then(setPeriods);
+    fetch("/api/reports/bi/revenue-periods")
+      .then((res) => (res.ok ? res.json() : []))
+      .then(setPeriods);
   }, []);
 
   const hasCustomRange = !!(customFrom || customTo);
@@ -83,7 +84,9 @@ export default function RevenueDashboardCards() {
     // gates the Custom Range card on `hasCustomRange`, so leaving any stale
     // customSummary in state here is harmless (it simply never renders).
     if (!customRange) return;
-    getRevenueSummary(customRange).then(setCustomSummary);
+    fetch(`/api/reports/bi/revenue-summary?start=${customRange.start}&end=${customRange.end}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then(setCustomSummary);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customRange?.start, customRange?.end]);
 

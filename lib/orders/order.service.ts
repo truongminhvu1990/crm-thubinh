@@ -1,5 +1,8 @@
 import * as orderRepository from "./order.repository";
-import { OrderRepository, ScopingStaff } from "./order.repository";
+import { CommissionSnapshotInput, OrderRepository, PurchaseSnapshotInput, ScopingStaff } from "./order.repository";
+import { getStaffByName } from "@/lib/staff.service";
+import { getActiveCommissionRules } from "@/lib/commission/commission.repository";
+import { calculateCommissionAmount, findMatchingRule } from "@/lib/commission/commission.service";
 import {
   AddOrderItemInput,
   AddPaymentInput,
@@ -539,9 +542,70 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
         throw new OrderRuleViolationError(completionError);
       }
 
+      // Orders -> Sales Snapshot Integration: one customer_purchases row +
+      // one sales_commissions row per order_item, committed atomically
+      // with the status transition below (complete_order_with_snapshots
+      // RPC, order.repository.ts). Every business decision is made here,
+      // in TypeScript, reusing the existing commission calculation
+      // functions unchanged (Rule 9) - the RPC only ever writes what it's
+      // given, never recomputes anything.
+      //
+      // sale_price = order_item.line_total (Rule 4): the actual post-
+      // discount amount for THIS line only - order.total_amount/subtotal/
+      // discount_total are order-level rollups across every item and are
+      // never read here. source is NULL (Rule 2/Revision 2): Orders has
+      // no source field of its own, so nothing is inferred from Product.
+      const staff = await getStaffByName(order.sales_owner);
+      const commissionRules = await getActiveCommissionRules();
+
+      const purchaseRows: PurchaseSnapshotInput[] = [];
+      const commissionRows: CommissionSnapshotInput[] = [];
+
+      for (const item of items) {
+        const rule = findMatchingRule(commissionRules, item.line_total);
+        if (!rule) {
+          throw new OrderRuleViolationError(
+            `Không tìm thấy mức hoa hồng phù hợp cho dòng sản phẩm (mã: ${item.product_id})`
+          );
+        }
+
+        const purchaseId = crypto.randomUUID();
+        purchaseRows.push({
+          id: purchaseId,
+          customer_id: order.customer_id,
+          product_id: item.product_id,
+          sale_price: item.line_total,
+          // Business Time Migration, Wave 1: no change needed here -
+          // order.order_date is already the correct Vietnam business date
+          // for every order created after this package ships (set in
+          // order.repository.ts's createOrder() via BusinessTime), so this
+          // passthrough is correct by construction. Orders created before
+          // this package shipped keep whatever (UTC-derived) order_date
+          // they were given at creation - Historical rows are LOCKED, no
+          // backfill, so completing an old Draft/Reserved order today still
+          // snapshots that order's own order_date verbatim, same as before.
+          sale_date: order.order_date,
+          source: null,
+          salesperson: order.sales_owner,
+          salesperson_id: staff?.id ?? null,
+          order_item_id: item.id!,
+        });
+        commissionRows.push({
+          id: crypto.randomUUID(),
+          purchase_id: purchaseId,
+          customer_id: order.customer_id,
+          salesperson: order.sales_owner,
+          salesperson_id: staff?.id ?? null,
+          sale_amount: item.line_total,
+          commission_percent: rule.commission_percent,
+          commission_amount: calculateCommissionAmount(item.line_total, rule.commission_percent),
+          status: "Pending",
+        });
+      }
+
       // ORDERS_SPEC.md §7: "Reserved --(order Completed)--> Sold" — every
       // reserved line's product becomes Sold.
-      const updated = await repository.completeOrder(orderId);
+      const updated = await repository.completeOrder(orderId, purchaseRows, commissionRows);
       await Promise.all(items.map((item) => repository.markProductSold(item.product_id)));
       await repository.appendOrderEvent({
         order_id: orderId,

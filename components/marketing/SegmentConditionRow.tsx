@@ -3,6 +3,7 @@
 import { Trash2 } from "lucide-react";
 import Select from "@/components/ui/Select";
 import Input from "@/components/ui/Input";
+import CurrencyInput from "@/components/ui/CurrencyInput";
 import {
   SEGMENT_CONDITION_FIELDS,
   SEGMENT_CONDITION_OPERATOR_LABELS,
@@ -76,6 +77,24 @@ export default function SegmentConditionRow({ condition, staffOptions, onChange,
 
     if (operator === "between") {
       const [min, max] = Array.isArray(condition.value) ? condition.value : [0, 0];
+      // lifetime_revenue is a money field (VND) - purchase_count, the other
+      // "number" field sharing this operator, is a unit count and stays a
+      // plain number input.
+      if (condition.field === "lifetime_revenue") {
+        return (
+          <div className="flex items-center gap-2">
+            <CurrencyInput
+              value={min}
+              onChange={(value) => onChange({ ...condition, value: [value ?? 0, max] })}
+            />
+            <span className="text-muted-foreground text-sm">-</span>
+            <CurrencyInput
+              value={max}
+              onChange={(value) => onChange({ ...condition, value: [min, value ?? 0] })}
+            />
+          </div>
+        );
+      }
       return (
         <div className="flex items-center gap-2">
           <Input
@@ -116,6 +135,15 @@ export default function SegmentConditionRow({ condition, staffOptions, onChange,
     }
 
     if (meta.valueKind === "number") {
+      // Same money-vs-count split as the "between" branch above.
+      if (condition.field === "lifetime_revenue") {
+        return (
+          <CurrencyInput
+            value={typeof condition.value === "number" ? condition.value : 0}
+            onChange={(value) => onChange({ ...condition, value: value ?? 0 })}
+          />
+        );
+      }
       return (
         <Input
           type="number"

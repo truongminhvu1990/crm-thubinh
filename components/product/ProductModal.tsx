@@ -31,7 +31,7 @@ export default function ProductModal({
   if (!open) return null;
 
   return (
-    <Modal open={open} title={title} onClose={onClose}>
+    <Modal open={open} title={title} onClose={onClose} testId="product-modal">
       <div className="max-h-96 overflow-y-auto mb-6">
         <ProductForm product={product} setProduct={setProduct} errors={errors} />
       </div>
@@ -39,10 +39,10 @@ export default function ProductModal({
       {formError && <p className="text-destructive text-xs mb-4">{formError}</p>}
 
       <div className="flex justify-end gap-3">
-        <Button variant="secondary" onClick={onClose} disabled={isLoading}>
+        <Button data-testid="product-cancel-button" variant="secondary" onClick={onClose} disabled={isLoading}>
           Hủy
         </Button>
-        <Button variant="primary" onClick={onSave} isLoading={isLoading}>
+        <Button data-testid="product-save-button" variant="primary" onClick={onSave} isLoading={isLoading}>
           Lưu
         </Button>
       </div>

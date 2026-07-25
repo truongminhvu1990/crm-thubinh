@@ -12,6 +12,7 @@ import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
+import CurrencyInput from "@/components/ui/CurrencyInput";
 import Select from "@/components/ui/Select";
 import SearchInput from "@/components/ui/SearchInput";
 
@@ -185,6 +186,7 @@ export default function CreateOrderPage() {
           <h2 className="text-lg font-semibold text-foreground mb-4">Khách hàng</h2>
           <div className="relative">
             <SearchInput
+              data-testid="order-customer-search-input"
               placeholder="Tìm theo tên hoặc số điện thoại..."
               value={customerSearch}
               onChange={(e) => handleCustomerSearch(e.target.value)}
@@ -208,6 +210,7 @@ export default function CreateOrderPage() {
 
           <div className="mt-4">
             <Select
+              data-testid="order-sales-owner-select"
               label="Người phụ trách *"
               placeholder="Chọn người phụ trách"
               options={salesOwnerOptions}
@@ -221,6 +224,7 @@ export default function CreateOrderPage() {
           <h2 className="text-lg font-semibold text-foreground mb-4">Chọn sản phẩm</h2>
           <div className="relative">
             <SearchInput
+              data-testid="order-product-search-input"
               placeholder="Tìm sản phẩm..."
               value={productSearch}
               onChange={(e) => handleProductSearch(e.target.value)}
@@ -232,6 +236,7 @@ export default function CreateOrderPage() {
                   <button
                     key={product.id}
                     type="button"
+                    data-testid="order-add-item-button"
                     onClick={() => addToCart(product)}
                     className="w-full flex items-center justify-between gap-2 text-left px-3 py-2 text-sm hover:bg-muted/60 transition-colors"
                   >
@@ -271,17 +276,15 @@ export default function CreateOrderPage() {
                   </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <Input
+                    <CurrencyInput
                       label="Giá bán"
-                      type="number"
                       value={line.snapshot_sale_price}
-                      onChange={(e) => updateLine(index, { snapshot_sale_price: Number(e.target.value) })}
+                      onChange={(value) => updateLine(index, { snapshot_sale_price: value ?? 0 })}
                     />
-                    <Input
+                    <CurrencyInput
                       label="Giảm giá"
-                      type="number"
                       value={line.discount}
-                      onChange={(e) => updateLine(index, { discount: Number(e.target.value) })}
+                      onChange={(value) => updateLine(index, { discount: value ?? 0 })}
                     />
                     <Input
                       label="Số lượng"
@@ -338,10 +341,10 @@ export default function CreateOrderPage() {
         </Card>
 
         <div className="flex justify-end gap-3">
-          <Button variant="secondary" onClick={() => router.push("/orders")} disabled={isSaving}>
+          <Button data-testid="order-cancel-button" variant="secondary" onClick={() => router.push("/orders")} disabled={isSaving}>
             Hủy
           </Button>
-          <Button variant="primary" onClick={handleSave} isLoading={isSaving}>
+          <Button data-testid="order-save-button" variant="primary" onClick={handleSave} isLoading={isSaving}>
             Lưu đơn hàng
           </Button>
         </div>

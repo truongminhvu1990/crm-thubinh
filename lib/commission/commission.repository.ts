@@ -1,3 +1,4 @@
+import { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { CommissionRule, SalesCommission, CommissionStatus } from "@/types/commission";
 
@@ -42,8 +43,12 @@ export async function insertCommissionSnapshot(
   return { data: data as SalesCommission, error: null };
 }
 
-export async function getAllCommissions(): Promise<SalesCommission[]> {
-  const { data, error } = await supabase
+/** `client` defaults to the browser Supabase client so every existing caller
+ * keeps its exact current behavior unchanged (getDashboardCommissionStats,
+ * summarizeCommissions' callers). Backend API Foundation (Package 4C, Wave 2)
+ * passes a server client instead, from app/api/commissions/**. */
+export async function getAllCommissions(client: SupabaseClient = supabase): Promise<SalesCommission[]> {
+  const { data, error } = await client
     .from("sales_commissions")
     .select("*")
     .order("created_at", { ascending: false });
@@ -55,8 +60,11 @@ export async function getAllCommissions(): Promise<SalesCommission[]> {
   return data as SalesCommission[];
 }
 
-export async function getCommissionById(id: string): Promise<SalesCommission | null> {
-  const { data, error } = await supabase.from("sales_commissions").select("*").eq("id", id).single();
+export async function getCommissionById(
+  id: string,
+  client: SupabaseClient = supabase
+): Promise<SalesCommission | null> {
+  const { data, error } = await client.from("sales_commissions").select("*").eq("id", id).single();
 
   if (error) {
     console.error("Error fetching commission:", error);

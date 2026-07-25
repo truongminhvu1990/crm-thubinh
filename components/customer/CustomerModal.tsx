@@ -31,7 +31,7 @@ export default function CustomerModal({
   if (!open) return null;
 
   return (
-    <Modal open={open} title={title} onClose={onClose}>
+    <Modal open={open} title={title} onClose={onClose} testId="customer-modal">
       <div className="max-h-[65vh] overflow-y-auto mb-6 pr-1">
         <CustomerForm customer={customer} setCustomer={setCustomer} errors={errors} />
       </div>
@@ -40,6 +40,7 @@ export default function CustomerModal({
 
       <div className="flex justify-end gap-3">
         <Button
+          data-testid="customer-cancel-button"
           variant="secondary"
           onClick={onClose}
           disabled={isLoading}
@@ -47,6 +48,7 @@ export default function CustomerModal({
           Hủy
         </Button>
         <Button
+          data-testid="customer-save-button"
           variant="primary"
           onClick={onSave}
           isLoading={isLoading}

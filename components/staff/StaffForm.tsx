@@ -39,6 +39,7 @@ export default function StaffForm({ staff, setStaff, errors = {} }: Props) {
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <Input
+          data-testid="staff-code-input"
           label="Mã nhân viên *"
           placeholder="VD: NV1"
           value={staff.staff_code || ""}
@@ -47,6 +48,7 @@ export default function StaffForm({ staff, setStaff, errors = {} }: Props) {
           icon={<Hash className="w-4 h-4" />}
         />
         <Input
+          data-testid="staff-name-input"
           label="Họ tên *"
           placeholder="Tên nhân viên"
           value={staff.full_name || ""}
@@ -58,6 +60,7 @@ export default function StaffForm({ staff, setStaff, errors = {} }: Props) {
 
       <div className="grid grid-cols-2 gap-4">
         <Input
+          data-testid="staff-phone-input"
           label="Số điện thoại"
           placeholder="Số điện thoại"
           value={staff.phone || ""}
@@ -65,6 +68,7 @@ export default function StaffForm({ staff, setStaff, errors = {} }: Props) {
           icon={<Phone className="w-4 h-4" />}
         />
         <Input
+          data-testid="staff-email-input"
           label="Email *"
           type="email"
           placeholder="email@example.com"
@@ -77,6 +81,7 @@ export default function StaffForm({ staff, setStaff, errors = {} }: Props) {
 
       <div className="grid grid-cols-2 gap-4">
         <Select
+          data-testid="staff-role-select"
           label="Vai trò"
           placeholder="Chọn vai trò"
           options={STAFF_ROLE_OPTIONS}
@@ -84,6 +89,7 @@ export default function StaffForm({ staff, setStaff, errors = {} }: Props) {
           onChange={(e) => updateField("role", e.target.value)}
         />
         <Select
+          data-testid="staff-status-select"
           label="Trạng thái"
           placeholder="Chọn trạng thái"
           options={STAFF_STATUS_OPTIONS}
@@ -103,6 +109,7 @@ export default function StaffForm({ staff, setStaff, errors = {} }: Props) {
       <div className="grid grid-cols-2 gap-4">
         <div>
           <Select
+            data-testid="permission-role-select"
             label="Vai trò (mới)"
             placeholder="Chưa gán"
             options={roleOptions}

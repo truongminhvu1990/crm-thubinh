@@ -5,7 +5,6 @@ import Link from "next/link";
 import { ArrowUp, ArrowDown, Wallet, Receipt, Scale, UserPlus, Repeat, Gem, UserCheck, Percent, Trophy } from "lucide-react";
 import Card from "@/components/ui/Card";
 import { DateFilterOption, DateRange, getPreviousEquivalentRange } from "@/lib/dateFilter";
-import { getKpiDashboard } from "@/lib/reports/reportsBI.service";
 import { buildSalesLedgerHref } from "@/lib/reports/drilldown";
 import { currency, NO_SALES_DATA_MESSAGE } from "@/lib/reports/format";
 import { ComparisonValue, KpiDashboardData } from "@/types/reportsBI";
@@ -108,7 +107,18 @@ export default function KpiDashboard({ option, range }: Props) {
   const previousRange = getPreviousEquivalentRange(option, range);
 
   useEffect(() => {
-    getKpiDashboard(range, previousRange).then(setData);
+    const params = new URLSearchParams();
+    if (range) {
+      params.set("start", range.start);
+      params.set("end", range.end);
+    }
+    if (previousRange) {
+      params.set("prevStart", previousRange.start);
+      params.set("prevEnd", previousRange.end);
+    }
+    fetch(`/api/reports/bi/kpi?${params.toString()}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then(setData);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range?.start, range?.end, previousRange?.start, previousRange?.end]);
 

@@ -5,9 +5,10 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, ImageOff, Package, User, Wallet, Percent, CalendarDays, StickyNote } from "lucide-react";
 import { SalesLedgerRow } from "@/types/salesLedger";
-import { getSalesLedgerDetail, getSalesLedgerDetailImages } from "@/lib/salesLedger/salesLedger.service";
 import { COMMISSION_STATUS_LABEL, COMMISSION_STATUS_BADGE_VARIANT } from "@/lib/commission/commission.constants";
 import { formatDate } from "@/lib/utils";
+import { getProductById } from "@/lib/product.service";
+import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -28,16 +29,20 @@ export default function SalesLedgerDetailPage() {
   const [images, setImages] = useState<{ id: string; image_url: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Simple Profit Calculation Package, Part 5 - Owner/Manager only, looked
+  // up from the existing products table (sale_amount already on the row).
+  const canViewCostAndProfit = useIsOwnerOrManager();
+  const [costPrice, setCostPrice] = useState<number | null>(null);
+
   async function load() {
     if (!id) return;
     setIsLoading(true);
-    const data = await getSalesLedgerDetail(id);
-    setRow(data);
-    if (data?.product_id) {
-      setImages(await getSalesLedgerDetailImages(data.product_id));
-    } else {
-      setImages([]);
-    }
+    const res = await fetch(`/api/sales-ledger/${id}`);
+    const data: { row: SalesLedgerRow | null; images: { id: string; image_url: string }[] } = res.ok
+      ? await res.json()
+      : { row: null, images: [] };
+    setRow(data.row);
+    setImages(data.images);
     setIsLoading(false);
   }
 
@@ -45,6 +50,24 @@ export default function SalesLedgerDetailPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!canViewCostAndProfit || !row?.product_id) {
+      queueMicrotask(() => {
+        if (!cancelled) setCostPrice(null);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    getProductById(row.product_id).then((product) => {
+      if (!cancelled) setCostPrice(typeof product?.cost_price === "number" ? product.cost_price : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [canViewCostAndProfit, row?.product_id]);
 
   if (isLoading) {
     return (
@@ -138,6 +161,16 @@ export default function SalesLedgerDetailPage() {
                 ? `${currency.format(row.commission_amount)} (${row.commission_percent}%)`
                 : "—"}
             </InfoItem>
+            {canViewCostAndProfit && costPrice !== null && (
+              <>
+                <InfoItem icon={<Wallet className="w-4 h-4" />} label="Giá vốn">
+                  {currency.format(costPrice)}
+                </InfoItem>
+                <InfoItem icon={<Wallet className="w-4 h-4" />} label="Lãi / Lỗ">
+                  {currency.format(row.sale_amount - costPrice)}
+                </InfoItem>
+              </>
+            )}
             {row.note && (
               <InfoItem icon={<StickyNote className="w-4 h-4" />} label="Ghi chú">
                 {row.note}

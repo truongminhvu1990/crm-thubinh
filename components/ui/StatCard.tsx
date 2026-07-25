@@ -11,6 +11,8 @@ interface Props {
   placeholder?: boolean;
   hint?: string;
   badge?: ReactNode;
+  /** QA Test IDs Foundation - stable selector, e.g. "dashboard-revenue-card". */
+  testId?: string;
 }
 
 export default function StatCard({
@@ -21,9 +23,10 @@ export default function StatCard({
   placeholder = false,
   hint,
   badge,
+  testId,
 }: Props) {
   return (
-    <Card>
+    <Card testId={testId}>
       <div className="flex items-center justify-between">
         <div>
           <p className="text-muted-foreground text-sm flex items-center gap-2 flex-wrap">

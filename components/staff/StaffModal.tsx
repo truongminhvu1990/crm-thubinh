@@ -29,16 +29,16 @@ export default function StaffModal({
   if (!open) return null;
 
   return (
-    <Modal open={open} title={title} onClose={onClose}>
+    <Modal open={open} title={title} onClose={onClose} testId="staff-modal">
       <div className="max-h-96 overflow-y-auto mb-6">
         <StaffForm staff={staff} setStaff={setStaff} errors={errors} />
       </div>
 
       <div className="flex justify-end gap-3">
-        <Button variant="secondary" onClick={onClose} disabled={isLoading}>
+        <Button data-testid="staff-cancel-button" variant="secondary" onClick={onClose} disabled={isLoading}>
           Hủy
         </Button>
-        <Button variant="primary" onClick={onSave} isLoading={isLoading}>
+        <Button data-testid="staff-save-button" variant="primary" onClick={onSave} isLoading={isLoading}>
           Lưu
         </Button>
       </div>

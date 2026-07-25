@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { getOrderDetail } from "@/lib/orders/order.service";
 import { orderService } from "../../_service";
 import { handleOrderServiceError } from "../../_errors";
+import { authorizeOrderWrite } from "../../_authorization";
 
-/** ORDERS_UI.md §6 — Complete action. actor = created_by (Product Owner
- * rule), resolved from the parent order. */
-export async function POST(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+/** ORDERS_UI.md §6 — Complete action. Authorization Engine V2 (Package 4A) —
+ * Authentication/Permission/Data Scope enforced via authorizeOrderWrite
+ * before the write proceeds. actor = the current authenticated staff member
+ * performing this action (Product Owner review: not order.created_by). */
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
   try {
@@ -14,9 +17,12 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
-    const order = await orderService.completeOrder(id, detail.order.created_by);
+    const authResult = await authorizeOrderWrite(request, detail.order);
+    if ("error" in authResult) return authResult.error;
+
+    const order = await orderService.completeOrder(id, authResult.staff.full_name);
     return NextResponse.json(order);
   } catch (error) {
-    return handleOrderServiceError(error, _request.headers.get("x-vercel-id") ?? crypto.randomUUID());
+    return handleOrderServiceError(error, request.headers.get("x-vercel-id") ?? crypto.randomUUID());
   }
 }

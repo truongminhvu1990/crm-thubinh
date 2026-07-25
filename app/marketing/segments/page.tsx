@@ -71,7 +71,7 @@ export default function SegmentListPage() {
             <ScopeIndicator resource="marketing" />
           </p>
         </div>
-        <Button onClick={() => router.push("/marketing/segments/new")}>
+        <Button data-testid="marketing-segment-add-button" onClick={() => router.push("/marketing/segments/new")}>
           <Plus className="w-4 h-4" />
           Phân khúc mới
         </Button>
@@ -80,6 +80,7 @@ export default function SegmentListPage() {
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="flex-1">
           <SearchInput
+            data-testid="marketing-segment-search-input"
             placeholder="Tìm theo tên phân khúc..."
             value={search}
             onChange={(e) => {

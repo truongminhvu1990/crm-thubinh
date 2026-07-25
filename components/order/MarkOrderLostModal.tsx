@@ -45,7 +45,7 @@ export default function MarkOrderLostModal({ open, orderId, onClose, onSaved }: 
   }
 
   return (
-    <Modal open={open} title="Đánh dấu đơn hàng Lost" onClose={onClose}>
+    <Modal open={open} title="Đánh dấu đơn hàng Lost" onClose={onClose} testId="order-lost-modal">
       <p className="text-sm text-muted-foreground mb-4">
         Tất cả sản phẩm trong đơn sẽ được chuyển lại về trạng thái Có sẵn.
       </p>
@@ -53,6 +53,7 @@ export default function MarkOrderLostModal({ open, orderId, onClose, onSaved }: 
       {error && <div className="mb-4 rounded-lg bg-red-100 text-red-700 text-sm px-3 py-2">{error}</div>}
 
       <Select
+        data-testid="order-lost-reason-select"
         label="Lý do *"
         placeholder="Chọn lý do"
         options={LOST_REASON_OPTIONS}
@@ -61,10 +62,10 @@ export default function MarkOrderLostModal({ open, orderId, onClose, onSaved }: 
       />
 
       <div className="flex justify-end gap-3 mt-6">
-        <Button variant="secondary" onClick={onClose} disabled={isSaving}>
+        <Button data-testid="order-lost-cancel-button" variant="secondary" onClick={onClose} disabled={isSaving}>
           Hủy
         </Button>
-        <Button variant="danger" onClick={handleConfirm} isLoading={isSaving} disabled={!lostReason}>
+        <Button data-testid="order-lost-confirm-button" variant="danger" onClick={handleConfirm} isLoading={isSaving} disabled={!lostReason}>
           Đánh dấu Lost
         </Button>
       </div>

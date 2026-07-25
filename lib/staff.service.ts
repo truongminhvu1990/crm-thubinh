@@ -1,3 +1,4 @@
+import { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import { Staff } from "@/types/staff";
 import { Customer } from "@/types/customer";
@@ -25,8 +26,12 @@ function pickWritableFields(staff: Partial<Staff>): Partial<Staff> {
   return filteredData as Partial<Staff>;
 }
 
-export async function getStaffList(searchTerm?: string): Promise<Staff[]> {
-  let query = supabase.from("staff").select("*");
+/** `client` (Backend API Foundation, Package 4C, Wave 5 revision) - same
+ * injectable-dependency pattern as every other wave; defaults to the
+ * browser Supabase client so every existing caller (Settings' Roles/Teams
+ * pages, useStaffOptions, etc.) keeps its exact current behavior. */
+export async function getStaffList(searchTerm?: string, client: SupabaseClient = supabase): Promise<Staff[]> {
+  let query = client.from("staff").select("*");
 
   if (searchTerm) {
     query = query.or(
@@ -137,18 +142,16 @@ export async function getNextStaffCode(): Promise<string> {
 /** Staff Creation. Stores `email` as a plain column - validated required
  * and unique server-side, in this function, before any write (Production
  * Authentication Hotfix V2 - "move email validation into the Staff API,
- * never rely on UI validation only"; app/settings/staff/page.tsx's own
- * pre-check is UX-only now, not the enforcement boundary). Does NOT create
- * a Supabase Auth account or populate `auth_user_id`.
+ * never rely on UI validation only"). Does NOT create a Supabase Auth
+ * account or populate `auth_user_id`.
  *
- * TODO(future Auth integration, Production Authentication Hotfix V2
- * Package 6): creating a linked Auth account requires the Supabase Admin
- * API (`auth.admin.createUser`), which requires a service_role key this
- * project does not have configured today. Until that exists, a new staff
- * row's `auth_user_id` stays NULL, and that staff member resolves via the
- * email fallback in getCurrentStaffFromRequest()
- * (lib/permission/serverAuth.ts) until either that future feature runs or
- * 20260730_staff_link_auth_user.sql-style linking is re-run. */
+ * Superseded for new staff by Staff Identity & Authentication Foundation's
+ * POST /api/staff (lib/auth/createStaffWithAuth.ts), which is now the only
+ * allowed way to create a staff member (Business Rule 3 - never from the
+ * Supabase Dashboard, and every staff row must have an Auth account). Kept
+ * here only because updateStaff() below reuses validateStaffEmail()/
+ * pickWritableFields() - not called from anywhere for new staff creation
+ * anymore. */
 export async function addStaff(staff: Partial<Staff>) {
   const emailError = await validateStaffEmail(staff.email);
   if (emailError) return { data: null, error: emailError };
@@ -186,10 +189,20 @@ export async function updateStaff(id: string, staff: Partial<Staff>) {
   return { data: data as Staff, error: null };
 }
 
-export async function deleteStaff(id: string) {
-  const { error } = await supabase.from("staff").delete().eq("id", id);
-  if (error) console.error("Error deleting staff member:", error);
-  return error;
+/** Staff Identity & Authentication Foundation, Required Change 2 - Business
+ * Rule 6: staff can never be deleted, only moved to a terminal status.
+ * Replaces the old deleteStaff() (hard `.delete()`), which is no longer
+ * exposed anywhere - preserves the row (and its history: activity_logs,
+ * commissions, assigned customers, etc. all keep their FK intact) instead
+ * of removing it. */
+export async function archiveStaff(id: string) {
+  const { error } = await supabase.from("staff").update({ status: "Archived" }).eq("id", id);
+  if (error) {
+    console.error("Error archiving staff member:", error);
+    return error;
+  }
+  await logActivity({ staff_id: id, action: "archived", entity: "staff", entity_id: id });
+  return null;
 }
 
 /** Feature 4 - Customer Assignment: customers whose one primary staff is
@@ -289,12 +302,16 @@ export interface TopSalesStaffEntry {
   commission: number;
 }
 
-/** Feature 9 - Dashboard "Top Sales Staff" widget. Ranked by revenue desc. */
-export async function getTopSalesStaff(limit = 5): Promise<TopSalesStaffEntry[]> {
+/** Feature 9 - Dashboard "Top Sales Staff" widget. Ranked by revenue desc.
+ * `client` (Backend API Foundation, Package 4C, Wave 5 revision) - same
+ * injectable-dependency pattern as every other wave; defaults to the
+ * browser Supabase client. Threaded into getStaffList() too so every query
+ * this function makes goes through the same client. */
+export async function getTopSalesStaff(limit = 5, client: SupabaseClient = supabase): Promise<TopSalesStaffEntry[]> {
   const [staffList, purchasesRes, commissionsRes] = await Promise.all([
-    getStaffList(),
-    supabase.from("customer_purchases").select("salesperson_id, salesperson, sale_price"),
-    supabase.from("sales_commissions").select("salesperson_id, salesperson, commission_amount"),
+    getStaffList(undefined, client),
+    client.from("customer_purchases").select("salesperson_id, salesperson, sale_price"),
+    client.from("sales_commissions").select("salesperson_id, salesperson, commission_amount"),
   ]);
 
   const purchases =

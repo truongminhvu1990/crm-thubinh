@@ -15,6 +15,41 @@ import {
 import { computeLineTotal } from "./order.rules";
 import { Staff } from "@/types/staff";
 import { applyDataScopeByName } from "@/lib/permission/dataScope";
+import { CommissionStatus } from "@/types/commission";
+import { BusinessTime } from "@/lib/businessTime";
+
+/** Orders -> Sales Snapshot Integration. One element per order_item, built
+ * by order.service.ts's completeOrder() and handed to the
+ * complete_order_with_snapshots RPC below as-is - every field here is
+ * already a business decision made in TypeScript (Rules 3-7), this type
+ * carries no logic of its own. */
+export interface PurchaseSnapshotInput {
+  id: string;
+  customer_id: string;
+  product_id: string;
+  sale_price: number;
+  sale_date: string;
+  source: string | null;
+  salesperson: string | null;
+  salesperson_id: string | null;
+  order_item_id: string;
+}
+
+/** Same role as PurchaseSnapshotInput, for the paired sales_commissions
+ * row - commission_percent/commission_amount are already the output of
+ * the real findMatchingRule()/calculateCommissionAmount() (Rule 9), never
+ * recomputed here or in the RPC. */
+export interface CommissionSnapshotInput {
+  id: string;
+  purchase_id: string;
+  customer_id: string;
+  salesperson: string | null;
+  salesperson_id: string | null;
+  sale_amount: number;
+  commission_percent: number;
+  commission_amount: number;
+  status: CommissionStatus;
+}
 
 /** Data Scope Rollout (Sprint v4.1), Package 2 - the shape `findAllOrders`/
  * `findOrderById` need to resolve Own/Team scope; optional everywhere it's
@@ -210,10 +245,15 @@ export async function findRevenueRecognizedOrders(start: string, end: string): P
  * flagged here, not hidden, and must be replaced once the atomic function
  * lands. Format per ORDERS_SPEC.md §3 Revision 5: `OD-{YYYYMMDD}-{6-digit
  * sequence}`, daily-reset.
+ *
+ * Business Time Migration, Wave 1: "today" here MUST be the Vietnam
+ * business date (Locked Product Owner decision, Business Time Foundation)
+ * — this runs server-side (POST /api/orders), where `new Date()` is the
+ * Node/Vercel runtime's clock, confirmed UTC. Sourced from
+ * BusinessTime.todayString() only — no separate date computation.
  */
 async function generateOrderNumber(): Promise<string> {
-  const now = new Date();
-  const datePart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+  const datePart = BusinessTime.todayString().replace(/-/g, "");
   const prefix = `OD-${datePart}-`;
 
   const { data, error } = await supabase
@@ -249,12 +289,22 @@ function pickOrderWritableFields(changes: Partial<Order>): Partial<Order> {
   return filtered as Partial<Order>;
 }
 
+/** Business Time Migration, Wave 1: `order_date` is set explicitly here
+ * (Vietnam business date, via BusinessTime) rather than left to the
+ * `orders.order_date` column's own DB default — the column default still
+ * exists (also migrated to Vietnam time, see
+ * 20260805_business_time_orders_write_path.sql, defense-in-depth for any
+ * non-app insert path) but this is now the one place that actually
+ * determines the value for every order the app creates. `CreateOrderInput`
+ * itself is unchanged — this is an internal repository detail, not a new
+ * request field. */
 export async function createOrder(input: CreateOrderInput): Promise<Order> {
   const order_number = await generateOrderNumber();
+  const order_date = BusinessTime.todayString();
 
   const { data, error } = await supabase
     .from("orders")
-    .insert({ ...input, order_number })
+    .insert({ ...input, order_number, order_date })
     .select()
     .single();
 
@@ -365,17 +415,29 @@ export async function cancelReservation(orderId: string): Promise<Order> {
 /** Draft or Reserved → Completed only (both are valid sources per
  * ORDERS_UI.md §6's action table) — same WHERE-guarded pattern, using
  * `.in()` since there are two valid starting statuses instead of one. */
-export async function completeOrder(orderId: string): Promise<Order> {
-  const { data, error } = await supabase
-    .from("orders")
-    .update({ order_status: "Completed" })
-    .eq("id", orderId)
-    .in("order_status", ["Draft", "Reserved"])
-    .select()
-    .single();
+/** Orders -> Sales Snapshot Integration. Replaces the old plain
+ * `UPDATE orders SET order_status = 'Completed' ...` with a single call to
+ * complete_order_with_snapshots (supabase/migrations/20260802_orders_
+ * sales_snapshot_integration.sql) - the Draft/Reserved-only guard moved
+ * into that function's own UPDATE...WHERE, so behavior on an
+ * already-Completed order is unchanged (still throws), it's just enforced
+ * inside the same transaction as the two new inserts now instead of a
+ * separate statement. Purchase/commission rows are pure data by the time
+ * they reach here - order.service.ts has already made every business
+ * decision (which rule matched, what the amount is) before calling this. */
+export async function completeOrder(
+  orderId: string,
+  purchaseRows: PurchaseSnapshotInput[],
+  commissionRows: CommissionSnapshotInput[]
+): Promise<Order> {
+  const { data, error } = await supabase.rpc("complete_order_with_snapshots", {
+    p_order_id: orderId,
+    p_purchase_rows: purchaseRows,
+    p_commission_rows: commissionRows,
+  });
 
   if (error) {
-    console.error("Error completing order:", error);
+    console.error("Error completing order with snapshots:", error);
     throw new OrderRepositoryError("completeOrder", error);
   }
 
@@ -728,7 +790,11 @@ export interface OrderWriteRepository {
   markProductSold(productId: string): Promise<void>;
   addPayment(input: AddPaymentInput): Promise<OrderPayment>;
   markOrderLost(input: MarkOrderLostInput): Promise<Order>;
-  completeOrder(orderId: string): Promise<Order>;
+  completeOrder(
+    orderId: string,
+    purchaseRows: PurchaseSnapshotInput[],
+    commissionRows: CommissionSnapshotInput[]
+  ): Promise<Order>;
   reassignSalesOwner(input: ReassignSalesOwnerInput): Promise<Order>;
   appendOrderEvent(event: Omit<OrderEvent, "id" | "event_timestamp">): Promise<OrderEvent>;
   /** Persists rollup fields the service layer recomputes after every

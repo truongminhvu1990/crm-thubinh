@@ -1,5 +1,7 @@
+import { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import { Customer, CustomerNote } from "@/types/customer";
+import { Staff } from "@/types/staff";
 import { parseMultiValue, serializeMultiValue, generateUUID, formatDate } from "./utils";
 import { CUSTOMER_STATUS_OPTIONS, labelFor, getFollowUpUrgency, FOLLOWUP_COMPLETED_MESSAGE } from "./customer.constants";
 import { logActivity } from "./activityLog.service";
@@ -59,12 +61,19 @@ function pickWritableFields(
   return filteredData as Partial<Customer>;
 }
 
-/** Data Scope Rollout (Sprint v4.1), Package 1 - Own/Team/All applied here,
- * during query construction, before the request is sent (never a
- * client-side post-filter, DATA_SCOPE_ROLLOUT_DATABASE.md §5). Unscoped
- * (`applyDataScope` skipped) only when no signed-in staff can be resolved
- * at all - the same "no staff -> no data" posture already used everywhere
- * `getCurrentStaff()` is called. */
+/** Customer Visibility Engine (Package 4B, LOCKED architecture decision):
+ * Customer Profile is a shared company asset - anyone with Customer
+ * permission may search/view/select any customer, regardless of role or
+ * team. This is deliberately UNSCOPED - no Own/Team/All restriction is
+ * ever applied to Customer Profile reads, unlike Purchase History
+ * (lib/purchase.service.ts / lib/permission/purchaseHistoryVisibility.ts),
+ * which is scoped independently. Prior to Package 4B this function applied
+ * `applyDataScope(..., "customers")` - the same admin-configurable
+ * mechanism used for ownership-restricted resources - which happened to be
+ * harmless only because `role_data_scopes` for "customers" is seeded 100%
+ * 'all'; narrowing it via the Data Scope Matrix would have silently broken
+ * this rule. Removed entirely rather than left "correctly configured," so
+ * there is no admin setting that can violate it. */
 export async function getCustomers(
   searchTerm?: string,
   vipLevel?: string
@@ -81,9 +90,6 @@ export async function getCustomers(
     query = query.eq("vip_level", vipLevel);
   }
 
-  const staff = await getCurrentStaff();
-  if (staff) query = (await applyDataScope(query, staff, "customers")).query;
-
   const { data, error } = await query.order("created_at", {
     ascending: false,
   });
@@ -96,19 +102,12 @@ export async function getCustomers(
   return data as Customer[];
 }
 
+/** See getCustomers() above - Customer Profile is always fully shared,
+ * never Data-Scope-restricted (Package 4B). */
 export async function getCustomerById(id: string): Promise<Customer | null> {
-  let query = supabase.from("customers").select("*").eq("id", id);
-
-  const staff = await getCurrentStaff();
-  if (staff) query = (await applyDataScope(query, staff, "customers")).query;
-
-  const { data, error } = await query.single();
+  const { data, error } = await supabase.from("customers").select("*").eq("id", id).single();
 
   if (error) {
-    // Scope-excluded rows and genuinely nonexistent ids both land here as
-    // the same "no matching row" error - deliberate, not a bug
-    // (DATA_SCOPE_ROLLOUT_UI.md §2: out-of-scope access must read as "not
-    // found," never a distinguishable "forbidden").
     console.error("Error fetching customer:", error);
     return null;
   }
@@ -370,12 +369,23 @@ export async function completeFollowUp(id: string, currentNotes: CustomerNote[])
 /** Data Scope Rollout (Sprint v4.1), Package 5 - Dashboard's customer-count
  * widget inherits Customers' own resolved scope (DATA_SCOPE_ROLLOUT_UI.md
  * §6), the same scope Package 1 already applies to the Customer List -
- * never a separately-invented Dashboard-only rule. */
-export async function getCustomerStats() {
-  let query = supabase.from("customers").select("*");
+ * never a separately-invented Dashboard-only rule.
+ *
+ * `client`/`staff` (Backend API Foundation, Package 4C, Wave 5 revision) -
+ * same injectable-dependency pattern as every other wave: `client` defaults
+ * to the browser Supabase client, `staff` is a sentinel (`undefined` means
+ * "resolve it yourself via getCurrentStaff(), exactly as before" - Browser
+ * Authentication Context; an explicit `Staff | null` means "use this value,
+ * I already resolved it" - what app/api/dashboard/** now passes via
+ * getCurrentStaffFromRequest(), the same Server Authentication Context
+ * pattern Hotfix 3A/4A already established). No change to the Data Scope
+ * call itself (applyDataScope, "customers" resource) - only how "current
+ * staff" is identified, and which client executes the query. */
+export async function getCustomerStats(client: SupabaseClient = supabase, staff?: Staff | null) {
+  let query = client.from("customers").select("*");
 
-  const staff = await getCurrentStaff();
-  if (staff) query = (await applyDataScope(query, staff, "customers")).query;
+  const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
+  if (resolvedStaff) query = (await applyDataScope(query, resolvedStaff, "customers")).query;
 
   const { data, error } = await query;
 
@@ -413,8 +423,8 @@ export interface FollowUpSummaryCounts {
 /** Powers the Dashboard "Follow-up Summary" widget and the Sidebar's
  * overdue badge (Follow-up Center, Sprint v1.1.1). Only the date column is
  * selected - this runs on every page via the Sidebar, so it stays cheap. */
-export async function getFollowUpSummaryCounts(): Promise<FollowUpSummaryCounts> {
-  const { data, error } = await supabase.from("customers").select("next_followup_date");
+export async function getFollowUpSummaryCounts(client: SupabaseClient = supabase): Promise<FollowUpSummaryCounts> {
+  const { data, error } = await client.from("customers").select("next_followup_date");
 
   if (error || !data) {
     return { overdue: 0, today: 0, next7Days: 0 };

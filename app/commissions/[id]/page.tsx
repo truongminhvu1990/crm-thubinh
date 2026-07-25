@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Clock3, UserPlus, BadgeCheck, CheckCircle2 } from "lucide-react";
 import { SalesCommission } from "@/types/commission";
-import { getCommissionDetail } from "@/lib/commission/commission.service";
 import { COMMISSION_STATUS_LABEL, COMMISSION_STATUS_BADGE_VARIANT } from "@/lib/commission/commission.constants";
 import { formatDate } from "@/lib/utils";
 import Card from "@/components/ui/Card";
@@ -36,7 +35,8 @@ export default function CommissionDetailPage() {
   async function load() {
     if (!id) return;
     setIsLoading(true);
-    const data = await getCommissionDetail(id);
+    const res = await fetch(`/api/commissions/${id}`);
+    const data: SalesCommission | null = res.ok ? await res.json() : null;
     setCommission(data);
     setIsLoading(false);
   }

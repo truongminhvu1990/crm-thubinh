@@ -25,6 +25,7 @@ export default function FollowUpRescheduleModal({ open, mode, isSaving, onClose,
       open={open}
       title={mode === "complete" ? "Đặt lịch chăm sóc tiếp theo?" : "Đổi lịch chăm sóc"}
       onClose={onClose}
+      testId="followup-reschedule-modal"
     >
       {mode === "complete" && (
         <p className="text-sm text-muted-foreground mb-4">
@@ -35,11 +36,18 @@ export default function FollowUpRescheduleModal({ open, mode, isSaving, onClose,
       <div className="space-y-3">
         <div>
           <label className="block text-sm font-medium text-foreground mb-1.5">Ngày follow-up tiếp theo</label>
-          <Input type="date" value={date} disabled={isSaving} onChange={(e) => setDate(e.target.value)} />
+          <Input
+            data-testid="followup-date-input"
+            type="date"
+            value={date}
+            disabled={isSaving}
+            onChange={(e) => setDate(e.target.value)}
+          />
         </div>
         <div>
           <label className="block text-sm font-medium text-foreground mb-1.5">Ghi chú (không bắt buộc)</label>
           <Input
+            data-testid="followup-note-input"
             placeholder="Ghi chú follow-up..."
             value={note}
             disabled={isSaving}
@@ -50,15 +58,20 @@ export default function FollowUpRescheduleModal({ open, mode, isSaving, onClose,
 
       <div className="flex justify-end gap-2 mt-5">
         {mode === "complete" ? (
-          <Button variant="secondary" onClick={onClose} disabled={isSaving}>
+          <Button data-testid="followup-skip-button" variant="secondary" onClick={onClose} disabled={isSaving}>
             Bỏ qua
           </Button>
         ) : (
-          <Button variant="secondary" onClick={onClose} disabled={isSaving}>
+          <Button data-testid="followup-cancel-button" variant="secondary" onClick={onClose} disabled={isSaving}>
             Hủy
           </Button>
         )}
-        <Button variant="primary" onClick={() => onSave(date, note.trim())} disabled={isSaving || !date}>
+        <Button
+          data-testid="followup-save-button"
+          variant="primary"
+          onClick={() => onSave(date, note.trim())}
+          disabled={isSaving || !date}
+        >
           Lưu lịch hẹn
         </Button>
       </div>

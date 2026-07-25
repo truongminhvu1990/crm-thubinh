@@ -52,10 +52,11 @@ export default function ReassignSalesOwnerModal({ open, orderId, currentOwner, o
   }
 
   return (
-    <Modal open={open} title="Đổi người phụ trách" onClose={onClose}>
+    <Modal open={open} title="Đổi người phụ trách" onClose={onClose} testId="order-reassign-owner-modal">
       {error && <div className="mb-4 rounded-lg bg-red-100 text-red-700 text-sm px-3 py-2">{error}</div>}
 
       <Select
+        data-testid="order-reassign-owner-select"
         label="Người phụ trách *"
         placeholder="Chọn người phụ trách"
         options={salesOwnerOptions}
@@ -64,10 +65,10 @@ export default function ReassignSalesOwnerModal({ open, orderId, currentOwner, o
       />
 
       <div className="flex justify-end gap-3 mt-6">
-        <Button variant="secondary" onClick={onClose} disabled={isSaving}>
+        <Button data-testid="order-reassign-owner-cancel-button" variant="secondary" onClick={onClose} disabled={isSaving}>
           Hủy
         </Button>
-        <Button variant="primary" onClick={handleSave} isLoading={isSaving}>
+        <Button data-testid="order-reassign-owner-save-button" variant="primary" onClick={handleSave} isLoading={isSaving}>
           Lưu
         </Button>
       </div>

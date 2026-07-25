@@ -3,7 +3,7 @@ import { CustomerPurchase, CustomerPurchaseSummary } from "@/types/purchase";
 import { createSnapshotForPurchase } from "@/lib/commission/commission.service";
 import { getStaffByName } from "@/lib/staff.service";
 import { getCurrentStaff } from "@/lib/permission";
-import { applyDataScopeWithFallback } from "@/lib/permission/dataScope";
+import { applyPurchaseHistoryVisibility } from "@/lib/permission/purchaseHistoryVisibility";
 
 const WRITABLE_FIELDS: (keyof CustomerPurchase)[] = [
   "customer_id",
@@ -26,17 +26,15 @@ function pickWritableFields(purchase: Partial<CustomerPurchase>): Partial<Custom
 const WITH_PRODUCT = "*, product:products(id, product_name, product_code)";
 const WITH_CUSTOMER = "*, customer:customers(id, full_name, customer_code)";
 
-/** Data Scope Rollout (Sprint v4.1), Package 3 - `customer_purchases`'
+/** Customer Visibility Engine (Package 4B) - `customer_purchases`'
  * ownership prefers `salesperson_id` (uuid) when populated, falling back
  * to `salesperson` (text, case-insensitive/trimmed) for historical rows
- * predating the Staff Management module (DATA_SCOPE_ROLLOUT_DATABASE.md
- * §2 rule 2). Note this scopes the *purchase* rows independently of
- * whether the *customer* itself is in scope - Customer Detail already
- * gated access to `customerId` via Customers' own scope (Package 1); this
- * is Customer Purchases' own, separately-resolved scope on top of that
- * (DATA_SCOPE_ROLLOUT_UI.md §4), so a visible customer can still have some
- * of their purchase rows filtered if a colleague closed those specific
- * sales. */
+ * predating the Staff Management module. Note this scopes the *purchase*
+ * rows entirely independently of whether the *customer profile* itself is
+ * visible - Customer Profile is now always a fully shared asset (see
+ * getCustomers/getCustomerById in lib/customer.service.ts), so a visible
+ * customer can still have some/all of their purchase rows hidden per the
+ * Owner=All/Manager=Team/Sales=Own/Marketing=Hidden rule. */
 export async function getPurchasesByCustomer(customerId: string): Promise<CustomerPurchase[]> {
   let query = supabase
     .from("customer_purchases")
@@ -44,7 +42,7 @@ export async function getPurchasesByCustomer(customerId: string): Promise<Custom
     .eq("customer_id", customerId);
 
   const staff = await getCurrentStaff();
-  if (staff) query = (await applyDataScopeWithFallback(query, staff, "revenue", "salesperson_id", "salesperson")).query;
+  if (staff) query = (await applyPurchaseHistoryVisibility(query, staff, "salesperson_id", "salesperson")).query;
 
   const { data, error } = await query.order("sale_date", { ascending: false });
 
@@ -58,15 +56,18 @@ export async function getPurchasesByCustomer(customerId: string): Promise<Custom
 
 /** The purchase record backing a sold product's "Customer / Sale Price / Sale
  * Date" display on the Product Detail page. A product can only be sold once
- * in this model, so the latest matching purchase is the sale. */
+ * in this model, so the latest matching purchase is the sale. Customer
+ * Visibility Engine (Package 4B): "Previous Selling Price" is Purchase
+ * History, not Customer Profile, so this is visibility-scoped the same as
+ * getPurchasesByCustomer - a Sales rep must never see another rep's sale
+ * price/buyer surfaced here just because they viewed the product. */
 export async function getPurchaseForProduct(productId: string): Promise<CustomerPurchase | null> {
-  const { data, error } = await supabase
-    .from("customer_purchases")
-    .select(WITH_CUSTOMER)
-    .eq("product_id", productId)
-    .order("sale_date", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  let query = supabase.from("customer_purchases").select(WITH_CUSTOMER).eq("product_id", productId);
+
+  const staff = await getCurrentStaff();
+  if (staff) query = (await applyPurchaseHistoryVisibility(query, staff, "salesperson_id", "salesperson")).query;
+
+  const { data, error } = await query.order("sale_date", { ascending: false }).limit(1).maybeSingle();
 
   if (error) {
     console.error("Error fetching purchase for product:", error);
@@ -247,11 +248,19 @@ export function aggregateCustomerRevenue(
  * revenue, last purchase date) - backs the Customers list "Doanh thu" column
  * and its revenue-threshold filter. Nothing here is stored/duplicated back
  * onto the customers table.
+ *
+ * Customer Visibility Engine (Package 4B): Revenue is Purchase History, not
+ * Customer Profile - visibility-scoped the same as getPurchasesByCustomer,
+ * so this list-wide aggregate never leaks another rep's (or, for Marketing,
+ * anyone's) sales through the back door of a total.
  */
 export async function getPurchaseSummaries(): Promise<Map<string, CustomerPurchaseSummary>> {
-  const { data, error } = await supabase
-    .from("customer_purchases")
-    .select("customer_id, sale_price, sale_date");
+  let query = supabase.from("customer_purchases").select("customer_id, sale_price, sale_date");
+
+  const staff = await getCurrentStaff();
+  if (staff) query = (await applyPurchaseHistoryVisibility(query, staff, "salesperson_id", "salesperson")).query;
+
+  const { data, error } = await query;
 
   if (error || !data) {
     if (error) console.error("Error fetching purchase summaries:", error);
@@ -267,6 +276,10 @@ export async function getPurchaseSummaries(): Promise<Map<string, CustomerPurcha
  * `null` means All Time (no date bound applied at all, not a wide hardcoded
  * range) - the same real absence-of-filter semantics as getPurchaseSummaries
  * above, just scoped to one customer instead of every customer.
+ *
+ * Customer Visibility Engine (Package 4B): same visibility scoping as
+ * getPurchaseSummaries above - a customer's total revenue is Purchase
+ * History, independent of whether their Customer Profile is visible.
  */
 export async function getCustomerRevenue(
   customerId: string,
@@ -280,6 +293,9 @@ export async function getCustomerRevenue(
   if (range) {
     query = query.gte("sale_date", range.start).lt("sale_date", range.end);
   }
+
+  const staff = await getCurrentStaff();
+  if (staff) query = (await applyPurchaseHistoryVisibility(query, staff, "salesperson_id", "salesperson")).query;
 
   const { data, error } = await query;
 

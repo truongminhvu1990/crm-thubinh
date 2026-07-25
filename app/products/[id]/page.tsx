@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Product } from "@/types/product";
 import { ProductImage } from "@/types/productImage";
-import { getProductById, updateProduct, findProductByCode, findProductBySku } from "@/lib/product.service";
+import { updateProduct, findProductByCode, findProductBySku } from "@/lib/product.service";
 import { coverImageUrl } from "@/lib/productImage.service";
 import { formatDate } from "@/lib/utils";
 import Button from "@/components/ui/Button";
@@ -38,7 +38,8 @@ export default function ProductDetailPage() {
     if (!id) return;
     setIsLoading(true);
     try {
-      const data = await getProductById(id);
+      const res = await fetch(`/api/products/${id}`);
+      const data: Product | null = res.ok ? await res.json() : null;
       setProduct(data);
       setEditProduct(data || {});
     } catch (error) {

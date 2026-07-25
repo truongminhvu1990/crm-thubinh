@@ -30,6 +30,7 @@ export default function GlobalDateFilter() {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <select
+        data-testid="report-date-filter"
         value={option}
         onChange={(e) => setOption(e.target.value as DateFilterOption)}
         className={selectClass}
@@ -43,6 +44,7 @@ export default function GlobalDateFilter() {
       {option === "custom" && (
         <div className="flex items-center gap-2">
           <input
+            data-testid="report-date-filter-from"
             type="date"
             value={customFrom}
             onChange={(e) => setCustomRange(e.target.value, customTo)}
@@ -50,6 +52,7 @@ export default function GlobalDateFilter() {
           />
           <span className="text-muted-foreground text-sm">-</span>
           <input
+            data-testid="report-date-filter-to"
             type="date"
             value={customTo}
             onChange={(e) => setCustomRange(customFrom, e.target.value)}

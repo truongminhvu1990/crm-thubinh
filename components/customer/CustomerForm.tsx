@@ -61,6 +61,7 @@ export default function CustomerForm({
   const staffOptions = useStaffOptions();
   const countryOptions = useMasterDataOptions("country", customer.country);
   const marketOptions = useMasterDataOptions("market", customer.province);
+  const sourceOptions = useMasterDataOptions("customer_source", customer.source);
 
   const isVietnam = customer.country === "Việt Nam";
   const districtOptions =
@@ -80,6 +81,7 @@ export default function CustomerForm({
 
       <div className="grid grid-cols-2 gap-4">
         <Input
+          data-testid="customer-code-input"
           label="Mã khách hàng"
           placeholder="VD: KH001"
           value={customer.customer_code || ""}
@@ -89,6 +91,7 @@ export default function CustomerForm({
 
         <Input
           id="customer-full_name"
+          data-testid="customer-name-input"
           label="Họ tên *"
           placeholder="Nhập họ tên"
           value={customer.full_name || ""}
@@ -100,6 +103,7 @@ export default function CustomerForm({
       <div className="grid grid-cols-2 gap-4">
         <Input
           id="customer-phone"
+          data-testid="customer-phone-input"
           label="Số điện thoại *"
           placeholder="Nhập số điện thoại"
           type="tel"
@@ -110,6 +114,7 @@ export default function CustomerForm({
         />
 
         <Input
+          data-testid="customer-birthday-input"
           label="Ngày sinh"
           type="date"
           value={customer.birthday || ""}
@@ -120,6 +125,7 @@ export default function CustomerForm({
 
       <div className="grid grid-cols-2 gap-4">
         <Select
+          data-testid="customer-gender-select"
           label="Giới tính"
           placeholder="Chọn giới tính"
           options={GENDER_OPTIONS}
@@ -128,6 +134,7 @@ export default function CustomerForm({
         />
 
         <Input
+          data-testid="customer-occupation-input"
           label="Nghề nghiệp"
           placeholder="Nhập nghề nghiệp"
           value={customer.occupation || ""}
@@ -138,6 +145,7 @@ export default function CustomerForm({
 
       <div className="grid grid-cols-2 gap-4">
         <Input
+          data-testid="customer-facebook-input"
           label="Facebook"
           placeholder="URL hoặc tên tài khoản"
           value={customer.facebook || ""}
@@ -146,6 +154,7 @@ export default function CustomerForm({
         />
 
         <Input
+          data-testid="customer-zalo-input"
           label="Zalo"
           placeholder="Số điện thoại Zalo"
           value={customer.zalo || ""}
@@ -155,6 +164,7 @@ export default function CustomerForm({
       </div>
 
       <Input
+        data-testid="customer-address-input"
         label="Địa chỉ"
         placeholder="Số nhà, đường..."
         value={customer.address || ""}
@@ -163,6 +173,7 @@ export default function CustomerForm({
       />
 
       <Select
+        data-testid="customer-country-select"
         label="Quốc gia"
         placeholder="Chọn quốc gia"
         options={countryOptions}
@@ -173,6 +184,7 @@ export default function CustomerForm({
       <div className="grid grid-cols-2 gap-4">
         {isVietnam ? (
           <Select
+            data-testid="customer-market-select"
             label="Thị trường"
             placeholder="Chọn thị trường"
             options={marketOptions}
@@ -181,6 +193,7 @@ export default function CustomerForm({
           />
         ) : (
           <Input
+            data-testid="customer-market-input"
             label="Thị trường"
             placeholder="VD: California, Toronto, Sydney..."
             value={customer.province || ""}
@@ -190,6 +203,7 @@ export default function CustomerForm({
         )}
         {districtOptionsWithCurrent ? (
           <Select
+            data-testid="customer-district-select"
             label="Địa phương"
             placeholder="Chọn địa phương"
             options={districtOptionsWithCurrent}
@@ -198,6 +212,7 @@ export default function CustomerForm({
           />
         ) : (
           <Input
+            data-testid="customer-district-input"
             label="Địa phương"
             placeholder="VD: California, Toronto, Bình Tân, Quận 1..."
             value={customer.district || ""}
@@ -211,6 +226,7 @@ export default function CustomerForm({
 
       <div className="grid grid-cols-3 gap-4">
         <Input
+          data-testid="customer-wrist-size-input"
           label="Kích thước cổ tay"
           placeholder="VD: 15cm"
           value={customer.wrist_size || ""}
@@ -219,6 +235,7 @@ export default function CustomerForm({
         />
 
         <Input
+          data-testid="customer-ring-size-input"
           label="Size nhẫn"
           placeholder="VD: 7"
           value={customer.ring_size || ""}
@@ -227,6 +244,7 @@ export default function CustomerForm({
         />
 
         <Input
+          data-testid="customer-budget-input"
           label="Ngân sách"
           placeholder="VD: 10-20 triệu"
           value={customer.budget || ""}
@@ -255,6 +273,7 @@ export default function CustomerForm({
 
       <div className="grid grid-cols-2 gap-4">
         <Select
+          data-testid="customer-preferred-origin-select"
           label="Nguồn gốc ưa thích"
           placeholder="Chọn nguồn gốc"
           options={JADE_ORIGINS}
@@ -276,6 +295,7 @@ export default function CustomerForm({
 
       <div className="grid grid-cols-2 gap-4">
         <Select
+          data-testid="customer-stage-select"
           label="Giai đoạn khách hàng"
           placeholder="Chọn giai đoạn"
           options={stageOptions}
@@ -283,9 +303,11 @@ export default function CustomerForm({
           onChange={(e) => updateField("vip_level", e.target.value)}
         />
 
-        <Input
+        <Select
+          data-testid="customer-source-select"
           label="Nguồn"
-          placeholder="VD: Facebook, Giới thiệu, Tìm kiếm..."
+          placeholder="Chọn nguồn khách hàng"
+          options={sourceOptions}
           value={customer.source || ""}
           onChange={(e) => updateField("source", e.target.value)}
         />
@@ -293,6 +315,7 @@ export default function CustomerForm({
 
       <div className="grid grid-cols-2 gap-4">
         <Select
+          data-testid="customer-salesperson-legacy-select"
           label="Nhân viên phụ trách (cũ)"
           placeholder="Chọn nhân viên"
           options={salespersonOptions}
@@ -301,6 +324,7 @@ export default function CustomerForm({
         />
 
         <Select
+          data-testid="customer-assigned-staff-select"
           label="Nhân viên phụ trách"
           placeholder="Chọn nhân viên"
           options={staffOptions}
@@ -310,6 +334,7 @@ export default function CustomerForm({
       </div>
 
       <Input
+        data-testid="customer-last-viewed-product-input"
         label="Sản phẩm xem gần nhất"
         placeholder="VD: Vòng ngọc bích size 15"
         value={customer.last_viewed_product || ""}

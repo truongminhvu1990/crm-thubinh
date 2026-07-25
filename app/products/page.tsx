@@ -4,14 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, RefreshCw, X, Download, Upload } from "lucide-react";
 import { Product } from "@/types/product";
-import {
-  getProducts,
-  addProduct,
-  updateProduct,
-  deleteProduct,
-  findProductByCode,
-  findProductBySku,
-} from "@/lib/product.service";
+import { addProduct, updateProduct, deleteProduct, findProductByCode, findProductBySku } from "@/lib/product.service";
 import { buildProductImportTemplate } from "@/lib/productImportExport";
 import { PRODUCT_STATUS } from "@/lib/product.constants";
 import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
@@ -58,7 +51,8 @@ export default function ProductsPage() {
 
   async function loadProducts() {
     setIsLoading(true);
-    const data = await getProducts();
+    const res = await fetch("/api/products");
+    const data: Product[] = res.ok ? await res.json() : [];
     setProducts(data);
     filterProducts(data, searchTerm, categoryFilter, statusFilter, sourceFilter, salespersonFilter);
     setIsLoading(false);
@@ -300,6 +294,7 @@ export default function ProductsPage() {
         <div className="flex flex-col lg:flex-row gap-3">
           <div className="flex-1 min-w-0">
             <SearchInput
+              data-testid="product-search-input"
               placeholder="Tìm theo tên, mã hoặc SKU..."
               value={searchTerm}
               onChange={(e) => handleSearchChange(e.target.value)}
@@ -309,6 +304,7 @@ export default function ProductsPage() {
 
           <div className="flex flex-wrap gap-3">
             <select
+              data-testid="product-category-filter"
               value={categoryFilter}
               onChange={(e) => handleCategoryChange(e.target.value)}
               className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -322,6 +318,7 @@ export default function ProductsPage() {
             </select>
 
             <select
+              data-testid="product-status-filter"
               value={statusFilter}
               onChange={(e) => handleStatusChange(e.target.value)}
               className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -335,6 +332,7 @@ export default function ProductsPage() {
             </select>
 
             <select
+              data-testid="product-source-filter"
               value={sourceFilter}
               onChange={(e) => handleSourceChange(e.target.value)}
               className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -348,6 +346,7 @@ export default function ProductsPage() {
             </select>
 
             <select
+              data-testid="product-salesperson-filter"
               value={salespersonFilter}
               onChange={(e) => handleSalespersonChange(e.target.value)}
               className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -361,24 +360,24 @@ export default function ProductsPage() {
             </select>
 
             {hasActiveFilters && (
-              <Button variant="secondary" size="md" onClick={handleClearFilters}>
+              <Button data-testid="product-clear-filters-button" variant="secondary" size="md" onClick={handleClearFilters}>
                 <X className="w-4 h-4" />
                 <span className="hidden sm:inline">Xóa bộ lọc</span>
               </Button>
             )}
-            <Button variant="secondary" size="md" onClick={loadProducts}>
+            <Button data-testid="product-reload-button" variant="secondary" size="md" onClick={loadProducts}>
               <RefreshCw className="w-4 h-4" />
               <span className="hidden sm:inline">Làm mới</span>
             </Button>
-            <Button variant="secondary" size="md" onClick={handleDownloadTemplate}>
+            <Button data-testid="product-download-template-button" variant="secondary" size="md" onClick={handleDownloadTemplate}>
               <Download className="w-4 h-4" />
               <span className="hidden sm:inline">Tải mẫu Excel</span>
             </Button>
-            <Button variant="secondary" size="md" onClick={() => setImportModalOpen(true)}>
+            <Button data-testid="product-import-button" variant="secondary" size="md" onClick={() => setImportModalOpen(true)}>
               <Upload className="w-4 h-4" />
               <span className="hidden sm:inline">Nhập Excel</span>
             </Button>
-            <Button variant="primary" size="md" onClick={handleAddProduct} className="whitespace-nowrap">
+            <Button data-testid="product-add-button" variant="primary" size="md" onClick={handleAddProduct} className="whitespace-nowrap">
               <Plus className="w-4 h-4" />
               Thêm sản phẩm
             </Button>
@@ -406,6 +405,7 @@ export default function ProductsPage() {
       />
 
       <AlertDialog
+        testId="product-duplicate-dialog"
         open={!!duplicateProduct}
         title={
           duplicateField === "sku"

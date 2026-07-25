@@ -5,6 +5,7 @@ import { Wallet, Calendar } from "lucide-react";
 import { Product } from "@/types/product";
 import { CustomerPurchase } from "@/types/purchase";
 import Input from "@/components/ui/Input";
+import CurrencyInput from "@/components/ui/CurrencyInput";
 import Select from "@/components/ui/Select";
 
 interface Props {
@@ -34,11 +35,11 @@ export default function PurchaseForm({ purchase, setPurchase, products }: Props)
     });
   }
 
-  function handlePriceChange(value: string) {
+  function handlePriceChange(value: number | undefined) {
     setPriceManuallyEdited(true);
     setPurchase({
       ...purchase,
-      sale_price: value === "" ? undefined : Number(value),
+      sale_price: value,
     });
   }
 
@@ -56,12 +57,11 @@ export default function PurchaseForm({ purchase, setPurchase, products }: Props)
       />
 
       <div className="grid grid-cols-2 gap-4">
-        <Input
+        <CurrencyInput
           label="Giá bán (VNĐ) *"
-          type="number"
           placeholder="0"
-          value={purchase.sale_price ?? ""}
-          onChange={(e) => handlePriceChange(e.target.value)}
+          value={purchase.sale_price}
+          onChange={handlePriceChange}
           icon={<Wallet className="w-4 h-4" />}
         />
         <Input

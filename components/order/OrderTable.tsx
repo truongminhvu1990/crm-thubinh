@@ -44,7 +44,7 @@ export default function OrderTable({ orders, isLoading = false }: Props) {
 
   return (
     <div className="overflow-x-auto bg-card rounded-xl border border-border shadow-sm">
-      <table className="w-full min-w-[1160px]">
+      <table data-testid="order-table" className="w-full min-w-[1160px]">
         <thead>
           <tr className="border-b border-border">
             <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide px-4 py-3">

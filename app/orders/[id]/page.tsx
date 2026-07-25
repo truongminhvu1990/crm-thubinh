@@ -5,9 +5,10 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { OrderDetail } from "@/lib/orders/order.service";
 import { canDeleteOrder, canEditOrderItems, canCompleteOrder, canMarkOrderLost, canAddPayment, validateOrderHasItems } from "@/lib/orders/order.rules";
-import { getProducts } from "@/lib/product.service";
+import { getProducts, getProductById } from "@/lib/product.service";
 import { Product } from "@/types/product";
 import { formatDate } from "@/lib/utils";
+import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
@@ -21,6 +22,12 @@ import AddPaymentModal from "@/components/order/AddPaymentModal";
 import OrderEventTimeline from "@/components/order/OrderEventTimeline";
 import MarkOrderLostModal from "@/components/order/MarkOrderLostModal";
 import ReassignSalesOwnerModal from "@/components/order/ReassignSalesOwnerModal";
+
+const currency = new Intl.NumberFormat("vi-VN", {
+  style: "currency",
+  currency: "VND",
+  maximumFractionDigits: 0,
+});
 
 export default function OrderDetailPage() {
   const params = useParams();
@@ -46,6 +53,16 @@ export default function OrderDetailPage() {
   const [isReassignModalOpen, setIsReassignModalOpen] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
 
+  // Simple Profit Calculation Package, Part 2: Profit = Selling Price - Cost
+  // Price, computed in memory only (never stored, no new column). "Selling
+  // Price" here is each line's already-computed line_total (existing value,
+  // reflects quantity + discount as already applied elsewhere in this
+  // page); "Cost Price" is looked up from the product's current cost_price
+  // via the existing getProductById() - the order item itself never
+  // snapshots cost. Owner/Manager only (Part 6/4's same rule, reused here).
+  const [orderProfit, setOrderProfit] = useState<number | null>(null);
+  const canViewProfit = useIsOwnerOrManager();
+
   async function loadOrder() {
     if (!id) return;
     setIsLoading(true);
@@ -68,6 +85,34 @@ export default function OrderDetailPage() {
     loadOrder();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!canViewProfit || !detail || detail.items.length === 0) {
+      queueMicrotask(() => {
+        if (!cancelled) setOrderProfit(null);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    (async () => {
+      const uniqueProductIds = Array.from(new Set(detail.items.map((item) => item.product_id)));
+      const products = await Promise.all(uniqueProductIds.map((productId) => getProductById(productId)));
+      const costByProductId = new Map(products.filter((p): p is Product => !!p).map((p) => [p.id!, p.cost_price]));
+
+      const totalSellingPrice = detail.items.reduce((sum, item) => sum + item.line_total, 0);
+      const totalCost = detail.items.reduce((sum, item) => {
+        const costPrice = costByProductId.get(item.product_id);
+        return sum + (typeof costPrice === "number" ? costPrice * item.quantity : 0);
+      }, 0);
+
+      if (!cancelled) setOrderProfit(totalSellingPrice - totalCost);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canViewProfit, detail]);
 
   async function handleSaveDetails() {
     setActionError(null);
@@ -217,13 +262,14 @@ export default function OrderDetailPage() {
 
         <div className="flex items-center gap-2">
           {isLosable && (
-            <Button variant="secondary" size="sm" onClick={() => setIsLostModalOpen(true)}>
+            <Button data-testid="order-lost-button" variant="secondary" size="sm" onClick={() => setIsLostModalOpen(true)}>
               Đánh dấu Lost
             </Button>
           )}
           {isCompletable && (
             <div className="text-right">
               <Button
+                data-testid="order-complete-button"
                 variant="success"
                 size="sm"
                 onClick={handleComplete}
@@ -238,7 +284,7 @@ export default function OrderDetailPage() {
             </div>
           )}
           {isDeletable && (
-            <Button variant="danger" size="sm" onClick={() => setIsDeleteConfirmOpen(true)}>
+            <Button data-testid="order-delete-trigger-button" variant="danger" size="sm" onClick={() => setIsDeleteConfirmOpen(true)}>
               <Trash2 className="w-4 h-4" />
               Xóa đơn nháp
             </Button>
@@ -264,15 +310,16 @@ export default function OrderDetailPage() {
             <h2 className="text-lg font-semibold text-foreground mb-4">Chỉnh sửa đơn hàng</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input
+                data-testid="order-date-input"
                 label="Ngày đặt hàng"
                 type="date"
                 value={orderDateDraft}
                 onChange={(e) => setOrderDateDraft(e.target.value)}
               />
-              <Input label="Ghi chú" value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} />
+              <Input data-testid="order-note-input" label="Ghi chú" value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} />
             </div>
             <div className="flex justify-end mt-4">
-              <Button variant="secondary" size="sm" onClick={handleSaveDetails} isLoading={isSavingDetails}>
+              <Button data-testid="order-save-details-button" variant="secondary" size="sm" onClick={handleSaveDetails} isLoading={isSavingDetails}>
                 Lưu thay đổi
               </Button>
             </div>
@@ -280,12 +327,20 @@ export default function OrderDetailPage() {
         )}
 
         <Card>
-          <h2 className="text-lg font-semibold text-foreground mb-4">Sản phẩm</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-foreground">Sản phẩm</h2>
+            {canViewProfit && orderProfit !== null && (
+              <p className="text-sm font-medium text-foreground">
+                Lãi / Lỗ: <span className="text-emerald-600">{currency.format(orderProfit)}</span>
+              </p>
+            )}
+          </div>
           <OrderLineItemsTable items={items} editable={isEditable} onRemove={handleRemoveItem} />
 
           {isEditable && (
             <div className="relative mt-4 pt-4 border-t border-border">
               <SearchInput
+                data-testid="order-detail-product-search-input"
                 placeholder="Tìm sản phẩm để thêm..."
                 value={productSearch}
                 onChange={(e) => handleProductSearch(e.target.value)}
@@ -298,6 +353,7 @@ export default function OrderDetailPage() {
                     <button
                       key={product.id}
                       type="button"
+                      data-testid="order-add-item-button"
                       onClick={() => handleAddItem(product)}
                       className="w-full flex items-center justify-between gap-2 text-left px-3 py-2 text-sm hover:bg-muted/60 transition-colors"
                     >
@@ -317,7 +373,7 @@ export default function OrderDetailPage() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-foreground">Thanh toán</h2>
             {canAddPayment(order.order_status, order.payment_status) && (
-              <Button variant="secondary" size="sm" onClick={() => setIsPaymentModalOpen(true)}>
+              <Button data-testid="order-add-payment-button" variant="secondary" size="sm" onClick={() => setIsPaymentModalOpen(true)}>
                 <Plus className="w-4 h-4" />
                 Thêm thanh toán
               </Button>
@@ -353,6 +409,7 @@ export default function OrderDetailPage() {
       />
 
       <AlertDialog
+        testId="order-delete"
         open={isDeleteConfirmOpen}
         title="Xóa đơn hàng nháp?"
         description="Đơn hàng ở trạng thái Nháp sẽ bị xóa vĩnh viễn. Hành động này không thể hoàn tác."

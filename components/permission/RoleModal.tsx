@@ -56,10 +56,17 @@ export default function RoleModal({ open, title, initial, lockRoleKey = false, i
   if (!open) return null;
 
   return (
-    <Modal open={open} title={title} onClose={onClose}>
+    <Modal open={open} title={title} onClose={onClose} testId="permission-role-modal">
       <div className="space-y-4 mb-6">
-        <Input label="Tên vai trò *" value={name} onChange={(e) => handleNameChange(e.target.value)} error={error && !name.trim() ? error : undefined} />
         <Input
+          data-testid="permission-role-name-input"
+          label="Tên vai trò *"
+          value={name}
+          onChange={(e) => handleNameChange(e.target.value)}
+          error={error && !name.trim() ? error : undefined}
+        />
+        <Input
+          data-testid="permission-role-key-input"
           label="Mã vai trò *"
           value={roleKey}
           disabled={lockRoleKey}
@@ -72,6 +79,7 @@ export default function RoleModal({ open, title, initial, lockRoleKey = false, i
         <div>
           <label className="block text-sm font-medium text-foreground mb-1.5">Mô tả</label>
           <textarea
+            data-testid="permission-role-description-input"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={2}
@@ -80,10 +88,10 @@ export default function RoleModal({ open, title, initial, lockRoleKey = false, i
         </div>
       </div>
       <div className="flex justify-end gap-3">
-        <Button variant="secondary" onClick={onClose} disabled={isSaving}>
+        <Button data-testid="permission-role-cancel-button" variant="secondary" onClick={onClose} disabled={isSaving}>
           Hủy
         </Button>
-        <Button variant="primary" onClick={handleSave} isLoading={isSaving}>
+        <Button data-testid="permission-role-save-button" variant="primary" onClick={handleSave} isLoading={isSaving}>
           Lưu
         </Button>
       </div>

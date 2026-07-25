@@ -3,9 +3,12 @@
 import { useState } from "react";
 import { OrderPayment } from "@/types/order";
 import { calculateRemainingBalance } from "@/lib/orders/order.rules";
+import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
+import CurrencyInput from "@/components/ui/CurrencyInput";
+import Select from "@/components/ui/Select";
 
 const currency = new Intl.NumberFormat("vi-VN", {
   style: "currency",
@@ -25,22 +28,23 @@ interface Props {
 const today = () => new Date().toISOString().slice(0, 10);
 
 /** ORDERS_UI.md §7 — Add Payment modal. Overpayment warns but never blocks
- * (ORDERS_SPEC.md §4). payment_method is a plain text input since the
- * `payment_method` master-data category doesn't exist yet (a known,
- * separately-tracked gap — ORDERS_IMPLEMENTATION_PLAN.md Task 2). */
+ * (ORDERS_SPEC.md §4). payment_method is a Select backed by the
+ * `payment_method` master-data category (UX Enhancement Package, Part 2). */
 export default function AddPaymentModal({ open, orderId, totalAmount, payments, onClose, onSaved }: Props) {
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState<number | undefined>(undefined);
   const [paymentMethod, setPaymentMethod] = useState("");
   const [paymentDate, setPaymentDate] = useState(today());
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  const paymentMethodOptions = useMasterDataOptions("payment_method", paymentMethod);
+
   if (!open) return null;
 
   const alreadyPaid = payments.reduce((sum, p) => sum + p.amount, 0);
   const remaining = calculateRemainingBalance(totalAmount, payments);
-  const amountNumber = Number(amount) || 0;
+  const amountNumber = amount || 0;
   const overpaymentWarning = amountNumber > remaining ? "Số tiền vượt quá số dư còn lại" : null;
 
   async function handleSave() {
@@ -80,7 +84,7 @@ export default function AddPaymentModal({ open, orderId, totalAmount, payments, 
   }
 
   return (
-    <Modal open={open} title="Thêm thanh toán" onClose={onClose}>
+    <Modal open={open} title="Thêm thanh toán" onClose={onClose} testId="payment-modal">
       <div className="space-y-1 text-sm mb-4 pb-4 border-b border-border">
         <div className="flex justify-between">
           <span className="text-muted-foreground">Tổng tiền</span>
@@ -100,29 +104,37 @@ export default function AddPaymentModal({ open, orderId, totalAmount, payments, 
 
       <div className="space-y-4">
         <div>
-          <Input
+          <CurrencyInput
+            testId="payment-amount-input"
             label="Số tiền *"
-            type="number"
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={setAmount}
           />
           {overpaymentWarning && <p className="text-xs text-amber-600 mt-1">{overpaymentWarning}</p>}
         </div>
-        <Input
+        <Select
+          data-testid="payment-method-select"
           label="Phương thức *"
-          placeholder="Tiền mặt, chuyển khoản..."
+          placeholder="Chọn phương thức"
+          options={paymentMethodOptions}
           value={paymentMethod}
           onChange={(e) => setPaymentMethod(e.target.value)}
         />
-        <Input label="Ngày thanh toán" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
-        <Input label="Ghi chú" value={note} onChange={(e) => setNote(e.target.value)} />
+        <Input
+          data-testid="payment-date-input"
+          label="Ngày thanh toán"
+          type="date"
+          value={paymentDate}
+          onChange={(e) => setPaymentDate(e.target.value)}
+        />
+        <Input data-testid="payment-note-input" label="Ghi chú" value={note} onChange={(e) => setNote(e.target.value)} />
       </div>
 
       <div className="flex justify-end gap-3 mt-6">
-        <Button variant="secondary" onClick={onClose} disabled={isSaving}>
+        <Button data-testid="payment-cancel-button" variant="secondary" onClick={onClose} disabled={isSaving}>
           Hủy
         </Button>
-        <Button variant="primary" onClick={handleSave} isLoading={isSaving}>
+        <Button data-testid="payment-save-button" variant="primary" onClick={handleSave} isLoading={isSaving}>
           Lưu
         </Button>
       </div>

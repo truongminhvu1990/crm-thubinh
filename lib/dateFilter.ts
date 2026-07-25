@@ -1,6 +1,20 @@
 // Sprint v1.0.2 - Global Date Filter. The one canonical implementation of
 // the filter's option set, range math, and period label - Dashboard and
 // Reports both consume this instead of each computing their own.
+//
+// Business Time Migration, Wave 2 (READ PATH): "Today"/"This Week"/
+// "This Month"/"This Quarter"/"This Year" are Business Dates (Locked
+// Product Owner decision, Business Time Foundation) - every one of them is
+// now anchored to Asia/Ho_Chi_Minh via lib/businessTime.ts, not the
+// runtime's local clock. `getPreviousEquivalentRange()` and
+// `addDaysToDateStr()` are untouched: both are pure calendar arithmetic on
+// an already-given date string/range, never read "now" themselves, so
+// they inherit correctness automatically once the range they're given is
+// Vietnam-anchored - no bug was found in either, audited not assumed.
+
+import { BusinessTime } from "@/lib/businessTime";
+
+const MS_PER_DAY = 86_400_000;
 
 export type DateFilterOption =
   | "today"
@@ -43,48 +57,53 @@ function toDisplayDate(dateStr: string): string {
  * returns `null` - a real absence of filter (no query bound applied), not a
  * hardcoded wide date span. This Week starts on Monday. Custom Range treats
  * `to` as inclusive (end = to + 1 day).
+ *
+ * Business Time Migration, Wave 2: every "current period" boundary comes
+ * from BusinessTime's `startOf*()` family (Vietnam-anchored), converted to
+ * "YYYY-MM-DD" via `BusinessTime.todayString(instant)`. Month/quarter/year
+ * exclusive end bounds are found by probing an instant safely past the
+ * period's end (32/95/370 days - each exceeds that period's maximum
+ * possible length) and re-anchoring with the matching `startOf*()`, exactly
+ * the composition pattern documented in docs/BUSINESS_TIME_FOUNDATION.md -
+ * no calendar-length table duplicated here.
  */
 export function getDateRange(option: DateFilterOption, customFrom?: string, customTo?: string): DateRange | null {
-  const now = new Date();
-
   if (option === "all_time") {
     return null;
   }
 
   if (option === "custom") {
-    const start = customFrom || toDateStr(now);
+    const start = customFrom || BusinessTime.todayString();
     const end = customTo ? addDaysToDateStr(customTo, 1) : addDaysToDateStr(start, 1);
     return { start, end };
   }
 
   if (option === "today") {
-    const start = toDateStr(now);
+    const start = BusinessTime.todayString();
     return { start, end: addDaysToDateStr(start, 1) };
   }
 
   if (option === "this_week") {
-    const day = now.getDay(); // 0 = Sunday .. 6 = Saturday
-    const diffToMonday = day === 0 ? 6 : day - 1;
-    const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diffToMonday);
-    const start = toDateStr(monday);
+    const start = BusinessTime.todayString(BusinessTime.startOfWeek());
     return { start, end: addDaysToDateStr(start, 7) };
   }
 
   if (option === "this_year") {
-    return { start: `${now.getFullYear()}-01-01`, end: `${now.getFullYear() + 1}-01-01` };
+    const yearStart = BusinessTime.startOfYear();
+    const nextYearStart = BusinessTime.startOfYear(new Date(yearStart.getTime() + 370 * MS_PER_DAY));
+    return { start: BusinessTime.todayString(yearStart), end: BusinessTime.todayString(nextYearStart) };
   }
 
   if (option === "this_quarter") {
-    const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3;
-    const start = `${now.getFullYear()}-${pad(quarterStartMonth + 1)}-01`;
-    const nextQuarter = new Date(now.getFullYear(), quarterStartMonth + 3, 1);
-    return { start, end: `${nextQuarter.getFullYear()}-${pad(nextQuarter.getMonth() + 1)}-01` };
+    const quarterStart = BusinessTime.startOfQuarter();
+    const nextQuarterStart = BusinessTime.startOfQuarter(new Date(quarterStart.getTime() + 95 * MS_PER_DAY));
+    return { start: BusinessTime.todayString(quarterStart), end: BusinessTime.todayString(nextQuarterStart) };
   }
 
   // this_month
-  const start = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
-  const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  return { start, end: `${nextMonth.getFullYear()}-${pad(nextMonth.getMonth() + 1)}-01` };
+  const monthStart = BusinessTime.startOfMonth();
+  const nextMonthStart = BusinessTime.startOfMonth(new Date(monthStart.getTime() + 32 * MS_PER_DAY));
+  return { start: BusinessTime.todayString(monthStart), end: BusinessTime.todayString(nextMonthStart) };
 }
 
 /**
@@ -137,14 +156,18 @@ export function getPreviousEquivalentRange(option: DateFilterOption, range: Date
  * they're viewing.
  */
 export function getDateFilterLabel(option: DateFilterOption, customFrom?: string, customTo?: string): string {
-  const now = new Date();
-
   if (option === "all_time") return "Toàn thời gian";
   if (option === "today") return "Hôm nay";
   if (option === "this_week") return "Tuần này";
-  if (option === "this_year") return `${now.getFullYear()}`;
-  if (option === "this_quarter") return `Quý ${Math.floor(now.getMonth() / 3) + 1}/${now.getFullYear()}`;
-  if (option === "this_month") return `Tháng ${now.getMonth() + 1}/${now.getFullYear()}`;
+  if (option === "this_year") return `${BusinessTime.businessYear()}`;
+  if (option === "this_quarter") {
+    const { year, quarter } = BusinessTime.businessQuarter();
+    return `Quý ${quarter}/${year}`;
+  }
+  if (option === "this_month") {
+    const [year, month] = BusinessTime.businessMonth().split("-");
+    return `Tháng ${Number(month)}/${year}`;
+  }
 
   // custom
   if (customFrom && customTo) return `${toDisplayDate(customFrom)} → ${toDisplayDate(customTo)}`;

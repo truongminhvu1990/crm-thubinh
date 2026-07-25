@@ -5,7 +5,12 @@ export type MasterDataCategory =
   | "product_category"
   | "product_color"
   | "market"
-  | "country";
+  | "country"
+  | "payment_method"
+  | "customer_source"
+  | "shipping_provider"
+  | "bank"
+  | "follow_up_status";
 
 export interface MasterDataItem {
   id: string;

@@ -58,7 +58,7 @@ export default function ProductTable({
 
   return (
     <div className="overflow-x-auto bg-card rounded-xl border border-border shadow-sm">
-      <table className="w-full min-w-[960px]">
+      <table data-testid="product-table" className="w-full min-w-[960px]">
         <thead>
           <tr className="border-b border-border">
             <th className="px-5 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -180,6 +180,7 @@ export default function ProductTable({
       </table>
 
       <AlertDialog
+        testId="product-delete"
         open={!!pendingDelete}
         title="Xóa sản phẩm?"
         description={

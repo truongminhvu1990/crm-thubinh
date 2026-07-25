@@ -1,5 +1,7 @@
+import { SupabaseClient } from "@supabase/supabase-js";
 import { DateRange } from "@/lib/dateFilter";
 import { SalesLedgerFilters, SalesLedgerRow, SalesLedgerSummary } from "@/types/salesLedger";
+import { Staff } from "@/types/staff";
 import * as repo from "./salesLedger.repository";
 
 // Business logic / composition only - SalesLedgerRepository owns every
@@ -23,31 +25,41 @@ export function withGlobalDateRange(
   };
 }
 
-async function withProductImages(rows: SalesLedgerRow[]): Promise<SalesLedgerRow[]> {
+async function withProductImages(rows: SalesLedgerRow[], client?: SupabaseClient): Promise<SalesLedgerRow[]> {
   const productIds = [...new Set(rows.map((r) => r.product_id).filter((id): id is string => !!id))];
   if (productIds.length === 0) return rows;
 
-  const images = await repo.getPrimaryImagesByProductIds(productIds);
+  const images = await repo.getPrimaryImagesByProductIds(productIds, client);
   return rows.map((r) => ({
     ...r,
     product_image_url: r.product_id ? images.get(r.product_id) || null : null,
   }));
 }
 
-export async function getSalesLedgerPage(filters: SalesLedgerFilters) {
-  const { rows, totalCount } = await repo.getSalesLedgerPage(filters);
-  return { rows: await withProductImages(rows), totalCount };
+/** `client` defaults to the browser Supabase client - see
+ * salesLedger.repository.ts's getSalesLedgerPage/getSalesLedgerRowByPurchaseId.
+ * `staff` (Hotfix 3A) - undefined (every pre-Hotfix-3A caller) preserves the
+ * exact previous behavior (Browser Authentication Context, resolved inside
+ * the repository); app/api/sales-ledger/** now passes an explicitly-resolved
+ * Server Authentication Context value instead. */
+export async function getSalesLedgerPage(filters: SalesLedgerFilters, client?: SupabaseClient, staff?: Staff | null) {
+  const { rows, totalCount } = await repo.getSalesLedgerPage(filters, client, staff);
+  return { rows: await withProductImages(rows, client), totalCount };
 }
 
-export async function getSalesLedgerDetail(purchaseId: string): Promise<SalesLedgerRow | null> {
-  const row = await repo.getSalesLedgerRowByPurchaseId(purchaseId);
+export async function getSalesLedgerDetail(
+  purchaseId: string,
+  client?: SupabaseClient,
+  staff?: Staff | null
+): Promise<SalesLedgerRow | null> {
+  const row = await repo.getSalesLedgerRowByPurchaseId(purchaseId, client, staff);
   if (!row) return null;
-  const [withImage] = await withProductImages([row]);
+  const [withImage] = await withProductImages([row], client);
   return withImage;
 }
 
-export async function getSalesLedgerDetailImages(productId: string) {
-  return repo.getProductImagesForProduct(productId);
+export async function getSalesLedgerDetailImages(productId: string, client?: SupabaseClient) {
+  return repo.getProductImagesForProduct(productId, client);
 }
 
 /** Feature 3 - Summary, computed over every currently-filtered row (not
@@ -66,8 +78,12 @@ export function summarizeSalesLedgerRows(
   };
 }
 
-export async function getSalesLedgerSummary(filters: SalesLedgerFilters): Promise<SalesLedgerSummary> {
-  const rows = await repo.getSalesLedgerAggregateRows(filters);
+export async function getSalesLedgerSummary(
+  filters: SalesLedgerFilters,
+  client?: SupabaseClient,
+  staff?: Staff | null
+): Promise<SalesLedgerSummary> {
+  const rows = await repo.getSalesLedgerAggregateRows(filters, client, staff);
   return summarizeSalesLedgerRows(rows);
 }
 

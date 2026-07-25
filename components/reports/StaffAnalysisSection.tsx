@@ -5,9 +5,9 @@ import { Wallet, Percent, Receipt, Scale, Trophy } from "lucide-react";
 import Card from "@/components/ui/Card";
 import StatCard from "@/components/ui/StatCard";
 import { DateRange } from "@/lib/dateFilter";
-import { getStaffAnalysis } from "@/lib/reports/reportsBI.service";
 import { buildSalesLedgerHref } from "@/lib/reports/drilldown";
 import { currency, NO_SALES_DATA_MESSAGE } from "@/lib/reports/format";
+import { rangeSearchParams } from "@/lib/reports/reportsApiClient";
 import { StaffAnalysisRow } from "@/types/reportsBI";
 import AnalysisTable, { AnalysisColumn } from "@/components/reports/AnalysisTable";
 import ExportButtons from "@/components/reports/ExportButtons";
@@ -42,10 +42,12 @@ export default function StaffAnalysisSection({ range }: Props) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    getStaffAnalysis(range, 1000).then((data) => {
-      setAllRows(data);
-      setIsLoading(false);
-    });
+    fetch(`/api/reports/bi/staff-analysis?${rangeSearchParams(range)}&limit=1000`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => {
+        setAllRows(data);
+        setIsLoading(false);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range?.start, range?.end]);
 

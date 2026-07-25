@@ -13,6 +13,8 @@ interface Props {
   onConfirm: () => void;
   onCancel?: () => void;
   onOpenChange: (open: boolean) => void;
+  /** QA Test IDs Foundation - stable selector for this specific dialog instance (e.g. "customer-delete-dialog"). Confirm/Cancel buttons derive `${testId}-confirm-button` / `${testId}-cancel-button`. */
+  testId?: string;
 }
 
 export default function AlertDialog({
@@ -25,12 +27,14 @@ export default function AlertDialog({
   onConfirm,
   onCancel,
   onOpenChange,
+  testId,
 }: Props) {
   return (
     <RadixAlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <RadixAlertDialog.Portal>
         <RadixAlertDialog.Overlay className="fixed inset-0 bg-black/50 z-50 data-[state=open]:animate-in data-[state=open]:fade-in data-[state=closed]:animate-out data-[state=closed]:fade-out" />
         <RadixAlertDialog.Content
+          data-testid={testId}
           className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[calc(100%-2rem)] max-w-sm
             rounded-xl border border-border bg-card p-6 shadow-xl
             data-[state=open]:animate-in data-[state=open]:fade-in data-[state=open]:zoom-in-95
@@ -46,10 +50,20 @@ export default function AlertDialog({
           )}
           <div className="flex justify-end gap-3 mt-6">
             <RadixAlertDialog.Cancel asChild>
-              <Button variant="secondary" onClick={onCancel}>{cancelLabel}</Button>
+              <Button
+                data-testid={testId ? `${testId}-cancel-button` : undefined}
+                variant="secondary"
+                onClick={onCancel}
+              >
+                {cancelLabel}
+              </Button>
             </RadixAlertDialog.Cancel>
             <RadixAlertDialog.Action asChild>
-              <Button variant={confirmVariant} onClick={onConfirm}>
+              <Button
+                data-testid={testId ? `${testId}-confirm-button` : undefined}
+                variant={confirmVariant}
+                onClick={onConfirm}
+              >
                 {confirmLabel}
               </Button>
             </RadixAlertDialog.Action>

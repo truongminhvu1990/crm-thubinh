@@ -16,6 +16,9 @@ interface Props {
    * Source / Audit Info / Possible Duplicate columns (Features 2/3/4) and
    * highlights duplicate-flagged rows. */
   verificationMode?: boolean;
+  /** Simple Profit Calculation Package, Part 5 - Owner/Manager only. */
+  canViewCostAndProfit?: boolean;
+  costByProductId?: Map<string, number>;
 }
 
 const currency = new Intl.NumberFormat("vi-VN", {
@@ -24,7 +27,13 @@ const currency = new Intl.NumberFormat("vi-VN", {
   maximumFractionDigits: 0,
 });
 
-export default function SalesLedgerTable({ rows, isLoading = false, verificationMode = false }: Props) {
+export default function SalesLedgerTable({
+  rows,
+  isLoading = false,
+  verificationMode = false,
+  canViewCostAndProfit = false,
+  costByProductId = new Map(),
+}: Props) {
   const router = useRouter();
 
   if (isLoading) {
@@ -48,7 +57,7 @@ export default function SalesLedgerTable({ rows, isLoading = false, verification
 
   return (
     <div className="overflow-x-auto bg-card rounded-xl border border-border shadow-sm">
-      <table className={`w-full ${verificationMode ? "min-w-[1560px]" : "min-w-[1200px]"}`}>
+      <table data-testid="sales-ledger-table" className={`w-full ${verificationMode ? "min-w-[1560px]" : "min-w-[1200px]"}`}>
         <thead>
           <tr className="border-b border-border">
             <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -72,6 +81,16 @@ export default function SalesLedgerTable({ rows, isLoading = false, verification
             <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Hoa hồng
             </th>
+            {canViewCostAndProfit && (
+              <>
+                <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Giá vốn
+                </th>
+                <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Lãi / Lỗ
+                </th>
+              </>
+            )}
             <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Trạng thái
             </th>
@@ -135,6 +154,20 @@ export default function SalesLedgerTable({ rows, isLoading = false, verification
               <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
                 {r.commission_amount !== null ? currency.format(r.commission_amount) : "—"}
               </td>
+              {canViewCostAndProfit && (
+                <>
+                  <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
+                    {r.product_id && costByProductId.has(r.product_id)
+                      ? currency.format(costByProductId.get(r.product_id)!)
+                      : "—"}
+                  </td>
+                  <td className="px-4 py-3.5 text-sm text-foreground whitespace-nowrap">
+                    {r.product_id && costByProductId.has(r.product_id)
+                      ? currency.format(r.sale_amount - costByProductId.get(r.product_id)!)
+                      : "—"}
+                  </td>
+                </>
+              )}
               <td className="px-4 py-3.5">
                 {r.commission_status ? (
                   <Badge variant={COMMISSION_STATUS_BADGE_VARIANT[r.commission_status]}>

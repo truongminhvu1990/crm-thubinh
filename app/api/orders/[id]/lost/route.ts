@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getOrderDetail } from "@/lib/orders/order.service";
 import { orderService } from "../../_service";
 import { handleOrderServiceError } from "../../_errors";
+import { authorizeOrderWrite } from "../../_authorization";
 
-/** ORDERS_UI.md §10 — Mark as Lost. actor = created_by (Product Owner
- * rule), resolved from the parent order. */
+/** ORDERS_UI.md §10 — Mark as Lost. Authorization Engine V2 (Package 4A) —
+ * Authentication/Permission/Data Scope enforced via authorizeOrderWrite
+ * before the write proceeds. actor = the current authenticated staff member
+ * performing this action (Product Owner review: not order.created_by). */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
@@ -15,9 +18,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
+    const authResult = await authorizeOrderWrite(request, detail.order);
+    if ("error" in authResult) return authResult.error;
+
     const order = await orderService.markOrderLost(
       { order_id: id, lost_reason: body.lost_reason },
-      detail.order.created_by
+      authResult.staff.full_name
     );
     return NextResponse.json(order);
   } catch (error) {

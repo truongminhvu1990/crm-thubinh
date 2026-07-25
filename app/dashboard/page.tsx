@@ -2,17 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Users, Gem, Package, TrendingUp, Calendar, Wallet } from "lucide-react";
-import { getCustomerStats, getFollowUpSummaryCounts, FollowUpSummaryCounts } from "@/lib/customer.service";
-import {
-  getProductReportData,
-  getBatchStaticReportData,
-  getPurchaseReportData,
-  PurchaseReportData,
-} from "@/lib/reports/reports.service";
+import { Users, Gem, Package, TrendingUp, Calendar, Wallet, Coins } from "lucide-react";
+import { FollowUpSummaryCounts } from "@/lib/customer.service";
+import { ProductReportData, BatchStaticReportData, PurchaseReportData } from "@/lib/reports/reports.service";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
-import { getDashboardCommissionStats } from "@/lib/commission/commission.service";
-import { getTopSalesStaff, TopSalesStaffEntry } from "@/lib/staff.service";
+import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
+import { TopSalesStaffEntry } from "@/lib/staff.service";
 import Card from "@/components/ui/Card";
 import StatCard from "@/components/ui/StatCard";
 import GlobalDateFilter from "@/components/shared/GlobalDateFilter";
@@ -45,16 +40,34 @@ export default function Dashboard() {
   const [commissionStats, setCommissionStats] = useState({ thisMonth: 0, outstanding: 0 });
   const [topSalesStaff, setTopSalesStaff] = useState<TopSalesStaffEntry[]>([]);
 
+  // Simple Profit Calculation Package, Final Revision: Dashboard stays
+  // exactly as it always has for every role - no separate Sales layout.
+  // Owner/Manager additionally see two more cards (Giá vốn/Lãi / Lỗ), using
+  // totalCost/totalProfit already present on `purchaseData` since Part 3's
+  // change to getPurchaseReportData - no new fetch needed.
+  const canViewCostAndProfit = useIsOwnerOrManager();
+
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
-    Promise.all([getCustomerStats(), getProductReportData(), getBatchStaticReportData(), getPurchaseReportData(range)])
-      .then(([customers, products, batches, purchases]) => {
-        if (cancelled) return;
-        setCustomerStats(customers);
-        setProductTotal(products.total);
-        setBatchTotal(batches.totalBatches);
-        setPurchaseData(purchases);
+    const overviewParams = range ? `?start=${range.start}&end=${range.end}` : "";
+    fetch(`/api/dashboard/overview${overviewParams}`)
+      .then((res) =>
+        res.ok
+          ? (res.json() as Promise<{
+              customers: { total: number; vip: number; normal: number; recentlyContacted: number };
+              products: ProductReportData;
+              batches: BatchStaticReportData;
+              purchases: PurchaseReportData;
+            }>)
+          : null
+      )
+      .then((overview) => {
+        if (cancelled || !overview) return;
+        setCustomerStats(overview.customers);
+        setProductTotal(overview.products.total);
+        setBatchTotal(overview.batches.totalBatches);
+        setPurchaseData(overview.purchases);
       })
       .catch((error) => console.error("Failed to load dashboard stats:", error))
       .finally(() => {
@@ -71,9 +84,11 @@ export default function Dashboard() {
   // range changes.
   useEffect(() => {
     let cancelled = false;
-    getFollowUpSummaryCounts().then((counts) => {
-      if (!cancelled) setFollowUpCounts(counts);
-    });
+    fetch("/api/dashboard/follow-up")
+      .then((res) => (res.ok ? (res.json() as Promise<FollowUpSummaryCounts>) : null))
+      .then((counts) => {
+        if (!cancelled && counts) setFollowUpCounts(counts);
+      });
     return () => {
       cancelled = true;
     };
@@ -84,9 +99,11 @@ export default function Dashboard() {
   // sales_commissions exclusively (never customer_purchases), per spec.
   useEffect(() => {
     let cancelled = false;
-    getDashboardCommissionStats().then((stats) => {
-      if (!cancelled) setCommissionStats(stats);
-    });
+    fetch("/api/dashboard/commission-stats")
+      .then((res) => (res.ok ? (res.json() as Promise<{ thisMonth: number; outstanding: number }>) : null))
+      .then((stats) => {
+        if (!cancelled && stats) setCommissionStats(stats);
+      });
     return () => {
       cancelled = true;
     };
@@ -97,9 +114,11 @@ export default function Dashboard() {
   // dependent.
   useEffect(() => {
     let cancelled = false;
-    getTopSalesStaff().then((entries) => {
-      if (!cancelled) setTopSalesStaff(entries);
-    });
+    fetch("/api/dashboard/top-sales-staff")
+      .then((res) => (res.ok ? (res.json() as Promise<TopSalesStaffEntry[]>) : []))
+      .then((entries) => {
+        if (!cancelled) setTopSalesStaff(entries);
+      });
     return () => {
       cancelled = true;
     };
@@ -142,10 +161,14 @@ export default function Dashboard() {
         <GlobalDateFilter />
       </div>
 
-      {/* Revenue - its own row so the formatted currency string always has room */}
-      <div className="mb-4">
+      {/* Revenue - unchanged for every role. Simple Profit Calculation
+          Package, Final Revision: Owner/Manager additionally see Giá vốn/
+          Lãi / Lỗ alongside it, in the same row - nothing is hidden or
+          replaced for Sales. */}
+      <div className={`mb-4 grid grid-cols-1 gap-4 ${canViewCostAndProfit ? "sm:grid-cols-3" : ""}`}>
         <Link href="/reports">
           <StatCard
+            testId="dashboard-revenue-card"
             title={revenueLabel}
             value={currency.format(monthRevenue)}
             icon={<Wallet className="w-8 h-8 text-emerald-600" />}
@@ -153,12 +176,31 @@ export default function Dashboard() {
             badge={<ScopeIndicator resource="revenue" />}
           />
         </Link>
+        {canViewCostAndProfit && (
+          <>
+            <StatCard
+              testId="dashboard-cost-card"
+              title="Giá vốn"
+              value={currency.format(purchaseData?.totalCost ?? 0)}
+              icon={<Coins className="w-8 h-8 text-amber-600" />}
+              color="bg-amber-100"
+            />
+            <StatCard
+              testId="dashboard-profit-card"
+              title="Lãi / Lỗ"
+              value={currency.format(purchaseData?.totalProfit ?? 0)}
+              icon={<TrendingUp className="w-8 h-8 text-primary" />}
+              color="bg-primary/10"
+            />
+          </>
+        )}
       </div>
 
       {/* Overview - customer stats (existing) + product/batch totals (Reports) */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         <Link href="/customers">
           <StatCard
+            testId="dashboard-customer-total-card"
             title="Tổng khách hàng"
             value={customerStats.total}
             icon={<Users className="w-6 h-6 text-primary" />}
@@ -168,6 +210,7 @@ export default function Dashboard() {
         </Link>
         <Link href="/customers?type=VIP">
           <StatCard
+            testId="dashboard-customer-vip-card"
             title="Khách VIP"
             value={customerStats.vip}
             icon={<Gem className="w-6 h-6 text-yellow-600" />}
@@ -175,12 +218,14 @@ export default function Dashboard() {
           />
         </Link>
         <StatCard
+          testId="dashboard-customer-normal-card"
           title="Khách thường"
           value={customerStats.normal}
           icon={<Users className="w-6 h-6 text-green-600" />}
           color="bg-green-100"
         />
         <StatCard
+          testId="dashboard-recently-contacted-card"
           title="Liên hệ 7 ngày"
           value={customerStats.recentlyContacted}
           icon={<Calendar className="w-6 h-6 text-purple-600" />}
@@ -188,6 +233,7 @@ export default function Dashboard() {
         />
         <Link href="/reports">
           <StatCard
+            testId="dashboard-product-total-card"
             title="Tổng sản phẩm"
             value={productTotal}
             icon={<Gem className="w-6 h-6 text-primary" />}
@@ -196,6 +242,7 @@ export default function Dashboard() {
         </Link>
         <Link href="/reports">
           <StatCard
+            testId="dashboard-batch-total-card"
             title="Tổng lô hàng"
             value={batchTotal}
             icon={<Package className="w-6 h-6 text-blue-600" />}

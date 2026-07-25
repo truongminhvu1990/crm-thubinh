@@ -52,6 +52,7 @@ export default function OrderDetailHeader({ order, isEditable = false, onReassig
             {order.sales_owner}
             {isEditable && onReassignClick && (
               <button
+                data-testid="order-reassign-owner-button"
                 onClick={onReassignClick}
                 className="text-primary hover:underline text-xs font-normal inline-flex items-center gap-0.5"
                 aria-label="Đổi người phụ trách"

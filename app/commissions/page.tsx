@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CommissionListFilters, SalesCommission } from "@/types/commission";
-import { getCommissionList, summarizeCommissions } from "@/lib/commission/commission.service";
+import { summarizeCommissions } from "@/lib/commission/commission.service";
 import CommissionSummaryCards from "@/components/commission/CommissionSummaryCards";
 import CommissionFilters from "@/components/commission/CommissionFilters";
 import CommissionTable from "@/components/commission/CommissionTable";
@@ -14,7 +14,14 @@ export default function CommissionsPage() {
 
   async function load(activeFilters: CommissionListFilters) {
     setIsLoading(true);
-    const data = await getCommissionList(activeFilters);
+    const params = new URLSearchParams();
+    if (activeFilters.dateFrom) params.set("dateFrom", activeFilters.dateFrom);
+    if (activeFilters.dateTo) params.set("dateTo", activeFilters.dateTo);
+    if (activeFilters.salesperson) params.set("salesperson", activeFilters.salesperson);
+    if (activeFilters.status) params.set("status", activeFilters.status);
+    const query = params.toString();
+    const res = await fetch(`/api/commissions${query ? `?${query}` : ""}`);
+    const data: SalesCommission[] = res.ok ? await res.json() : [];
     setCommissions(data);
     setIsLoading(false);
   }

@@ -9,14 +9,17 @@ interface Props {
   title: string;
   children: ReactNode;
   onClose: () => void;
+  /** QA Test IDs Foundation - stable selector for this specific modal instance (e.g. "customer-modal"). */
+  testId?: string;
 }
 
-export default function Modal({ open, title, children, onClose }: Props) {
+export default function Modal({ open, title, children, onClose, testId }: Props) {
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !next && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-black/50 z-50 data-[state=open]:animate-in data-[state=open]:fade-in data-[state=closed]:animate-out data-[state=closed]:fade-out" />
         <Dialog.Content
+          data-testid={testId}
           className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[calc(100%-2rem)] max-w-lg
             rounded-xl border border-border bg-card p-6 shadow-xl
             data-[state=open]:animate-in data-[state=open]:fade-in data-[state=open]:zoom-in-95
@@ -28,6 +31,7 @@ export default function Modal({ open, title, children, onClose }: Props) {
             </Dialog.Title>
             <Dialog.Close asChild>
               <button
+                data-testid={testId ? `${testId}-close-button` : undefined}
                 className="text-muted-foreground hover:text-destructive transition-colors rounded-md p-1"
                 aria-label="Đóng"
               >

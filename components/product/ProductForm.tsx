@@ -2,6 +2,7 @@
 
 import { Product } from "@/types/product";
 import Input from "@/components/ui/Input";
+import CurrencyInput from "@/components/ui/CurrencyInput";
 import Select from "@/components/ui/Select";
 import CreatableSelect from "@/components/ui/CreatableSelect";
 import { Tag, Wallet, MapPin, FileText, Truck, Video, Scale, PackageCheck } from "lucide-react";
@@ -58,6 +59,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
 
       <div className="grid grid-cols-2 gap-4">
         <Input
+          data-testid="product-sku-input"
           label="SKU"
           placeholder="VD: SKU-001"
           value={product.sku || ""}
@@ -65,6 +67,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
         />
         <Input
           id="product-product_code"
+          data-testid="product-code-input"
           label="Mã sản phẩm *"
           placeholder="VD: SP001"
           value={product.product_code || ""}
@@ -76,6 +79,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
       <div className="grid grid-cols-2 gap-4">
         <Input
           id="product-product_name"
+          data-testid="product-name-input"
           label="Tên sản phẩm *"
           placeholder="Nhập tên sản phẩm"
           value={product.product_name || ""}
@@ -84,6 +88,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
           icon={<Tag className="w-4 h-4" />}
         />
         <Select
+          data-testid="product-category-select"
           label="Danh mục"
           placeholder="Chọn danh mục"
           options={categoryOptions}
@@ -93,6 +98,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
       </div>
 
       <Select
+        data-testid="product-status-select"
         label="Trạng thái"
         placeholder="Chọn trạng thái"
         options={PRODUCT_STATUS}
@@ -103,25 +109,23 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
       <SectionTitle>Kinh doanh</SectionTitle>
 
       <div className="grid grid-cols-2 gap-4">
-        <Input
+        <CurrencyInput
           id="product-cost_price"
+          testId="product-cost-price-input"
           label="Giá vốn (VNĐ)"
-          type="number"
           placeholder="0"
-          min={0}
-          value={product.cost_price ?? ""}
-          onChange={(e) => updateNumberField("cost_price", e.target.value)}
+          value={product.cost_price}
+          onChange={(value) => setProduct({ ...product, cost_price: value })}
           icon={<Wallet className="w-4 h-4" />}
           error={errors.cost_price}
         />
-        <Input
+        <CurrencyInput
           id="product-sale_price"
+          testId="product-selling-price-input"
           label="Giá bán (VNĐ)"
-          type="number"
           placeholder="0"
-          min={0}
-          value={product.sale_price ?? ""}
-          onChange={(e) => updateNumberField("sale_price", e.target.value)}
+          value={product.sale_price}
+          onChange={(value) => setProduct({ ...product, sale_price: value })}
           icon={<Wallet className="w-4 h-4" />}
           error={errors.sale_price}
         />
@@ -129,6 +133,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
 
       <div className="grid grid-cols-2 gap-4">
         <Select
+          data-testid="product-source-select"
           label="Nguồn hàng"
           placeholder="Chọn nguồn hàng"
           options={sourceOptions}
@@ -136,6 +141,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
           onChange={(e) => updateField("source", e.target.value)}
         />
         <Select
+          data-testid="product-batch-select"
           label="Lô hàng (không bắt buộc)"
           placeholder="Không thuộc lô hàng nào"
           options={batchOptions}
@@ -147,6 +153,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
       {!product.id && (
         <Input
           id="product-available"
+          data-testid="product-available-input"
           label="Tồn kho ban đầu"
           type="number"
           placeholder="1"
@@ -160,6 +167,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
       <div className="grid grid-cols-2 gap-4">
         <Input
           id="product-discount"
+          data-testid="product-discount-input"
           label="Giảm giá (%)"
           type="number"
           placeholder="0"
@@ -170,6 +178,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
           error={errors.discount}
         />
         <Select
+          data-testid="product-salesperson-select"
           label="Nhân viên bán hàng"
           placeholder="Chọn nhân viên"
           options={salespersonOptions}
@@ -180,6 +189,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
 
       <div className="grid grid-cols-2 gap-4">
         <Input
+          data-testid="product-location-input"
           label="Vị trí lưu kho"
           placeholder="VD: Tủ A - Ngăn 2"
           value={product.location || ""}
@@ -187,6 +197,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
           icon={<MapPin className="w-4 h-4" />}
         />
         <Input
+          data-testid="product-certificate-input"
           label="Số chứng nhận"
           placeholder="VD: GIA-123456"
           value={product.certificate_no || ""}
@@ -196,6 +207,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
       </div>
 
       <Input
+        data-testid="product-supplier-input"
         label="Nhà cung cấp"
         placeholder="Tên nhà cung cấp"
         value={product.supplier || ""}
@@ -207,6 +219,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
 
       <div className="grid grid-cols-2 gap-4">
         <Select
+          data-testid="product-color-select"
           label="Màu sắc"
           placeholder="Chọn màu sắc"
           options={colorOptions}
@@ -215,6 +228,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
         />
         <Input
           id="product-size"
+          data-testid="product-size-input"
           label={sizeLabel}
           type="number"
           placeholder="VD: 54 hoặc 17.5"
@@ -228,6 +242,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
       <div className="grid grid-cols-2 gap-4">
         <Input
           id="product-weight"
+          data-testid="product-weight-input"
           label="Trọng lượng (g)"
           type="number"
           placeholder="VD: 25.5"
@@ -250,6 +265,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
       <div>
         <label className="block text-sm font-medium text-foreground mb-1">Ghi chú</label>
         <textarea
+          data-testid="product-notes-input"
           placeholder="Ghi chú về sản phẩm..."
           value={product.notes || ""}
           onChange={(e) => updateField("notes", e.target.value)}
@@ -267,6 +283,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
       )}
 
       <Input
+        data-testid="product-video-input"
         label="Video (URL)"
         placeholder="https://..."
         value={product.video || ""}

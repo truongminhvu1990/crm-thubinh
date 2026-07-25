@@ -2,6 +2,7 @@
 
 import { ProductBatch } from "@/types/productBatch";
 import Input from "@/components/ui/Input";
+import CurrencyInput from "@/components/ui/CurrencyInput";
 import Select from "@/components/ui/Select";
 import { Hash, Truck, CalendarDays, CalendarClock, Wallet } from "lucide-react";
 import { BATCH_STATUS } from "@/lib/product.constants";
@@ -15,10 +16,6 @@ interface Props {
 export default function BatchForm({ batch, setBatch, errors = {} }: Props) {
   const updateField = (field: keyof ProductBatch, value: string) => {
     setBatch({ ...batch, [field]: value });
-  };
-
-  const updateNumberField = (field: keyof ProductBatch, value: string) => {
-    setBatch({ ...batch, [field]: value === "" ? undefined : Number(value) });
   };
 
   return (
@@ -59,12 +56,11 @@ export default function BatchForm({ batch, setBatch, errors = {} }: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <Input
+        <CurrencyInput
           label="Chi phí khác (VNĐ)"
-          type="number"
           placeholder="0"
-          value={batch.other_cost ?? ""}
-          onChange={(e) => updateNumberField("other_cost", e.target.value)}
+          value={batch.other_cost}
+          onChange={(value) => setBatch({ ...batch, other_cost: value })}
           icon={<Wallet className="w-4 h-4" />}
         />
         <Select

@@ -44,12 +44,8 @@ import {
   CustomerReportData,
   ProductReportData,
   PurchaseReportData,
-  getBatchStaticReportData,
-  getCustomerReportData,
-  getProductReportData,
-  getPurchaseReportData,
-  getRevenueByBatch,
 } from "@/lib/reports/reports.service";
+import { DateRange } from "@/lib/dateFilter";
 
 const currency = new Intl.NumberFormat("vi-VN", {
   style: "currency",
@@ -65,6 +61,15 @@ function formatMonth(month: string): string {
 
 function breakdownRows(rows: { label: string; count: number }[]): ReportsTableRow[] {
   return rows.map((r) => ({ key: r.label, searchLabel: r.label, cells: [r.label, r.count] }));
+}
+
+function rangeQuery(range: DateRange | null): string {
+  return range ? `?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}` : "";
+}
+
+async function fetchJson<T>(url: string): Promise<T | null> {
+  const res = await fetch(url);
+  return res.ok ? ((await res.json()) as T) : null;
 }
 
 export default function ReportsPage() {
@@ -85,21 +90,21 @@ export default function ReportsPage() {
 
   // Initial load - everything not gated behind a Date Filter loads once.
   useEffect(() => {
-    getCustomerReportData().then(setCustomerData);
-    getProductReportData().then(setProductData);
-    getBatchStaticReportData().then(setBatchStatic);
+    fetchJson<CustomerReportData>("/api/reports/customers").then(setCustomerData);
+    fetchJson<ProductReportData>("/api/reports/products").then(setProductData);
+    fetchJson<BatchStaticReportData>("/api/reports/batches").then(setBatchStatic);
   }, []);
 
   // Doanh thu section - the Global Date Filter governs all 4 of its reports
   // at once (REPORTS_SPEC.md §4, Sprint v1.0.2).
   useEffect(() => {
-    getPurchaseReportData(range).then(setPurchaseData);
+    fetchJson<PurchaseReportData>(`/api/reports/purchases${rangeQuery(range)}`).then(setPurchaseData);
   }, [range]);
 
   // Revenue by Batch - the only Lô hàng report the Date Filter governs, same
   // shared range as the Doanh thu section above.
   useEffect(() => {
-    getRevenueByBatch(range).then(setRevenueByBatch);
+    fetchJson<BatchRevenueRow[]>(`/api/reports/batches/revenue${rangeQuery(range)}`).then(setRevenueByBatch);
   }, [range]);
 
   const initialLoading = customerData === null || productData === null || batchStatic === null;
@@ -193,6 +198,7 @@ export default function ReportsPage() {
         <div className="flex items-center gap-2">
           <GlobalDateFilter />
           <Button
+            data-testid="report-reload-button"
             variant="secondary"
             size="md"
             onClick={() => setRefreshToken((t) => t + 1)}

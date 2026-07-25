@@ -291,6 +291,7 @@ export default function CustomersPage() {
         <div className="flex flex-col lg:flex-row gap-3">
           <div className="flex-1 min-w-0">
             <SearchInput
+              data-testid="customer-search-input"
               placeholder="Tìm theo tên, mã hoặc số điện thoại..."
               value={searchTerm}
               onChange={(e) => handleSearchChange(e.target.value)}
@@ -300,6 +301,7 @@ export default function CustomersPage() {
 
           <div className="flex flex-wrap gap-3">
             <select
+              data-testid="customer-type-filter"
               value={filterType}
               onChange={(e) => handleFilterChange(e.target.value)}
               className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -310,6 +312,7 @@ export default function CustomersPage() {
             </select>
 
             <select
+              data-testid="customer-revenue-filter"
               value={revenueFilter}
               onChange={(e) => handleRevenueFilterChange(e.target.value)}
               className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -323,6 +326,7 @@ export default function CustomersPage() {
             </select>
 
             <select
+              data-testid="customer-country-filter"
               value={countryFilter}
               onChange={(e) => handleCountryFilterChange(e.target.value)}
               className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -336,6 +340,7 @@ export default function CustomersPage() {
             </select>
 
             <select
+              data-testid="customer-market-filter"
               value={marketFilter}
               onChange={(e) => handleMarketFilterChange(e.target.value)}
               className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -349,6 +354,7 @@ export default function CustomersPage() {
             </select>
 
             <select
+              data-testid="customer-tag-filter"
               value={tagFilter}
               onChange={(e) => handleTagFilterChange(e.target.value)}
               className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -362,6 +368,7 @@ export default function CustomersPage() {
             </select>
 
             <select
+              data-testid="customer-followup-filter"
               value={followupFilter}
               onChange={(e) => handleFollowupFilterChange(e.target.value)}
               className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -374,24 +381,24 @@ export default function CustomersPage() {
             </select>
 
             {hasActiveFilters && (
-              <Button variant="secondary" size="md" onClick={handleClearFilters}>
+              <Button data-testid="customer-clear-filters-button" variant="secondary" size="md" onClick={handleClearFilters}>
                 <X className="w-4 h-4" />
                 <span className="hidden sm:inline">Xóa bộ lọc</span>
               </Button>
             )}
-            <Button variant="secondary" size="md" onClick={loadCustomers}>
+            <Button data-testid="customer-reload-button" variant="secondary" size="md" onClick={loadCustomers}>
               <RefreshCw className="w-4 h-4" />
               <span className="hidden sm:inline">Làm mới</span>
             </Button>
-            <Button variant="secondary" size="md" onClick={handleExportCsv}>
+            <Button data-testid="customer-export-button" variant="secondary" size="md" onClick={handleExportCsv}>
               <Download className="w-4 h-4" />
               <span className="hidden sm:inline">Xuất CSV</span>
             </Button>
-            <Button variant="secondary" size="md" onClick={() => setImportModalOpen(true)}>
+            <Button data-testid="customer-import-button" variant="secondary" size="md" onClick={() => setImportModalOpen(true)}>
               <Upload className="w-4 h-4" />
               <span className="hidden sm:inline">Nhập CSV</span>
             </Button>
-            <Button variant="primary" size="md" onClick={handleAddCustomer} className="whitespace-nowrap">
+            <Button data-testid="customer-add-button" variant="primary" size="md" onClick={handleAddCustomer} className="whitespace-nowrap">
               <Plus className="w-4 h-4" />
               Thêm khách
             </Button>
@@ -422,6 +429,7 @@ export default function CustomersPage() {
       />
 
       <AlertDialog
+        testId="customer-duplicate-dialog"
         open={!!saveFlow.duplicateCustomer}
         title="Khách hàng với số điện thoại này đã tồn tại."
         confirmLabel="Tiếp tục tạo"

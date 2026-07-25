@@ -121,7 +121,7 @@ export default function OrdersPage() {
           </p>
         </div>
         <Link href="/orders/new">
-          <Button variant="primary">
+          <Button data-testid="order-create-button" variant="primary">
             <Plus className="w-4 h-4" />
             Tạo đơn hàng
           </Button>
@@ -132,6 +132,7 @@ export default function OrdersPage() {
         <div className="flex flex-col lg:flex-row gap-3">
           <div className="flex-1 min-w-0">
             <SearchInput
+              data-testid="order-search-input"
               placeholder="Tìm theo mã đơn hoặc tên/SĐT khách hàng..."
               value={searchTerm}
               onChange={(e) => handleSearchChange(e.target.value)}
@@ -141,6 +142,7 @@ export default function OrdersPage() {
 
           <div className="flex flex-wrap gap-3">
             <select
+              data-testid="order-status-filter"
               value={orderStatusFilter}
               onChange={(e) => handleOrderStatusChange(e.target.value)}
               className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -154,6 +156,7 @@ export default function OrdersPage() {
             </select>
 
             <select
+              data-testid="order-payment-status-filter"
               value={paymentStatusFilter}
               onChange={(e) => handlePaymentStatusChange(e.target.value)}
               className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -167,6 +170,7 @@ export default function OrdersPage() {
             </select>
 
             <select
+              data-testid="order-sales-owner-filter"
               value={salesOwnerFilter}
               onChange={(e) => handleSalesOwnerChange(e.target.value)}
               className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -180,19 +184,21 @@ export default function OrdersPage() {
             </select>
 
             <input
+              data-testid="order-date-from-filter"
               type="date"
               value={dateFrom}
               onChange={(e) => handleDateFromChange(e.target.value)}
               className="flex-1 sm:flex-none sm:w-36 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
             />
             <input
+              data-testid="order-date-to-filter"
               type="date"
               value={dateTo}
               onChange={(e) => handleDateToChange(e.target.value)}
               className="flex-1 sm:flex-none sm:w-36 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
             />
 
-            <Button variant="secondary" size="md" onClick={loadOrders}>
+            <Button data-testid="order-reload-button" variant="secondary" size="md" onClick={loadOrders}>
               <RefreshCw className="w-4 h-4" />
               <span className="hidden sm:inline">Làm mới</span>
             </Button>

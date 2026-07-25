@@ -38,7 +38,7 @@ export default function CampaignTable({ campaigns, isLoading = false, onEdit, on
 
   return (
     <div className="overflow-x-auto bg-card rounded-xl border border-border shadow-sm">
-      <table className="w-full min-w-[1000px]">
+      <table data-testid="marketing-campaign-table" className="w-full min-w-[1000px]">
         <thead>
           <tr className="border-b border-border">
             <th className="px-5 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tên</th>

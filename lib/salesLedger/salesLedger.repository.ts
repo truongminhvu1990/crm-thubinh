@@ -1,5 +1,7 @@
+import { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { SalesLedgerFilters, SalesLedgerRow, SalesLedgerPage, SALES_LEDGER_PAGE_SIZE } from "@/types/salesLedger";
+import { Staff } from "@/types/staff";
 import { getCurrentStaff } from "@/lib/permission";
 import { applyDataScopeWithFallback } from "@/lib/permission/dataScope";
 
@@ -15,9 +17,26 @@ import { applyDataScopeWithFallback } from "@/lib/permission/dataScope";
  * Loosely typed - PostgrestFilterBuilder's generics don't thread cleanly
  * through a shared helper called with two different `.select()` shapes,
  * and this codebase already accepts that tradeoff elsewhere (see the
- * `as unknown as X` casts throughout lib/*.service.ts). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function applyFilters(query: any, filters: SalesLedgerFilters) {
+ * `as unknown as X` casts throughout lib/*.service.ts).
+ *
+ * `staff` (Hotfix 3A): sentinel-typed `Staff | null | undefined`, not just
+ * `Staff | null` - `undefined` (the default, every pre-Hotfix-3A caller)
+ * means "resolve it yourself via getCurrentStaff() exactly as before" (the
+ * Browser Authentication Context, correct for callers that actually run in
+ * the browser - Data Verification's page, Export Excel). An explicit
+ * `Staff | null` means "use this value, I already resolved it" - what
+ * app/api/sales-ledger/** now passes, using getCurrentStaffFromRequest()
+ * (Server Authentication Context, lib/permission/serverAuth.ts - the same
+ * mechanism Orders/Permission Center already use) instead of the browser
+ * client's session-less auth.getUser() call. Nothing about the Data Scope
+ * call itself (applyDataScopeWithFallback, "revenue" resource, uuid+text
+ * fallback fields) changed - only how "current staff" is identified. */
+async function applyFilters(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  query: any,
+  filters: SalesLedgerFilters,
+  staff?: Staff | null
+) {
   if (filters.dateFrom) query = query.gte("sale_date", filters.dateFrom);
   if (filters.dateTo) query = query.lt("sale_date", filters.dateTo);
 
@@ -71,15 +90,26 @@ async function applyFilters(query: any, filters: SalesLedgerFilters) {
   // passes both `salesperson_id`/`salesperson` straight through unchanged
   // (DATA_SCOPE_ROLLOUT_DATABASE.md §1), so it uses the identical
   // uuid-with-text-fallback resolution, not a separate one.
-  const staff = await getCurrentStaff();
-  if (staff) query = (await applyDataScopeWithFallback(query, staff, "revenue", "salesperson_id", "salesperson")).query;
+  const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
+  if (resolvedStaff) {
+    query = (await applyDataScopeWithFallback(query, resolvedStaff, "revenue", "salesperson_id", "salesperson")).query;
+  }
 
   return query;
 }
 
-export async function getSalesLedgerPage(filters: SalesLedgerFilters): Promise<SalesLedgerPage> {
-  let query = supabase.from("sales_ledger").select("*", { count: "exact" });
-  query = await applyFilters(query, filters);
+/** `client` defaults to the browser Supabase client so every existing
+ * caller (Data Verification's page, export) keeps its exact current
+ * behavior unchanged. Backend API Foundation (Package 4C, Wave 3) passes a
+ * server client instead, from app/api/sales-ledger/**. `staff` (Hotfix 3A)
+ * - see applyFilters' doc comment for the sentinel semantics. */
+export async function getSalesLedgerPage(
+  filters: SalesLedgerFilters,
+  client: SupabaseClient = supabase,
+  staff?: Staff | null
+): Promise<SalesLedgerPage> {
+  let query = client.from("sales_ledger").select("*", { count: "exact" });
+  query = await applyFilters(query, filters, staff);
   query = query.order(filters.sortField, { ascending: filters.sortDirection === "asc" });
 
   const from = (filters.page - 1) * SALES_LEDGER_PAGE_SIZE;
@@ -101,10 +131,12 @@ export async function getSalesLedgerPage(filters: SalesLedgerFilters): Promise<S
  * not just the current page of 50. Selecting only these two columns keeps
  * it cheap even when the filtered set is large. */
 export async function getSalesLedgerAggregateRows(
-  filters: SalesLedgerFilters
+  filters: SalesLedgerFilters,
+  client: SupabaseClient = supabase,
+  staff?: Staff | null
 ): Promise<{ sale_amount: number; commission_amount: number | null }[]> {
-  let query = supabase.from("sales_ledger").select("sale_amount, commission_amount");
-  query = await applyFilters(query, filters);
+  let query = client.from("sales_ledger").select("sale_amount, commission_amount");
+  query = await applyFilters(query, filters, staff);
 
   const { data, error } = await query;
 
@@ -119,11 +151,17 @@ export async function getSalesLedgerAggregateRows(
  * list (above), so a direct-link to an out-of-scope row resolves to the
  * same "no row" outcome as a nonexistent purchase id (DATA_SCOPE_ROLLOUT_
  * UI.md §5 - "not found," never "forbidden"). */
-export async function getSalesLedgerRowByPurchaseId(purchaseId: string): Promise<SalesLedgerRow | null> {
-  let query = supabase.from("sales_ledger").select("*").eq("purchase_id", purchaseId);
+export async function getSalesLedgerRowByPurchaseId(
+  purchaseId: string,
+  client: SupabaseClient = supabase,
+  staff?: Staff | null
+): Promise<SalesLedgerRow | null> {
+  let query = client.from("sales_ledger").select("*").eq("purchase_id", purchaseId);
 
-  const staff = await getCurrentStaff();
-  if (staff) query = (await applyDataScopeWithFallback(query, staff, "revenue", "salesperson_id", "salesperson")).query;
+  const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
+  if (resolvedStaff) {
+    query = (await applyDataScopeWithFallback(query, resolvedStaff, "revenue", "salesperson_id", "salesperson")).query;
+  }
 
   const { data, error } = await query.maybeSingle();
 
@@ -139,10 +177,13 @@ export async function getSalesLedgerRowByPurchaseId(purchaseId: string): Promise
  * module, keeping this a pure read with no coupling to Products' CRUD.
  * Picks the lowest sort_order per product, same tie-break as
  * coverImageUrl() in that module. */
-export async function getPrimaryImagesByProductIds(productIds: string[]): Promise<Map<string, string>> {
+export async function getPrimaryImagesByProductIds(
+  productIds: string[],
+  client: SupabaseClient = supabase
+): Promise<Map<string, string>> {
   if (productIds.length === 0) return new Map();
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("product_images")
     .select("product_id, image_url, sort_order")
     .in("product_id", productIds)
@@ -161,9 +202,10 @@ export async function getPrimaryImagesByProductIds(productIds: string[]): Promis
 }
 
 export async function getProductImagesForProduct(
-  productId: string
+  productId: string,
+  client: SupabaseClient = supabase
 ): Promise<{ id: string; image_url: string; sort_order: number }[]> {
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("product_images")
     .select("id, image_url, sort_order")
     .eq("product_id", productId)

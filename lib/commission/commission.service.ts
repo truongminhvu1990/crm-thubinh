@@ -1,3 +1,4 @@
+import { SupabaseClient } from "@supabase/supabase-js";
 import { CommissionListFilters, CommissionRule, CommissionSummary, SalesCommission } from "@/types/commission";
 import { getCustomers } from "@/lib/customer.service";
 import { COMMISSION_NEXT_STATUS } from "./commission.constants";
@@ -86,13 +87,21 @@ async function withCustomerNames(commissions: SalesCommission[]): Promise<SalesC
   return commissions.map((c) => ({ ...c, customer: byId.get(c.customer_id) || null }));
 }
 
-export async function getCommissionList(filters: CommissionListFilters = {}): Promise<SalesCommission[]> {
-  const all = await repo.getAllCommissions();
+/** `client` defaults to the browser Supabase client - see
+ * commission.repository.ts's getAllCommissions/getCommissionById. Note
+ * withCustomerNames' getCustomers() call still uses its own default client
+ * internally (Customer module, out of Wave 2's scope to modify) - the
+ * commission read itself is what moves to the injected client. */
+export async function getCommissionList(
+  filters: CommissionListFilters = {},
+  client?: SupabaseClient
+): Promise<SalesCommission[]> {
+  const all = await repo.getAllCommissions(client);
   return withCustomerNames(applyFilters(all, filters));
 }
 
-export async function getCommissionDetail(id: string): Promise<SalesCommission | null> {
-  const commission = await repo.getCommissionById(id);
+export async function getCommissionDetail(id: string, client?: SupabaseClient): Promise<SalesCommission | null> {
+  const commission = await repo.getCommissionById(id, client);
   if (!commission) return null;
   const [withName] = await withCustomerNames([commission]);
   return withName;
@@ -112,8 +121,14 @@ export function summarizeCommissions(commissions: SalesCommission[]): Commission
 /** Feature 6 - Dashboard widget. Reads sales_commissions only, per the
  * spec's explicit "Dashboard MUST read sales_commissions NOT
  * customer_purchases" instruction. */
-export async function getDashboardCommissionStats(): Promise<{ thisMonth: number; outstanding: number }> {
-  const all = await repo.getAllCommissions();
+/** `client` (Backend API Foundation, Package 4C, Wave 5 revision) - same
+ * injectable-dependency pattern as every other wave; defaults to the
+ * browser Supabase client so Sidebar/other unmigrated callers, if any, keep
+ * their exact current behavior. */
+export async function getDashboardCommissionStats(
+  client?: SupabaseClient
+): Promise<{ thisMonth: number; outstanding: number }> {
+  const all = await repo.getAllCommissions(client);
   const now = new Date();
   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
 

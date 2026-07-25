@@ -1,7 +1,10 @@
+import { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { DateFilterOption, DateRange, getDateRange } from "@/lib/dateFilter";
+import { Staff } from "@/types/staff";
 import { getCurrentStaff } from "@/lib/permission";
 import { applyDataScopeWithFallback } from "@/lib/permission/dataScope";
+import { BusinessTime } from "@/lib/businessTime";
 
 // This module intentionally reads Supabase tables directly rather than
 // importing customer.service.ts / product.service.ts / purchase.service.ts /
@@ -62,6 +65,14 @@ export interface MonthlyRevenueRow {
 
 export interface PurchaseReportData {
   totalRevenue: number;
+  /** Simple Profit Calculation Package, Part 3 - Σ cost_price of each sold
+   * item's product, looked up from the products table (existing values
+   * only, no new column, nothing persisted). 0 for rows whose product no
+   * longer has a cost_price on file - never guessed. */
+  totalCost: number;
+  /** = totalRevenue - totalCost. The one and only formula this package
+   * defines (no margin/percentage/ROI). */
+  totalProfit: number;
   bySource: SourceRevenueRow[];
   bySalesperson: SalespersonRevenueRow[];
   topCustomers: TopCustomerRow[];
@@ -96,14 +107,6 @@ export interface BatchStaticReportData {
   overdueBatches: OverdueBatchRow[];
 }
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-function toDateStr(d: Date): string {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
 function groupCount<T>(rows: T[], key: (row: T) => string | null | undefined): CountBreakdown[] {
   const map = new Map<string, number>();
   for (const row of rows) {
@@ -119,8 +122,12 @@ interface CustomerRow {
   assigned_salesperson: string | null;
 }
 
-export async function getCustomerReportData(): Promise<CustomerReportData> {
-  const { data, error } = await supabase.from("customers").select("source, vip_level, assigned_salesperson");
+/** `client` defaults to the browser Supabase client so every existing
+ * caller keeps its exact current behavior unchanged. Backend API Foundation
+ * (Package 4C, Wave 4) passes a server client instead, from
+ * app/api/reports/**. */
+export async function getCustomerReportData(client: SupabaseClient = supabase): Promise<CustomerReportData> {
+  const { data, error } = await client.from("customers").select("source, vip_level, assigned_salesperson");
 
   if (error || !data) {
     if (error) console.error("Error fetching customer report data:", error);
@@ -148,8 +155,8 @@ interface ProductRow {
  * stock signal (REPORTS_SPEC.md §2, carried from the resolved Inventory
  * counter-trust finding).
  */
-export async function getProductReportData(): Promise<ProductReportData> {
-  const { data, error } = await supabase.from("products").select("status, category, origin, salesperson");
+export async function getProductReportData(client: SupabaseClient = supabase): Promise<ProductReportData> {
+  const { data, error } = await client.from("products").select("status, category, origin, salesperson");
 
   if (error || !data) {
     if (error) console.error("Error fetching product report data:", error);
@@ -168,6 +175,7 @@ export async function getProductReportData(): Promise<ProductReportData> {
 
 interface PurchaseRow {
   customer_id: string;
+  product_id: string | null;
   sale_price: number;
   sale_date: string;
   source: string | null;
@@ -187,21 +195,47 @@ interface PurchaseRow {
  * comment: "no Orders dependency for Dashboard revenue"), so it inherits
  * Customer Purchases' resolved scope (DATA_SCOPE_ROLLOUT_UI.md §6), the
  * same resolution Package 3/4 already apply - never a separately-invented
- * Dashboard-only rule. */
-export async function getPurchaseReportData(range: DateRange | null): Promise<PurchaseReportData> {
-  let query = supabase
+ * Dashboard-only rule.
+ *
+ * `staff` (Hotfix 4A - same sentinel pattern as Hotfix 3A's fix for
+ * salesLedger.repository.ts's applyFilters): `undefined` (every pre-Hotfix-
+ * 4A caller) means "resolve it yourself via getCurrentStaff(), exactly as
+ * before" (Browser Authentication Context, correct for callers that
+ * actually run in the browser). An explicit `Staff | null` means "use this
+ * value, I already resolved it" - what app/api/reports/purchases/route.ts
+ * now passes, using getCurrentStaffFromRequest() (Server Authentication
+ * Context, lib/permission/serverAuth.ts) instead. Nothing about the Data
+ * Scope call itself (applyDataScopeWithFallback, "revenue" resource,
+ * salesperson_id/salesperson fields) changed - only how "current staff" is
+ * identified. */
+export async function getPurchaseReportData(
+  range: DateRange | null,
+  client: SupabaseClient = supabase,
+  staff?: Staff | null
+): Promise<PurchaseReportData> {
+  let query = client
     .from("customer_purchases")
-    .select("customer_id, sale_price, sale_date, source, salesperson, customer:customers(full_name)");
+    .select("customer_id, product_id, sale_price, sale_date, source, salesperson, customer:customers(full_name)");
   if (range) {
     query = query.gte("sale_date", range.start).lt("sale_date", range.end);
   }
 
-  const staff = await getCurrentStaff();
-  if (staff) query = (await applyDataScopeWithFallback(query, staff, "revenue", "salesperson_id", "salesperson")).query;
+  const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
+  if (resolvedStaff) {
+    query = (await applyDataScopeWithFallback(query, resolvedStaff, "revenue", "salesperson_id", "salesperson")).query;
+  }
 
   const { data, error } = await query;
 
-  const empty: PurchaseReportData = { totalRevenue: 0, bySource: [], bySalesperson: [], topCustomers: [], byPeriod: [] };
+  const empty: PurchaseReportData = {
+    totalRevenue: 0,
+    totalCost: 0,
+    totalProfit: 0,
+    bySource: [],
+    bySalesperson: [],
+    topCustomers: [],
+    byPeriod: [],
+  };
   if (error || !data) {
     if (error) console.error("Error fetching purchase report data:", error);
     return empty;
@@ -209,15 +243,39 @@ export async function getPurchaseReportData(range: DateRange | null): Promise<Pu
 
   const rows = data as unknown as PurchaseRow[];
 
+  // Simple Profit Calculation Package, Part 3 - Total Cost needs each sold
+  // row's product cost_price, which customer_purchases doesn't itself store
+  // (only product_id). One extra query against the existing `products`
+  // table (Reports reads Supabase tables directly by design - see this
+  // file's header comment - so this isn't a new cross-module dependency),
+  // scoped to just the id/cost_price columns actually needed.
+  const productIds = Array.from(new Set(rows.map((r) => r.product_id).filter((id): id is string => !!id)));
+  const costByProductId = new Map<string, number>();
+  if (productIds.length > 0) {
+    const { data: productRows, error: productError } = await client
+      .from("products")
+      .select("id, cost_price")
+      .in("id", productIds);
+    if (productError) {
+      console.error("Error fetching product cost prices for purchase report:", productError);
+    } else {
+      for (const p of productRows as { id: string; cost_price: number | null }[]) {
+        if (typeof p.cost_price === "number") costByProductId.set(p.id, p.cost_price);
+      }
+    }
+  }
+
   const sourceMap = new Map<string, { count: number; revenue: number }>();
   const salespersonMap = new Map<string, { count: number; revenue: number }>();
   const customerMap = new Map<string, { name: string; count: number; revenue: number }>();
   const monthMap = new Map<string, number>();
   let totalRevenue = 0;
+  let totalCost = 0;
 
   for (const row of rows) {
     const price = Number(row.sale_price) || 0;
     totalRevenue += price;
+    if (row.product_id) totalCost += costByProductId.get(row.product_id) ?? 0;
 
     const sourceKey = row.source || UNSPECIFIED;
     const source = sourceMap.get(sourceKey) || { count: 0, revenue: 0 };
@@ -246,6 +304,8 @@ export async function getPurchaseReportData(range: DateRange | null): Promise<Pu
 
   return {
     totalRevenue,
+    totalCost,
+    totalProfit: totalRevenue - totalCost,
     bySource: Array.from(sourceMap, ([source, v]) => ({ source, ...v })).sort((a, b) => b.revenue - a.revenue),
     bySalesperson: Array.from(salespersonMap, ([salesperson, v]) => ({ salesperson, ...v })).sort(
       (a, b) => b.revenue - a.revenue
@@ -280,10 +340,10 @@ interface BatchPurchaseRow {
  * Batch is the one exception, fetched separately by getRevenueByBatch below
  * so a Date Filter change here doesn't force a redundant refetch of this data.
  */
-export async function getBatchStaticReportData(): Promise<BatchStaticReportData> {
+export async function getBatchStaticReportData(client: SupabaseClient = supabase): Promise<BatchStaticReportData> {
   const [batchesRes, productsRes] = await Promise.all([
-    supabase.from("product_batches").select("id, batch_code, status, return_due_date"),
-    supabase.from("products").select("batch_id, status").not("batch_id", "is", null),
+    client.from("product_batches").select("id, batch_code, status, return_due_date"),
+    client.from("products").select("batch_id, status").not("batch_id", "is", null),
   ]);
 
   const empty: BatchStaticReportData = {
@@ -317,7 +377,11 @@ export async function getBatchStaticReportData(): Promise<BatchStaticReportData>
     }
   }
 
-  const todayStr = toDateStr(new Date());
+  // Business Time Migration, Wave 2: "today" for Overdue Batch determination
+  // is a Business Date (Locked Product Owner decision) - this function runs
+  // server-side (app/api/reports/batches/route.ts), where new Date() was
+  // confirmed UTC, not Vietnam time.
+  const todayStr = BusinessTime.todayString();
 
   const toCountRows = (map: Map<string, number>): BatchCountRow[] =>
     batches
@@ -350,14 +414,17 @@ export async function getBatchStaticReportData(): Promise<BatchStaticReportData>
 }
 
 /** Revenue by Batch - the one Batch report that is a Date Filter target. */
-export async function getRevenueByBatch(range: DateRange | null): Promise<BatchRevenueRow[]> {
-  let purchasesQuery = supabase.from("customer_purchases").select("sale_price, product:products!inner(batch_id)");
+export async function getRevenueByBatch(
+  range: DateRange | null,
+  client: SupabaseClient = supabase
+): Promise<BatchRevenueRow[]> {
+  let purchasesQuery = client.from("customer_purchases").select("sale_price, product:products!inner(batch_id)");
   if (range) {
     purchasesQuery = purchasesQuery.gte("sale_date", range.start).lt("sale_date", range.end);
   }
 
   const [batchesRes, purchasesRes] = await Promise.all([
-    supabase.from("product_batches").select("id, batch_code"),
+    client.from("product_batches").select("id, batch_code"),
     purchasesQuery,
   ]);
 

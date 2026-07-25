@@ -40,7 +40,7 @@ export default function SegmentTable({ segments, isLoading = false, onEdit, onDu
 
   return (
     <div className="overflow-x-auto bg-card rounded-xl border border-border shadow-sm">
-      <table className="w-full min-w-[900px]">
+      <table data-testid="marketing-segment-table" className="w-full min-w-[900px]">
         <thead>
           <tr className="border-b border-border">
             <th className="px-5 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tên</th>

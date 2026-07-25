@@ -119,6 +119,11 @@ const USAGE_CHECKS: Partial<Record<MasterDataCategory, { table: string; column: 
   product_color: [{ table: "products", column: "color" }],
   market: [{ table: "customers", column: "province" }],
   country: [{ table: "customers", column: "country" }],
+  payment_method: [{ table: "payments", column: "payment_method" }],
+  customer_source: [{ table: "customers", column: "source" }],
+  // shipping_provider, bank, follow_up_status: no consuming column exists
+  // yet (UX Enhancement Package, Part 3 - list-only master data), so
+  // nothing can reference a value and deletion never needs to be blocked.
 };
 
 export async function isMasterDataValueInUse(
