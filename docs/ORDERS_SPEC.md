@@ -522,3 +522,22 @@ Descriptive only — nothing below is being changed in this phase.
 **Release**
 - [ ] V1 scope explicitly excludes everything listed under V2/V3 (§18) — no scope creep at build time, in particular no packaging/gift pricing, no certificate verification links, and no opportunity/pipeline tracking on Orders.
 - [ ] This document stored at `/docs/ORDERS_SPEC.md` and reviewed before any implementation ticket is opened.
+# Business Rule Lock
+
+Status: LOCKED
+
+Decision ID: BR-001
+
+Revenue Recognition
+
+Revenue is recognized ONLY when:
+
+- Order Status = Completed
+AND
+- Payment Status = Paid
+
+Completed alone must NEVER recognize revenue.
+
+Dashboard, Reports, Sales Ledger, Top Sales Staff and all BI functions must follow this rule.
+
+Changing this rule requires explicit Product Owner approval.
