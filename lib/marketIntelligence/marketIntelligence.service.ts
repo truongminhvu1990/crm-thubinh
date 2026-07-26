@@ -55,6 +55,24 @@ interface PurchaseRow {
   sale_price: number;
   sale_date: string;
   product: { category: string | null; color: string | null; size: number | null } | null;
+  order_item_id: string | null;
+  order_items: { orders: { order_status: string; payment_status: string } | null } | null;
+}
+
+/** BR-001 Revenue Recognition (docs/ORDERS_SPEC.md "Business Rule Lock",
+ * LOCKED): revenue counts only when Order Status = Completed AND Payment
+ * Status = Paid. A row with no linked Order (order_item_id NULL - predates
+ * the Orders module, or entered manually) has no Order to check and
+ * counts as recognized, same as it always has. Local to this module by
+ * design (MARKET_INTELLIGENCE_SPEC.md §1 Independence, LOCKED - no shared
+ * business logic with lib/orders/*). */
+function isRevenueRecognized(row: {
+  order_item_id: string | null;
+  order_items: { orders: { order_status: string; payment_status: string } | null } | null;
+}): boolean {
+  if (!row.order_item_id) return true;
+  const order = row.order_items?.orders;
+  return order?.order_status === "Completed" && order?.payment_status === "Paid";
 }
 
 function buildDualRanking(map: Map<string, { count: number; revenue: number }>): DualRanking {
@@ -80,7 +98,9 @@ function buildDualRanking(map: Map<string, { count: number; revenue: number }>):
 export async function getMarketIntelligenceData(): Promise<MarketIntelligenceData> {
   const { data, error } = await supabase
     .from("customer_purchases")
-    .select("sale_price, sale_date, product:products(category, color, size)");
+    .select(
+      "sale_price, sale_date, order_item_id, order_items(orders(order_status, payment_status)), product:products(category, color, size)"
+    );
 
   if (error || !data) {
     if (error) console.error("Error fetching market intelligence data:", error);
@@ -97,7 +117,9 @@ export async function getMarketIntelligenceData(): Promise<MarketIntelligenceDat
   let totalRevenue = 0;
 
   for (const row of rows) {
-    const price = Number(row.sale_price) || 0;
+    // BR-001: purchase counts (below) include every row regardless of
+    // recognition status; only revenue is gated.
+    const price = isRevenueRecognized(row) ? Number(row.sale_price) || 0 : 0;
     totalRevenue += price;
 
     const categoryKey = row.product?.category || UNSPECIFIED;

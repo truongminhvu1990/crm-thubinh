@@ -180,13 +180,17 @@ export default function SalesLedgerTable({
               {verificationMode && (
                 <>
                   <td className="px-4 py-3.5">
-                    <Badge variant={r.entry_source === "Historical Import" ? "muted" : "secondary"}>
-                      {r.entry_source === "Historical Import" ? "Historical Import" : "Live Sale"}
-                    </Badge>
+                    {r.entry_source ? (
+                      <Badge variant={r.entry_source === "Historical Import" ? "muted" : "secondary"}>
+                        {r.entry_source === "Historical Import" ? "Historical Import" : "Live Sale"}
+                      </Badge>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3.5 text-xs text-muted-foreground whitespace-nowrap">
                     <div>Tạo: {r.created_by || "—"} · {formatDate(r.purchase_created_at)}</div>
-                    <div>Sửa: {r.updated_by || "—"} · {formatDate(r.updated_at)}</div>
+                    <div>Sửa: {r.updated_by || "—"} · {r.updated_at ? formatDate(r.updated_at) : "—"}</div>
                   </td>
                   <td className="px-4 py-3.5">
                     {r.is_duplicate ? (

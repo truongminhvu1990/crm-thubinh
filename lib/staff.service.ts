@@ -235,6 +235,20 @@ export function matchesStaff(
   return !!row.salesperson && row.salesperson === staff.full_name;
 }
 
+/** BR-001 Revenue Recognition (docs/ORDERS_SPEC.md "Business Rule Lock",
+ * LOCKED): revenue counts only when Order Status = Completed AND Payment
+ * Status = Paid. A row with no linked Order (order_item_id NULL - predates
+ * the Orders module, or entered manually) has no Order to check and
+ * counts as recognized, same as it always has. */
+function isRevenueRecognized(row: {
+  order_item_id: string | null;
+  order_items: { orders: { order_status: string; payment_status: string } | null } | null;
+}): boolean {
+  if (!row.order_item_id) return true;
+  const order = row.order_items?.orders;
+  return order?.order_status === "Completed" && order?.payment_status === "Paid";
+}
+
 export interface StaffRevenueSummary {
   count: number;
   totalRevenue: number;
@@ -244,19 +258,25 @@ export interface StaffRevenueSummary {
 export async function getStaffRevenue(staff: Pick<Staff, "id" | "full_name">): Promise<StaffRevenueSummary> {
   const { data, error } = await supabase
     .from("customer_purchases")
-    .select("salesperson_id, salesperson, sale_price");
+    .select("salesperson_id, salesperson, sale_price, order_item_id, order_items(orders(order_status, payment_status))");
 
   if (error || !data) {
     if (error) console.error("Error fetching staff revenue:", error);
     return { count: 0, totalRevenue: 0 };
   }
 
-  const rows = (data as { salesperson_id: string | null; salesperson: string | null; sale_price: number }[]).filter(
-    (r) => matchesStaff(r, staff)
-  );
+  const rows = (
+    data as unknown as {
+      salesperson_id: string | null;
+      salesperson: string | null;
+      sale_price: number;
+      order_item_id: string | null;
+      order_items: { orders: { order_status: string; payment_status: string } | null } | null;
+    }[]
+  ).filter((r) => matchesStaff(r, staff));
   return {
     count: rows.length,
-    totalRevenue: rows.reduce((sum, r) => sum + (Number(r.sale_price) || 0), 0),
+    totalRevenue: rows.reduce((sum, r) => sum + (isRevenueRecognized(r) ? Number(r.sale_price) || 0 : 0), 0),
   };
 }
 
@@ -313,7 +333,9 @@ export async function getTopSalesStaff(
   client: SupabaseClient = supabase,
   range: DateRange | null = null
 ): Promise<TopSalesStaffEntry[]> {
-  let purchasesQuery = client.from("customer_purchases").select("salesperson_id, salesperson, sale_price");
+  let purchasesQuery = client
+    .from("customer_purchases")
+    .select("salesperson_id, salesperson, sale_price, order_item_id, order_items(orders(order_status, payment_status))");
   let commissionsQuery = client.from("sales_commissions").select("salesperson_id, salesperson, commission_amount");
   if (range) {
     purchasesQuery = purchasesQuery.gte("sale_date", range.start).lt("sale_date", range.end);
@@ -327,7 +349,13 @@ export async function getTopSalesStaff(
   ]);
 
   const purchases =
-    (purchasesRes.data as { salesperson_id: string | null; salesperson: string | null; sale_price: number }[]) || [];
+    (purchasesRes.data as unknown as {
+      salesperson_id: string | null;
+      salesperson: string | null;
+      sale_price: number;
+      order_item_id: string | null;
+      order_items: { orders: { order_status: string; payment_status: string } | null } | null;
+    }[]) || [];
   const commissions =
     (commissionsRes.data as { salesperson_id: string | null; salesperson: string | null; commission_amount: number }[]) ||
     [];
@@ -335,8 +363,11 @@ export async function getTopSalesStaff(
   const entries = staffList
     .filter((s) => s.status === "Active")
     .map((staff) => {
+      // BR-001: revenue only counts Completed+Paid orders (or order-less
+      // legacy rows) - see isRevenueRecognized above. Commission is a
+      // separate concept BR-001 doesn't name and stays unfiltered.
       const revenue = purchases
-        .filter((p) => matchesStaff(p, staff))
+        .filter((p) => matchesStaff(p, staff) && isRevenueRecognized(p))
         .reduce((sum, p) => sum + (Number(p.sale_price) || 0), 0);
       const commission = commissions
         .filter((c) => matchesStaff(c, staff))

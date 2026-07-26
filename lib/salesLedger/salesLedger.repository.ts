@@ -78,9 +78,18 @@ async function applyFilters(
   // Sprint v2.3.0 (Data Verification Center), Feature 7 - only ever set by
   // Verification Mode's own filter panel; every branch below is a no-op
   // for Normal Mode's existing filter object.
-  if (filters.entrySource) query = query.eq("entry_source", filters.entrySource);
-  if (filters.createdBy) query = query.ilike("created_by", `%${filters.createdBy.replace(/[%,]/g, "")}%`);
-  if (filters.updatedBy) query = query.ilike("updated_by", `%${filters.updatedBy.replace(/[%,]/g, "")}%`);
+  //
+  // entry_source/created_by/updated_by are NOT applied here: they only
+  // exist on customer_purchases (and therefore on this view) once
+  // 20260725_data_verification_module.sql has run, which Production's
+  // actual schema confirms it has not. Sending .eq()/.ilike() against a
+  // column the view doesn't have fails the whole query at the Postgrest
+  // layer (42703), which the caller below turns into an empty page - i.e.
+  // silently worse than just not filtering. Until that migration (or an
+  // equivalent one) actually lands on Production, these three fields are
+  // accepted but intentionally ignored; `duplicateOnly` is unaffected
+  // since `is_duplicate` is computed by the view from columns that do
+  // exist (customer_id/product_id/sale_date/sale_price) on every schema.
   if (filters.duplicateOnly) query = query.eq("is_duplicate", true);
 
   // Data Scope Rollout (Sprint v4.1), Package 4 - applied last, after every
@@ -134,8 +143,8 @@ export async function getSalesLedgerAggregateRows(
   filters: SalesLedgerFilters,
   client: SupabaseClient = supabase,
   staff?: Staff | null
-): Promise<{ sale_amount: number; commission_amount: number | null }[]> {
-  let query = client.from("sales_ledger").select("sale_amount, commission_amount");
+): Promise<{ sale_amount: number; commission_amount: number | null; is_revenue_recognized: boolean }[]> {
+  let query = client.from("sales_ledger").select("sale_amount, commission_amount, is_revenue_recognized");
   query = await applyFilters(query, filters, staff);
 
   const { data, error } = await query;
@@ -144,7 +153,7 @@ export async function getSalesLedgerAggregateRows(
     console.error("Error fetching sales ledger summary rows:", error);
     return [];
   }
-  return data as { sale_amount: number; commission_amount: number | null }[];
+  return data as { sale_amount: number; commission_amount: number | null; is_revenue_recognized: boolean }[];
 }
 
 /** Data Scope Rollout (Sprint v4.1), Package 4 - scoped the same way as the

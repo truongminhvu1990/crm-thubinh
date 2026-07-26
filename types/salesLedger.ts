@@ -31,16 +31,29 @@ export interface SalesLedgerRow {
   /** Resolved separately (product_images), not part of the view - see
    * salesLedger.repository.ts. */
   product_image_url?: string | null;
-  /** Sprint v2.3.0 (Data Verification Center) - Features 2/3/4. Present on
-   * every row regardless of mode; only surfaced in the UI when Verification
-   * Mode is on. `is_duplicate` is the one computed (non-stored) column on
-   * the view - Feature 4's exact rule (same customer/product/sale_date/
-   * sale_amount), never auto-merged or deleted, warning only. */
-  entry_source: EntrySource;
-  created_by: string | null;
-  updated_by: string | null;
-  updated_at: string;
+  /** Sprint v2.3.0 (Data Verification Center) - Features 2/3/4; only
+   * surfaced in the UI when Verification Mode is on. Optional, not just
+   * nullable: the view only projects these once 20260725_data_
+   * verification_module.sql has run, which Production's schema confirms
+   * it has not, so `select("*")` against the live view simply omits the
+   * keys - `undefined`, not `null`. Every reader must treat them as
+   * possibly absent until that migration (or an equivalent one) lands.
+   * `is_duplicate` is the one computed (non-stored) column on the view -
+   * Feature 4's exact rule (same customer/product/sale_date/sale_amount),
+   * never auto-merged or deleted, warning only - and is present on every
+   * schema since it only depends on columns that always exist. */
+  entry_source?: EntrySource;
+  created_by?: string | null;
+  updated_by?: string | null;
+  updated_at?: string;
   is_duplicate: boolean;
+  /** BR-001 Revenue Recognition (docs/ORDERS_SPEC.md "Business Rule Lock",
+   * LOCKED): true when this purchase has no linked Order (pre-Orders /
+   * manual entry - the rule doesn't apply) or its Order is Completed AND
+   * Paid. False means the row exists but hasn't earned recognized-revenue
+   * status yet (e.g. Completed but only Partially Paid). Row-level display
+   * is unaffected - only "revenue" totals gate on this column. */
+  is_revenue_recognized: boolean;
 }
 
 export type SalesLedgerSortField = "sale_date" | "sale_amount" | "commission_amount";

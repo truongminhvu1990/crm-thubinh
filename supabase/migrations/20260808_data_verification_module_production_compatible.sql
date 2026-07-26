@@ -3,10 +3,10 @@
 -- Production already has 20260807_sales_ledger_revenue_recognition.sql
 -- applied (sales_ledger carries order_item_id/orders joins + BR-001's
 -- is_revenue_recognized, and customer_purchases has no entry_source/
--- created_by/updated_by/updated_at). Running this file's original form
--- unmodified would fail: a CREATE OR REPLACE VIEW that omits
--- is_revenue_recognized is rejected by Postgres (cannot drop a column via
--- CREATE OR REPLACE VIEW). This version keeps every original feature, adds
+-- created_by/updated_by/updated_at). Running the original 20260725
+-- unmodified would fail: its CREATE OR REPLACE VIEW omits
+-- is_revenue_recognized, and Postgres refuses to drop a column via
+-- CREATE OR REPLACE VIEW. This file keeps every 20260725 feature, adds
 -- the missing customer_purchases columns as before, and rebuilds
 -- sales_ledger as the union of both migrations: the live 20-column shape
 -- (through is_revenue_recognized) is preserved byte-for-byte in place and
@@ -63,13 +63,12 @@ FOR EACH ROW EXECUTE FUNCTION set_customers_updated_at();
 CREATE INDEX IF NOT EXISTS idx_customer_purchases_entry_source ON customer_purchases(entry_source);
 
 -- ============================================================
--- 2. sales_ledger view - rebuilt as the union of this migration and
---    20260807. Columns 1-20 (through is_revenue_recognized) match the
---    live Production view exactly, same names/order/types, per
---    Postgres's CREATE OR REPLACE VIEW column-compatibility rule.
---    entry_source/created_by/updated_by/updated_at are appended as
---    columns 21-24 - purely additive, nothing existing is reordered or
---    removed.
+-- 2. sales_ledger view - rebuilt as the union of 20260725 and 20260807.
+--    Columns 1-20 (through is_revenue_recognized) match the live
+--    Production view exactly, same names/order/types, per Postgres's
+--    CREATE OR REPLACE VIEW column-compatibility rule. entry_source/
+--    created_by/updated_by/updated_at are appended as columns 21-24 -
+--    purely additive, nothing existing is reordered or removed.
 -- ============================================================
 
 CREATE OR REPLACE VIEW sales_ledger
@@ -122,8 +121,8 @@ GRANT SELECT ON sales_ledger TO anon, authenticated;
 --    import_pct), Missing History (estimated_historical/imported_
 --    historical/remaining_historical/completion_pct), and Duplicate
 --    Warnings - all small aggregates, computed server-side (Feature 10).
---    Does not reference order_item_id or is_revenue_recognized, so it
---    has no interaction with BR-001.
+--    Unchanged from 20260725 - does not reference order_item_id or
+--    is_revenue_recognized, so it has no interaction with BR-001.
 --
 --    Missing History's "Estimated Historical" has no dedicated field
 --    anywhere in the schema (no table stores an independent "expected

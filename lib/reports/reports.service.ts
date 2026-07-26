@@ -181,6 +181,24 @@ interface PurchaseRow {
   source: string | null;
   salesperson: string | null;
   customer: { full_name: string } | null;
+  order_item_id: string | null;
+  order_items: { orders: { order_status: string; payment_status: string } | null } | null;
+}
+
+/** BR-001 Revenue Recognition (docs/ORDERS_SPEC.md "Business Rule Lock",
+ * LOCKED): revenue counts only when Order Status = Completed AND Payment
+ * Status = Paid. A row with no linked Order (order_item_id NULL - predates
+ * the Orders module, or entered manually) has no Order to check and
+ * counts as recognized, same as it always has. Local to this module by
+ * design (REPORTS_SPEC.md Decision 5, LOCKED - no shared business logic
+ * with lib/orders/*). */
+function isRevenueRecognized(row: {
+  order_item_id: string | null;
+  order_items: { orders: { order_status: string; payment_status: string } | null } | null;
+}): boolean {
+  if (!row.order_item_id) return true;
+  const order = row.order_items?.orders;
+  return order?.order_status === "Completed" && order?.payment_status === "Paid";
 }
 
 /**
@@ -215,7 +233,9 @@ export async function getPurchaseReportData(
 ): Promise<PurchaseReportData> {
   let query = client
     .from("customer_purchases")
-    .select("customer_id, product_id, sale_price, sale_date, source, salesperson, customer:customers(full_name)");
+    .select(
+      "customer_id, product_id, sale_price, sale_date, source, salesperson, order_item_id, order_items(orders(order_status, payment_status)), customer:customers(full_name)"
+    );
   if (range) {
     query = query.gte("sale_date", range.start).lt("sale_date", range.end);
   }
@@ -273,9 +293,12 @@ export async function getPurchaseReportData(
   let totalCost = 0;
 
   for (const row of rows) {
-    const price = Number(row.sale_price) || 0;
+    // BR-001: transaction counts (below) include every row regardless of
+    // recognition status; only money (revenue/cost/profit) is gated.
+    const recognized = isRevenueRecognized(row);
+    const price = recognized ? Number(row.sale_price) || 0 : 0;
     totalRevenue += price;
-    if (row.product_id) totalCost += costByProductId.get(row.product_id) ?? 0;
+    if (recognized && row.product_id) totalCost += costByProductId.get(row.product_id) ?? 0;
 
     const sourceKey = row.source || UNSPECIFIED;
     const source = sourceMap.get(sourceKey) || { count: 0, revenue: 0 };
@@ -332,6 +355,8 @@ interface ProductBatchLinkRow {
 interface BatchPurchaseRow {
   sale_price: number;
   product: { batch_id: string | null } | null;
+  order_item_id: string | null;
+  order_items: { orders: { order_status: string; payment_status: string } | null } | null;
 }
 
 /**
@@ -418,7 +443,9 @@ export async function getRevenueByBatch(
   range: DateRange | null,
   client: SupabaseClient = supabase
 ): Promise<BatchRevenueRow[]> {
-  let purchasesQuery = client.from("customer_purchases").select("sale_price, product:products!inner(batch_id)");
+  let purchasesQuery = client
+    .from("customer_purchases")
+    .select("sale_price, order_item_id, order_items(orders(order_status, payment_status)), product:products!inner(batch_id)");
   if (range) {
     purchasesQuery = purchasesQuery.gte("sale_date", range.start).lt("sale_date", range.end);
   }
@@ -440,7 +467,7 @@ export async function getRevenueByBatch(
   const revenueMap = new Map<string, number>();
   for (const row of purchases) {
     const batchId = row.product?.batch_id;
-    if (!batchId) continue;
+    if (!batchId || !isRevenueRecognized(row)) continue;
     revenueMap.set(batchId, (revenueMap.get(batchId) || 0) + (Number(row.sale_price) || 0));
   }
 

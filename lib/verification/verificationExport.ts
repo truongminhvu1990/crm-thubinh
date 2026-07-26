@@ -18,10 +18,10 @@ export const VERIFICATION_EXPORT_COLUMNS: ExcelColumn<SalesLedgerRow>[] = [
   { header: "Giá trị bán", width: 16, value: (r) => Number(r.sale_amount) || 0 },
   { header: "Hoa hồng", width: 14, value: (r) => (r.commission_amount !== null ? Number(r.commission_amount) : "") },
   { header: "Trạng thái hoa hồng", width: 16, value: (r) => (r.commission_status ? COMMISSION_STATUS_LABEL[r.commission_status] : "") },
-  { header: "Nguồn nhập", width: 16, value: (r) => r.entry_source },
+  { header: "Nguồn nhập", width: 16, value: (r) => r.entry_source || "" },
   { header: "Người tạo", width: 18, value: (r) => r.created_by || "" },
   { header: "Ngày tạo", width: 16, value: (r) => formatDate(r.purchase_created_at) },
   { header: "Người cập nhật", width: 18, value: (r) => r.updated_by || "" },
-  { header: "Ngày cập nhật", width: 16, value: (r) => formatDate(r.updated_at) },
+  { header: "Ngày cập nhật", width: 16, value: (r) => (r.updated_at ? formatDate(r.updated_at) : "") },
   { header: "Nghi ngờ trùng lặp", width: 18, value: (r) => (r.is_duplicate ? "Possible Duplicate" : "") },
 ];

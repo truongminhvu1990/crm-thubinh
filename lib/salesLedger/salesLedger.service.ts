@@ -63,12 +63,19 @@ export async function getSalesLedgerDetailImages(productId: string, client?: Sup
 }
 
 /** Feature 3 - Summary, computed over every currently-filtered row (not
- * just the visible page of 50). */
+ * just the visible page of 50). `totalTransactions`/`totalCommission` count
+ * every filtered row, unchanged. `totalRevenue` (and the `averageSale`
+ * derived from it) applies BR-001 Revenue Recognition (docs/ORDERS_SPEC.md
+ * "Business Rule Lock", LOCKED) - only rows where `is_revenue_recognized`
+ * is true contribute to it; the transaction list itself stays unfiltered. */
 export function summarizeSalesLedgerRows(
-  rows: { sale_amount: number; commission_amount: number | null }[]
+  rows: { sale_amount: number; commission_amount: number | null; is_revenue_recognized: boolean }[]
 ): SalesLedgerSummary {
   const totalTransactions = rows.length;
-  const totalRevenue = rows.reduce((sum, r) => sum + (Number(r.sale_amount) || 0), 0);
+  const totalRevenue = rows.reduce(
+    (sum, r) => sum + (r.is_revenue_recognized ? Number(r.sale_amount) || 0 : 0),
+    0
+  );
   const totalCommission = rows.reduce((sum, r) => sum + (Number(r.commission_amount) || 0), 0);
   return {
     totalTransactions,

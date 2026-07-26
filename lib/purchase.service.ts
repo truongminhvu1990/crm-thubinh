@@ -215,15 +215,34 @@ export async function deletePurchase(id: string, productId?: string | null) {
   return null;
 }
 
+/** BR-001 Revenue Recognition (docs/ORDERS_SPEC.md "Business Rule Lock",
+ * LOCKED): revenue counts only when Order Status = Completed AND Payment
+ * Status = Paid. A row with no linked Order (order_item_id NULL - predates
+ * the Orders module, or entered manually) has no Order to check and
+ * counts as recognized, same as it always has. */
+function isRevenueRecognized(row: {
+  order_item_id: string | null;
+  order_items: { orders: { order_status: string; payment_status: string } | null } | null;
+}): boolean {
+  if (!row.order_item_id) return true;
+  const order = row.order_items?.orders;
+  return order?.order_status === "Completed" && order?.payment_status === "Paid";
+}
+
+type CustomerRevenueRow = Pick<CustomerPurchase, "customer_id" | "sale_price" | "sale_date"> & {
+  order_item_id: string | null;
+  order_items: { orders: { order_status: string; payment_status: string } | null } | null;
+};
+
 /**
  * BUG-006: the one place "revenue per customer" is summed from
  * customer_purchases rows. Shared by getPurchaseSummaries (Customers list,
  * all-time) and getCustomerRevenue (Customer Detail, date-filterable) below,
  * so the two can never sum rows differently, only over a different row set.
+ * `count`/`lastPurchaseDate` reflect every row; `totalRevenue` applies
+ * BR-001 (see isRevenueRecognized above).
  */
-export function aggregateCustomerRevenue(
-  rows: Pick<CustomerPurchase, "customer_id" | "sale_price" | "sale_date">[]
-): Map<string, CustomerPurchaseSummary> {
+export function aggregateCustomerRevenue(rows: CustomerRevenueRow[]): Map<string, CustomerPurchaseSummary> {
   const summaries = new Map<string, CustomerPurchaseSummary>();
 
   for (const row of rows) {
@@ -233,7 +252,7 @@ export function aggregateCustomerRevenue(
       lastPurchaseDate: null as string | null,
     };
     existing.count += 1;
-    existing.totalRevenue += Number(row.sale_price) || 0;
+    if (isRevenueRecognized(row)) existing.totalRevenue += Number(row.sale_price) || 0;
     if (!existing.lastPurchaseDate || row.sale_date > existing.lastPurchaseDate) {
       existing.lastPurchaseDate = row.sale_date;
     }
@@ -255,7 +274,9 @@ export function aggregateCustomerRevenue(
  * anyone's) sales through the back door of a total.
  */
 export async function getPurchaseSummaries(): Promise<Map<string, CustomerPurchaseSummary>> {
-  let query = supabase.from("customer_purchases").select("customer_id, sale_price, sale_date");
+  let query = supabase
+    .from("customer_purchases")
+    .select("customer_id, sale_price, sale_date, order_item_id, order_items(orders(order_status, payment_status))");
 
   const staff = await getCurrentStaff();
   if (staff) query = (await applyPurchaseHistoryVisibility(query, staff, "salesperson_id", "salesperson")).query;
@@ -267,7 +288,7 @@ export async function getPurchaseSummaries(): Promise<Map<string, CustomerPurcha
     return new Map();
   }
 
-  return aggregateCustomerRevenue(data as Pick<CustomerPurchase, "customer_id" | "sale_price" | "sale_date">[]);
+  return aggregateCustomerRevenue(data as unknown as CustomerRevenueRow[]);
 }
 
 /**
@@ -287,7 +308,7 @@ export async function getCustomerRevenue(
 ): Promise<CustomerPurchaseSummary> {
   let query = supabase
     .from("customer_purchases")
-    .select("customer_id, sale_price, sale_date")
+    .select("customer_id, sale_price, sale_date, order_item_id, order_items(orders(order_status, payment_status))")
     .eq("customer_id", customerId);
 
   if (range) {
@@ -304,8 +325,6 @@ export async function getCustomerRevenue(
     return { count: 0, totalRevenue: 0, lastPurchaseDate: null };
   }
 
-  const summaries = aggregateCustomerRevenue(
-    data as Pick<CustomerPurchase, "customer_id" | "sale_price" | "sale_date">[]
-  );
+  const summaries = aggregateCustomerRevenue(data as unknown as CustomerRevenueRow[]);
   return summaries.get(customerId) || { count: 0, totalRevenue: 0, lastPurchaseDate: null };
 }
