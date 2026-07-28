@@ -20,6 +20,7 @@ import {
   AlertTriangle,
   LayoutDashboard,
   RefreshCw,
+  ArrowRight,
 } from "lucide-react";
 import StatCard from "@/components/ui/StatCard";
 import Button from "@/components/ui/Button";
@@ -28,7 +29,6 @@ import PageViewingLabel from "@/components/shared/PageViewingLabel";
 import ReportsTable, { ReportsTableRow } from "@/components/reports/ReportsTable";
 import RevenueDashboardCards from "@/components/reports/RevenueDashboardCards";
 import KpiDashboard from "@/components/reports/KpiDashboard";
-import ProductAnalysisSection from "@/components/reports/ProductAnalysisSection";
 import CategoryAnalysisSection from "@/components/reports/CategoryAnalysisSection";
 import CustomerAnalysisSection from "@/components/reports/CustomerAnalysisSection";
 import StaffAnalysisSection from "@/components/reports/StaffAnalysisSection";
@@ -248,12 +248,27 @@ export default function ReportsPage() {
           <RevenueTrendChart range={range} />
         </section>
 
+        {/* Product Owner Decision (2026-07-28) - Monthly Sold Products is a
+            standalone operational report page (app/reports/monthly-sold-
+            products/page.tsx), not embedded in this BI Center. This is only
+            an access link out to it, per "must be accessible from the
+            existing Reports module." */}
         <section className="space-y-4">
-          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-            <Gem className="w-5 h-5 text-primary" />
-            Phân tích sản phẩm
-          </h2>
-          <ProductAnalysisSection range={range} />
+          <Link
+            href="/reports/monthly-sold-products"
+            className="flex items-center justify-between gap-3 bg-card border border-border rounded-xl shadow-sm p-4 hover:border-primary/40 transition-colors"
+          >
+            <span className="flex items-center gap-3">
+              <Gem className="w-5 h-5 text-primary" />
+              <span>
+                <span className="block text-sm font-semibold text-foreground">Sản phẩm đã bán theo tháng</span>
+                <span className="block text-xs text-muted-foreground">
+                  Danh sách từng sản phẩm đã bán theo kỳ - báo cáo vận hành riêng
+                </span>
+              </span>
+            </span>
+            <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0" />
+          </Link>
         </section>
 
         <section className="space-y-4">
