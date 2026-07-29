@@ -6,6 +6,7 @@ import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import SearchInput from "@/components/ui/SearchInput";
+import SearchToolbar from "@/components/ui/SearchToolbar";
 import MarketingPagination from "@/components/marketing/MarketingPagination";
 import VoucherStatusBadge from "@/components/marketing/VoucherStatusBadge";
 import VoucherFormModal from "@/components/marketing/VoucherFormModal";
@@ -73,17 +74,19 @@ export default function VoucherPage() {
       </div>
 
       <div className="bg-card border border-border rounded-xl shadow-sm p-4">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex-1 min-w-0">
+        <SearchToolbar
+          breakpoint="sm"
+          search={
             <SearchInput placeholder="Tìm theo mã hoặc tên..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} onClear={() => setSearch("")} />
-          </div>
+          }
+        >
           <Select
             options={[{ value: ALL, label: "Tất cả trạng thái" }, ...VOUCHER_STATUS_OPTIONS]}
             value={statusFilter}
             onChange={(e) => { setStatusFilter(e.target.value as VoucherStatus | "All"); setPage(1); }}
             className="sm:w-48"
           />
-        </div>
+        </SearchToolbar>
       </div>
 
       {isLoading ? (

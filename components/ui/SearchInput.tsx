@@ -23,6 +23,7 @@ export default function SearchInput({
         value={value}
         className={cn(
           "w-full rounded-lg border border-input bg-card pl-10 pr-9 py-2 text-sm outline-none transition-colors",
+          "text-card-foreground caret-card-foreground",
           "placeholder:text-muted-foreground",
           "focus:border-primary focus:ring-2 focus:ring-primary/20",
           className

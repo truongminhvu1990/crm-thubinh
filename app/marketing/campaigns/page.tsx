@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Plus } from "lucide-react";
 import Button from "@/components/ui/Button";
 import SearchInput from "@/components/ui/SearchInput";
+import SearchToolbar from "@/components/ui/SearchToolbar";
 import Select from "@/components/ui/Select";
 import CampaignTable from "@/components/marketing/CampaignTable";
 import CampaignFormModal from "@/components/marketing/CampaignFormModal";
@@ -100,8 +101,9 @@ export default function CampaignListPage() {
         </Button>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="flex-1">
+      <SearchToolbar
+        breakpoint="sm"
+        search={
           <SearchInput
             data-testid="marketing-campaign-search-input"
             placeholder="Tìm theo tên chiến dịch..."
@@ -115,7 +117,8 @@ export default function CampaignListPage() {
               setSearch("");
             }}
           />
-        </div>
+        }
+      >
         <div className="w-full sm:w-52">
           <Select
             options={STATUS_FILTER_OPTIONS}
@@ -136,7 +139,7 @@ export default function CampaignListPage() {
             }}
           />
         </div>
-      </div>
+      </SearchToolbar>
 
       <CampaignTable
         campaigns={rows}

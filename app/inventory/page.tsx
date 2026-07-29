@@ -23,6 +23,7 @@ import InventoryBatchTable from "@/components/inventory/InventoryBatchTable";
 import ProductDetailDrawer from "@/components/inventory/ProductDetailDrawer";
 import Button from "@/components/ui/Button";
 import SearchInput from "@/components/ui/SearchInput";
+import SearchToolbar from "@/components/ui/SearchToolbar";
 
 const ALL = "ALL";
 
@@ -227,17 +228,16 @@ export default function InventoryPage() {
       {tab === "list" ? (
         <>
           <div className="bg-card border border-border rounded-xl shadow-sm p-4 mb-6">
-            <div className="flex flex-col lg:flex-row gap-3">
-              <div className="flex-1 min-w-0">
+            <SearchToolbar
+              search={
                 <SearchInput
                   placeholder="Tìm theo tên, mã, SKU hoặc số chứng nhận..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   onClear={() => setSearchTerm("")}
                 />
-              </div>
-
-              <div className="flex flex-wrap gap-3 items-center">
+              }
+            >
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
@@ -307,8 +307,7 @@ export default function InventoryPage() {
                   <RefreshCw className="w-4 h-4" />
                   <span className="hidden sm:inline">Làm mới</span>
                 </Button>
-              </div>
-            </div>
+            </SearchToolbar>
           </div>
 
           <InventoryProductTable
@@ -321,20 +320,22 @@ export default function InventoryPage() {
       ) : (
         <>
           <div className="bg-card border border-border rounded-xl shadow-sm p-4 mb-6">
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="flex-1 min-w-0">
+            <SearchToolbar
+              breakpoint="sm"
+              search={
                 <SearchInput
                   placeholder="Tìm theo mã lô hoặc nhà cung cấp..."
                   value={batchSearchTerm}
                   onChange={(e) => setBatchSearchTerm(e.target.value)}
                   onClear={() => setBatchSearchTerm("")}
                 />
-              </div>
+              }
+            >
               <Button variant="secondary" size="md" onClick={handleRefresh}>
                 <RefreshCw className="w-4 h-4" />
                 <span className="hidden sm:inline">Làm mới</span>
               </Button>
-            </div>
+            </SearchToolbar>
           </div>
 
           <InventoryBatchTable

@@ -9,6 +9,7 @@ import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
 import OrderTable from "@/components/order/OrderTable";
 import Button from "@/components/ui/Button";
 import SearchInput from "@/components/ui/SearchInput";
+import SearchToolbar from "@/components/ui/SearchToolbar";
 import ScopeIndicator from "@/components/shared/ScopeIndicator";
 
 export default function OrdersPage() {
@@ -129,8 +130,8 @@ export default function OrdersPage() {
       </div>
 
       <div className="bg-card border border-border rounded-xl shadow-sm p-4 mb-6">
-        <div className="flex flex-col lg:flex-row gap-3">
-          <div className="flex-1 min-w-0">
+        <SearchToolbar
+          search={
             <SearchInput
               data-testid="order-search-input"
               placeholder="Tìm theo mã đơn hoặc tên/SĐT khách hàng..."
@@ -138,9 +139,8 @@ export default function OrdersPage() {
               onChange={(e) => handleSearchChange(e.target.value)}
               onClear={() => handleSearchChange("")}
             />
-          </div>
-
-          <div className="flex flex-wrap gap-3">
+          }
+        >
             <select
               data-testid="order-status-filter"
               value={orderStatusFilter}
@@ -202,8 +202,7 @@ export default function OrdersPage() {
               <RefreshCw className="w-4 h-4" />
               <span className="hidden sm:inline">Làm mới</span>
             </Button>
-          </div>
-        </div>
+        </SearchToolbar>
       </div>
 
       <OrderTable orders={filteredOrders} isLoading={isLoading} />

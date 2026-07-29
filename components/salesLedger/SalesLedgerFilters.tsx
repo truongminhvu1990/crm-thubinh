@@ -6,6 +6,7 @@ import { COMMISSION_STATUS_OPTIONS } from "@/lib/commission/commission.constants
 import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
 import { useStaffOptions } from "@/lib/hooks/useStaffOptions";
 import SearchInput from "@/components/ui/SearchInput";
+import SearchToolbar from "@/components/ui/SearchToolbar";
 import Button from "@/components/ui/Button";
 import CurrencyInput from "@/components/ui/CurrencyInput";
 
@@ -53,8 +54,8 @@ export default function SalesLedgerFilters({ filters, onChange }: Props) {
 
   return (
     <div className="bg-card border border-border rounded-xl shadow-sm p-4 mb-6 space-y-3">
-      <div className="flex flex-col lg:flex-row gap-3">
-        <div className="flex-1 min-w-0">
+      <SearchToolbar
+        search={
           <SearchInput
             data-testid="sales-ledger-search-input"
             placeholder="Tìm theo khách hàng, mã hoặc tên sản phẩm..."
@@ -62,8 +63,8 @@ export default function SalesLedgerFilters({ filters, onChange }: Props) {
             onChange={(e) => update({ search: e.target.value || undefined })}
             onClear={() => update({ search: undefined })}
           />
-        </div>
-
+        }
+      >
         <div className="flex items-center gap-2">
           <select
             value={filters.sortField}
@@ -86,7 +87,7 @@ export default function SalesLedgerFilters({ filters, onChange }: Props) {
             {filters.sortDirection === "asc" ? "Cũ nhất" : "Mới nhất"}
           </button>
         </div>
-      </div>
+      </SearchToolbar>
 
       <div className="flex flex-wrap gap-3">
         <input
