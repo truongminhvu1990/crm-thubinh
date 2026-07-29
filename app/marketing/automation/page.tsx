@@ -8,6 +8,7 @@ import StatCard from "@/components/ui/StatCard";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import SearchInput from "@/components/ui/SearchInput";
+import SearchToolbar from "@/components/ui/SearchToolbar";
 import Select from "@/components/ui/Select";
 import AutomationTable from "@/components/marketing/AutomationTable";
 import AutomationRunStatusBadge from "@/components/marketing/AutomationRunStatusBadge";
@@ -226,11 +227,11 @@ export default function AutomationPage() {
       ) : (
         <div className="space-y-4">
           <div className="bg-card border border-border rounded-xl shadow-sm p-4">
-            <div className="flex flex-col lg:flex-row gap-3">
-              <div className="flex-1 min-w-0">
+            <SearchToolbar
+              search={
                 <SearchInput placeholder="Tìm theo tên..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} onClear={() => setSearch("")} />
-              </div>
-              <div className="flex flex-wrap gap-3">
+              }
+            >
                 <Select
                   options={[{ value: ALL, label: "Tất cả trạng thái" }, ...AUTOMATION_STATUS_OPTIONS]}
                   value={statusFilter}
@@ -255,8 +256,7 @@ export default function AutomationPage() {
                   onChange={(e) => { setTriggerFilter(e.target.value); setPage(1); }}
                   className="w-36"
                 />
-              </div>
-            </div>
+            </SearchToolbar>
           </div>
 
           {error && <p className="text-sm text-destructive">{error}</p>}

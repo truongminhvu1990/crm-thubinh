@@ -17,6 +17,7 @@ import CustomerModal from "@/components/customer/CustomerModal";
 import CustomerImportModal from "@/components/customer/CustomerImportModal";
 import Button from "@/components/ui/Button";
 import SearchInput from "@/components/ui/SearchInput";
+import SearchToolbar from "@/components/ui/SearchToolbar";
 import AlertDialog from "@/components/ui/AlertDialog";
 import ScopeIndicator from "@/components/shared/ScopeIndicator";
 
@@ -288,8 +289,8 @@ export default function CustomersPage() {
       </div>
 
       <div className="bg-card border border-border rounded-xl shadow-sm p-4 mb-6">
-        <div className="flex flex-col lg:flex-row gap-3">
-          <div className="flex-1 min-w-0">
+        <SearchToolbar
+          search={
             <SearchInput
               data-testid="customer-search-input"
               placeholder="Tìm theo tên, mã hoặc số điện thoại..."
@@ -297,9 +298,8 @@ export default function CustomersPage() {
               onChange={(e) => handleSearchChange(e.target.value)}
               onClear={() => handleSearchChange("")}
             />
-          </div>
-
-          <div className="flex flex-wrap gap-3">
+          }
+        >
             <select
               data-testid="customer-type-filter"
               value={filterType}
@@ -402,8 +402,7 @@ export default function CustomersPage() {
               <Plus className="w-4 h-4" />
               Thêm khách
             </Button>
-          </div>
-        </div>
+        </SearchToolbar>
       </div>
 
       <CustomerTable

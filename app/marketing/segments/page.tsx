@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import Button from "@/components/ui/Button";
 import SearchInput from "@/components/ui/SearchInput";
+import SearchToolbar from "@/components/ui/SearchToolbar";
 import Select from "@/components/ui/Select";
 import SegmentTable, { SegmentRow } from "@/components/marketing/SegmentTable";
 import MarketingPagination from "@/components/marketing/MarketingPagination";
@@ -77,8 +78,9 @@ export default function SegmentListPage() {
         </Button>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="flex-1">
+      <SearchToolbar
+        breakpoint="sm"
+        search={
           <SearchInput
             data-testid="marketing-segment-search-input"
             placeholder="Tìm theo tên phân khúc..."
@@ -92,7 +94,8 @@ export default function SegmentListPage() {
               setSearch("");
             }}
           />
-        </div>
+        }
+      >
         <div className="w-full sm:w-52">
           <Select
             options={TYPE_FILTER_OPTIONS}
@@ -113,7 +116,7 @@ export default function SegmentListPage() {
             }}
           />
         </div>
-      </div>
+      </SearchToolbar>
 
       <SegmentTable
         segments={rows}

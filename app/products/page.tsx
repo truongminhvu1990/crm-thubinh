@@ -13,6 +13,7 @@ import ProductModal from "@/components/product/ProductModal";
 import ProductImportModal from "@/components/product/ProductImportModal";
 import Button from "@/components/ui/Button";
 import SearchInput from "@/components/ui/SearchInput";
+import SearchToolbar from "@/components/ui/SearchToolbar";
 import AlertDialog from "@/components/ui/AlertDialog";
 
 const EMPTY_PRODUCT: Partial<Product> = {
@@ -291,8 +292,8 @@ export default function ProductsPage() {
       </div>
 
       <div className="bg-card border border-border rounded-xl shadow-sm p-4 mb-6">
-        <div className="flex flex-col lg:flex-row gap-3">
-          <div className="flex-1 min-w-0">
+        <SearchToolbar
+          search={
             <SearchInput
               data-testid="product-search-input"
               placeholder="Tìm theo tên, mã hoặc SKU..."
@@ -300,9 +301,8 @@ export default function ProductsPage() {
               onChange={(e) => handleSearchChange(e.target.value)}
               onClear={() => handleSearchChange("")}
             />
-          </div>
-
-          <div className="flex flex-wrap gap-3">
+          }
+        >
             <select
               data-testid="product-category-filter"
               value={categoryFilter}
@@ -381,8 +381,7 @@ export default function ProductsPage() {
               <Plus className="w-4 h-4" />
               Thêm sản phẩm
             </Button>
-          </div>
-        </div>
+        </SearchToolbar>
       </div>
 
       <ProductTable
