@@ -20,15 +20,17 @@ export default function EditPartnerPage() {
 
   useEffect(() => {
     if (!id) return;
-    setIsLoading(true);
-    fetch(`/api/partners/${id}`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Không tìm thấy đối tác");
-        return res.json();
-      })
-      .then(setPartner)
-      .catch((error) => console.error("Failed to load partner:", error))
-      .finally(() => setIsLoading(false));
+    queueMicrotask(() => {
+      setIsLoading(true);
+      fetch(`/api/partners/${id}`)
+        .then((res) => {
+          if (!res.ok) throw new Error("Không tìm thấy đối tác");
+          return res.json();
+        })
+        .then(setPartner)
+        .catch((error) => console.error("Failed to load partner:", error))
+        .finally(() => setIsLoading(false));
+    });
   }, [id]);
 
   function validate(): boolean {

@@ -55,12 +55,16 @@ export default function PartnersPage() {
   }
 
   useEffect(() => {
-    loadPartners();
+    queueMicrotask(() => {
+      loadPartners();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm, typeFilter, statusFilter]);
 
   useEffect(() => {
-    setPage(1);
+    queueMicrotask(() => {
+      setPage(1);
+    });
   }, [searchTerm, typeFilter, statusFilter]);
 
   function handleSort(key: PartnerSortKey) {

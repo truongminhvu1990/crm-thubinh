@@ -87,7 +87,9 @@ export default function PartnerDetailPage() {
   }
 
   useEffect(() => {
-    loadPartner();
+    queueMicrotask(() => {
+      loadPartner();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
