@@ -33,6 +33,15 @@ export interface MonthlySoldProductRow {
   product_code: string | null;
   product_name: string | null;
   product_category: string | null;
+  /** Column Customization (2026-08-12) - brings this report into compliance
+   * with docs/07_REPORTING_SPEC.md's locked field list, which names Jade
+   * Type as one of the report's fields. `products.jade_type` is a real,
+   * already-LOCKED Business Attribute (docs/02_PRODUCT_SPEC.md §8) - not a
+   * new business rule - resolved the same way cost_price already is, via
+   * the existing products enrichment join (see
+   * getDerivedFieldsByPurchaseId in monthlySoldProducts.repository.ts).
+   * Null when the product has no jade_type set. */
+  jade_type: string | null;
   customer_id: string;
   customer_name: string;
   customer_code: string;
@@ -41,6 +50,25 @@ export interface MonthlySoldProductRow {
   discount: number | null;
   final_sale_price: number;
   gross_profit: number | null;
+  /** Payment Details (Product Owner task, 2026-08-14) - Order-level, not
+   * per-product-line: `payments` records amounts against the Order as a
+   * whole, not against individual order_items, and the Product Owner's own
+   * definition is explicit ("actual payment amount recorded against the
+   * Order" / "Order total ... minus actual payments recorded against that
+   * Order") - so every product row belonging to the same Order shows that
+   * Order's own totals, not an invented per-line allocation. `null` for
+   * purchases with no linked Order (manual/historical entries have no Order
+   * to record payments against), same treatment as original_price/discount
+   * above. See lib/reports/orderPaymentSummary.ts for the derivation
+   * (reuses lib/orders/order.rules.ts's calculateAmountPaid/
+   * calculateRemainingBalance verbatim). */
+  amount_paid: number | null;
+  remaining_balance: number | null;
+  /** Distinct payment_method values recorded on the Order, comma-joined -
+   * never collapsed to a single assumed method (see
+   * lib/reports/orderPaymentSummary.ts doc comment). `null` when the Order
+   * has no payments yet, or there is no linked Order. */
+  payment_methods: string | null;
 }
 
 export interface MonthlySoldProductsFilters {

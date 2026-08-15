@@ -4,10 +4,13 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Download, ShieldCheck } from "lucide-react";
 import { SalesLedgerFilters as Filters, SalesLedgerRow, SalesLedgerSummary as Summary } from "@/types/salesLedger";
-import { withGlobalDateRange, getAllFilteredRowsForExport } from "@/lib/salesLedger/salesLedger.service";
+import { withGlobalDateRange } from "@/lib/salesLedger/salesLedger.service";
 import { exportSalesLedgerToExcel } from "@/lib/salesLedger/salesLedgerExport";
+import { SalesLedgerColumnKey, getAvailableSalesLedgerColumns } from "@/lib/salesLedger/salesLedgerColumns";
+import { getCostPricesByProductIds } from "@/lib/salesLedger/salesLedger.repository";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
 import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
+import { useReportColumnPreference } from "@/lib/hooks/useReportColumnPreference";
 import { getProductById } from "@/lib/product.service";
 import { exclusiveEndToInclusiveTo } from "@/lib/reports/drilldown";
 import GlobalDateFilter from "@/components/shared/GlobalDateFilter";
@@ -17,6 +20,7 @@ import Button from "@/components/ui/Button";
 import SalesLedgerSummary from "@/components/salesLedger/SalesLedgerSummary";
 import SalesLedgerFilters from "@/components/salesLedger/SalesLedgerFilters";
 import SalesLedgerTable from "@/components/salesLedger/SalesLedgerTable";
+import SalesLedgerColumnPicker from "@/components/salesLedger/SalesLedgerColumnPicker";
 import SalesLedgerPagination from "@/components/salesLedger/SalesLedgerPagination";
 import VerificationFilters from "@/components/verification/VerificationFilters";
 
@@ -119,6 +123,19 @@ function SalesLedgerPageInner() {
   // itself does.
   const [verificationMode, setVerificationMode] = useState(false);
 
+  // Per-User Report Column Preferences (Product Owner task, 2026-08-14) -
+  // persisted server-side per (staff, "sales_ledger"), superseding Task 3's
+  // session-only React state. No saved preference -> every currently-
+  // available column visible, same default as before this existed.
+  const availableColumnKeys = getAvailableSalesLedgerColumns({ canViewCostAndProfit, verificationMode, costByProductId }).map(
+    (c) => c.key
+  );
+  const {
+    visibleColumns,
+    setVisibleColumns,
+    saveError: columnPreferenceSaveError,
+  } = useReportColumnPreference<SalesLedgerColumnKey>("sales_ledger", availableColumnKeys);
+
   // The date range half of a drill-down, unlike the filters above, mutates
   // the Global Date Filter - a different component's shared context state -
   // so it has to run as an effect, not a local lazy initializer. Deferred
@@ -186,8 +203,32 @@ function SalesLedgerPageInner() {
   async function handleExport() {
     setIsExporting(true);
     try {
-      const allRows = await getAllFilteredRowsForExport(filters);
-      const blob = await exportSalesLedgerToExcel(allRows);
+      // Reporting Permission Enforcement (Decision Q-12, 2026-08-14) -
+      // fetches from the new server-side export route (reports.export
+      // enforced there) instead of calling the repository directly with
+      // the browser client, which had no permission check in front of it.
+      const exportRes = await fetch(`/api/sales-ledger/export?${buildSalesLedgerQuery(filters)}`);
+      if (!exportRes.ok) throw new Error(`Export failed: ${exportRes.status}`);
+      const { rows: allRows }: { rows: SalesLedgerRow[] } = await exportRes.json();
+
+      // Cost/Profit isn't on the sales_ledger view - only fetch it for the
+      // full exported set when a Cost/Profit column is actually visible
+      // (and permitted), same "don't fetch what nothing needs" discipline
+      // as the on-screen costByProductId effect above, just scoped to every
+      // filtered row instead of only the current page's 50.
+      const needsCost = canViewCostAndProfit && (visibleColumns.has("cost_price") || visibleColumns.has("profit"));
+      const exportCostByProductId = needsCost
+        ? await getCostPricesByProductIds([...new Set(allRows.map((r) => r.product_id).filter((id): id is string => !!id))])
+        : new Map<string, number>();
+
+      const columnContext = { canViewCostAndProfit, verificationMode, costByProductId: exportCostByProductId };
+      // Locked Decision 2A - export contains exactly the columns currently
+      // visible in the table, same order, same labels: intersect the
+      // user's visibility choice with what's actually available right now
+      // (permission/mode gates), same as the table's own `show()` check.
+      const exportColumns = getAvailableSalesLedgerColumns(columnContext).filter((c) => visibleColumns.has(c.key));
+
+      const blob = await exportSalesLedgerToExcel(allRows, exportColumns, columnContext);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -215,7 +256,7 @@ function SalesLedgerPageInner() {
             <PageViewingLabel />
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <GlobalDateFilter />
           <Button
             data-testid="sales-ledger-verification-mode-button"
@@ -227,6 +268,16 @@ function SalesLedgerPageInner() {
             <ShieldCheck className="w-4 h-4" />
             {verificationMode ? "Chế độ xác minh: BẬT" : "Chế độ xác minh"}
           </Button>
+          <SalesLedgerColumnPicker
+            columns={getAvailableSalesLedgerColumns({ canViewCostAndProfit, verificationMode, costByProductId })}
+            visibleColumns={visibleColumns}
+            onChange={setVisibleColumns}
+          />
+          {columnPreferenceSaveError && (
+            <span className="text-xs text-destructive" data-testid="sales-ledger-column-preference-save-error">
+              Không thể lưu tùy chỉnh cột
+            </span>
+          )}
           <Button
             data-testid="report-export-button"
             variant="secondary"
@@ -252,6 +303,7 @@ function SalesLedgerPageInner() {
         verificationMode={verificationMode}
         canViewCostAndProfit={canViewCostAndProfit}
         costByProductId={costByProductId}
+        visibleColumns={visibleColumns}
       />
 
       <SalesLedgerPagination

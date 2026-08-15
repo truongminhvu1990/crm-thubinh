@@ -3,7 +3,7 @@ import { getSalesLedgerPage, getSalesLedgerSummary } from "@/lib/salesLedger/sal
 import { EntrySource, SalesLedgerFilters, SalesLedgerSortField, SortDirection } from "@/types/salesLedger";
 import { CommissionStatus } from "@/types/commission";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentStaffFromRequest } from "@/lib/permission/serverAuth";
+import { getCurrentStaffFromRequest, requirePermission } from "@/lib/permission/serverAuth";
 
 /** Backend API Foundation (Package 4C, Wave 3) - Sales Ledger's server-side
  * read endpoint. Reuses getSalesLedgerPage()/getSalesLedgerSummary()
@@ -22,6 +22,9 @@ import { getCurrentStaffFromRequest } from "@/lib/permission/serverAuth";
  * Nothing about Permission/Data Scope/query/filtering logic changed - only
  * how "who is calling" gets identified. */
 export async function GET(request: NextRequest) {
+  const auth = await requirePermission(request, "reports.view");
+  if ("error" in auth) return auth.error;
+
   const { searchParams } = request.nextUrl;
 
   const filters: SalesLedgerFilters = {

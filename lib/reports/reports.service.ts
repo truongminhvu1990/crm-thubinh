@@ -119,27 +119,38 @@ function groupCount<T>(rows: T[], key: (row: T) => string | null | undefined): C
 interface CustomerRow {
   source: string | null;
   vip_level: string | null;
-  assigned_salesperson: string | null;
+  assigned_staff: { full_name: string } | { full_name: string }[] | null;
+}
+
+function staffName(assigned_staff: CustomerRow["assigned_staff"]): string | null {
+  if (!assigned_staff) return null;
+  return Array.isArray(assigned_staff) ? assigned_staff[0]?.full_name ?? null : assigned_staff.full_name;
 }
 
 /** `client` defaults to the browser Supabase client so every existing
  * caller keeps its exact current behavior unchanged. Backend API Foundation
  * (Package 4C, Wave 4) passes a server client instead, from
- * app/api/reports/**. */
+ * app/api/reports/**.
+ *
+ * Legacy Field Migration (docs/01_CUSTOMER_SPEC.md §12, Product Owner
+ * Implementation Gate, 2026-08-15) - "by Salesperson" now groups by the
+ * structured `assigned_staff_id` (joined to `staff.full_name`), not the
+ * deprecated `assigned_salesperson` free-text field, which is no longer
+ * written on new/edited Customer records. */
 export async function getCustomerReportData(client: SupabaseClient = supabase): Promise<CustomerReportData> {
-  const { data, error } = await client.from("customers").select("source, vip_level, assigned_salesperson");
+  const { data, error } = await client.from("customers").select("source, vip_level, assigned_staff:staff(full_name)");
 
   if (error || !data) {
     if (error) console.error("Error fetching customer report data:", error);
     return { total: 0, bySource: [], byVipTier: [], bySalesperson: [] };
   }
 
-  const rows = data as CustomerRow[];
+  const rows = data as unknown as CustomerRow[];
   return {
     total: rows.length,
     bySource: groupCount(rows, (r) => r.source),
     byVipTier: groupCount(rows, (r) => r.vip_level),
-    bySalesperson: groupCount(rows, (r) => r.assigned_salesperson),
+    bySalesperson: groupCount(rows, (r) => staffName(r.assigned_staff)),
   };
 }
 

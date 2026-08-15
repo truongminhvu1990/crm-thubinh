@@ -98,12 +98,24 @@ export async function getSalesLedgerSummary(
  * explicit "only export currently filtered rows"), not just the visible
  * page. Re-runs the same filtered query, walking every 50-row page rather
  * than adding a second, separately-shaped "fetch everything" query - keeps
- * exactly one code path building the sales_ledger query. */
-export async function getAllFilteredRowsForExport(filters: SalesLedgerFilters): Promise<SalesLedgerRow[]> {
+ * exactly one code path building the sales_ledger query.
+ *
+ * `client`/`staff` (Reporting Permission Enforcement, Decision Q-12,
+ * 2026-08-14) - same optional Hotfix 3A pair as getSalesLedgerPage above.
+ * `app/api/sales-ledger/export/route.ts` now passes an explicitly-resolved
+ * Server Authentication Context value so `reports.export` can be enforced
+ * at a real trusted boundary before this function ever runs, instead of the
+ * export button's own click handler calling straight into the browser
+ * client with no permission check in front of it. */
+export async function getAllFilteredRowsForExport(
+  filters: SalesLedgerFilters,
+  client?: SupabaseClient,
+  staff?: Staff | null
+): Promise<SalesLedgerRow[]> {
   const rows: SalesLedgerRow[] = [];
   let page = 1;
   for (;;) {
-    const { rows: chunk, totalCount } = await repo.getSalesLedgerPage({ ...filters, page });
+    const { rows: chunk, totalCount } = await repo.getSalesLedgerPage({ ...filters, page }, client, staff);
     rows.push(...chunk);
     if (rows.length >= totalCount || chunk.length === 0) break;
     page += 1;

@@ -5,13 +5,16 @@ import {
 } from "@/lib/monthlySoldProducts/monthlySoldProducts.service";
 import { MonthlySoldProductsFilters } from "@/types/monthlySoldProducts";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentStaffFromRequest } from "@/lib/permission/serverAuth";
+import { getCurrentStaffFromRequest, requirePermission } from "@/lib/permission/serverAuth";
 
 /** Monthly Sold Products Report - server-side read endpoint, mirrors
  * app/api/sales-ledger/route.ts's shape (rows+totalCount+summary bundled in
  * one response, server Supabase client, Server Authentication Context for
  * the Data Scope call inside the repository). */
 export async function GET(request: NextRequest) {
+  const auth = await requirePermission(request, "reports.view");
+  if ("error" in auth) return auth.error;
+
   const { searchParams } = request.nextUrl;
 
   const filters: MonthlySoldProductsFilters = {

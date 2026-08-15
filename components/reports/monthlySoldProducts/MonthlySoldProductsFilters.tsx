@@ -53,7 +53,7 @@ export default function MonthlySoldProductsFilters({ filters, onChange }: Props)
           className="w-56"
         />
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm text-muted-foreground">Từ</span>
           <input
             type="date"

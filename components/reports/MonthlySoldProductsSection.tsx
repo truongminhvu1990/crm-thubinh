@@ -3,14 +3,19 @@
 import { useEffect, useState } from "react";
 import { Download, Printer } from "lucide-react";
 import { MonthlySoldProductsFilters as Filters, MonthlySoldProductRow, MonthlySoldProductsSummary as Summary } from "@/types/monthlySoldProducts";
-import { getAllFilteredRowsForExport } from "@/lib/monthlySoldProducts/monthlySoldProducts.service";
 import { ExcelColumn, exportRowsToExcel, downloadBlob } from "@/lib/reports/reportsBIExport";
+import {
+  MonthlySoldProductsColumnKey,
+  getAvailableMonthlySoldProductsColumns,
+} from "@/lib/monthlySoldProducts/monthlySoldProductsColumns";
 import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
+import { useReportColumnPreference } from "@/lib/hooks/useReportColumnPreference";
 import ScopeIndicator from "@/components/shared/ScopeIndicator";
 import Button from "@/components/ui/Button";
 import MonthlySoldProductsFilters from "@/components/reports/monthlySoldProducts/MonthlySoldProductsFilters";
 import MonthlySoldProductsSummary from "@/components/reports/monthlySoldProducts/MonthlySoldProductsSummary";
 import MonthlySoldProductsTable from "@/components/reports/monthlySoldProducts/MonthlySoldProductsTable";
+import MonthlySoldProductsColumnPicker from "@/components/reports/monthlySoldProducts/MonthlySoldProductsColumnPicker";
 import MonthlySoldProductsPagination from "@/components/reports/monthlySoldProducts/MonthlySoldProductsPagination";
 import ExpenseManagementSection from "@/components/reports/monthlySoldProducts/ExpenseManagementSection";
 
@@ -56,6 +61,19 @@ export default function MonthlySoldProductsSection() {
 
   const canViewGrossProfit = useIsOwnerOrManager();
 
+  // Per-User Report Column Preferences (Product Owner task, 2026-08-14) -
+  // own visibility state, own column definitions
+  // (lib/monthlySoldProducts/monthlySoldProductsColumns.ts), deliberately
+  // not shared with Sales Ledger's - persisted independently per
+  // (staff, "monthly_sold_products"), superseding the previous
+  // session-only React state.
+  const availableColumnKeys = getAvailableMonthlySoldProductsColumns({ canViewGrossProfit }).map((c) => c.key);
+  const {
+    visibleColumns,
+    setVisibleColumns,
+    saveError: columnPreferenceSaveError,
+  } = useReportColumnPreference<MonthlySoldProductsColumnKey>("monthly_sold_products", availableColumnKeys);
+
   async function load() {
     setIsLoading(true);
     const res = await fetch(`/api/reports/monthly-sold-products?${buildQuery(filters)}`);
@@ -73,25 +91,30 @@ export default function MonthlySoldProductsSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(filters)]);
 
-  const EXPORT_COLUMNS: ExcelColumn<MonthlySoldProductRow>[] = [
-    { header: "Ngày bán", width: 14, value: (r) => r.sale_date },
-    { header: "Số đơn", width: 16, value: (r) => r.order_number || "" },
-    { header: "Mã sản phẩm", width: 16, value: (r) => r.product_code || "" },
-    { header: "Tên sản phẩm", width: 28, value: (r) => r.product_name || "" },
-    { header: "Danh mục", width: 16, value: (r) => r.product_category || "" },
-    { header: "Khách hàng", width: 24, value: (r) => r.customer_name },
-    { header: "Nhân viên", width: 18, value: (r) => r.salesperson || "" },
-    { header: "Giá gốc", width: 16, value: (r) => r.original_price ?? "" },
-    { header: "Chiết khấu", width: 14, value: (r) => r.discount ?? "" },
-    { header: "Giá bán cuối", width: 16, value: (r) => r.final_sale_price },
-    { header: "Lãi gộp", width: 16, value: (r) => r.gross_profit ?? "" },
-  ];
-
   async function handleExportExcel() {
     setIsExporting(true);
     try {
-      const allRows = await getAllFilteredRowsForExport(filters);
-      const blob = await exportRowsToExcel<MonthlySoldProductRow>("San pham da ban", EXPORT_COLUMNS, allRows);
+      // Reporting Permission Enforcement (Decision Q-12, 2026-08-14) -
+      // fetches from the new server-side export route (reports.export
+      // enforced there) instead of calling the repository directly with
+      // the browser client, which had no permission check in front of it.
+      const exportRes = await fetch(`/api/reports/monthly-sold-products/export?${buildQuery(filters)}`);
+      if (!exportRes.ok) throw new Error(`Export failed: ${exportRes.status}`);
+      const { rows: allRows }: { rows: MonthlySoldProductRow[] } = await exportRes.json();
+
+      // Locked Decision 2A (Task 3 precedent) - export contains exactly the
+      // columns currently visible in the table, same order, same labels:
+      // intersect the user's visibility choice with what's actually
+      // available right now (canViewGrossProfit), same as the table's own
+      // `show()` check. Reuses the existing shared Excel writer
+      // (reportsBIExport.ts) rather than a bespoke one - unlike Sales
+      // Ledger's Cost/Profit, gross_profit needs no export-time lookup
+      // (already resolved per row, server-side).
+      const exportColumns: ExcelColumn<MonthlySoldProductRow>[] = getAvailableMonthlySoldProductsColumns({ canViewGrossProfit })
+        .filter((c) => visibleColumns.has(c.key))
+        .map((c) => ({ header: c.label, width: c.width, value: c.exportValue }));
+
+      const blob = await exportRowsToExcel<MonthlySoldProductRow>("San pham da ban", exportColumns, allRows);
       downloadBlob(blob, `san-pham-da-ban-theo-thang-${new Date().toISOString().slice(0, 10)}.xlsx`);
     } catch (error) {
       alert("Lỗi khi xuất Excel");
@@ -119,7 +142,17 @@ export default function MonthlySoldProductsSection() {
           {totalCount} sản phẩm trong khoảng thời gian đã chọn
           <ScopeIndicator resource="revenue" />
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <MonthlySoldProductsColumnPicker
+            columns={getAvailableMonthlySoldProductsColumns({ canViewGrossProfit })}
+            visibleColumns={visibleColumns}
+            onChange={setVisibleColumns}
+          />
+          {columnPreferenceSaveError && (
+            <span className="text-xs text-destructive" data-testid="monthly-sold-products-column-preference-save-error">
+              Không thể lưu tùy chỉnh cột
+            </span>
+          )}
           <Button
             data-testid="monthly-sold-products-export-excel-button"
             variant="secondary"
@@ -143,7 +176,12 @@ export default function MonthlySoldProductsSection() {
         <MonthlySoldProductsFilters filters={filters} onChange={setFilters} />
       </div>
 
-      <MonthlySoldProductsTable rows={rows} isLoading={isLoading} canViewGrossProfit={canViewGrossProfit} />
+      <MonthlySoldProductsTable
+        rows={rows}
+        isLoading={isLoading}
+        canViewGrossProfit={canViewGrossProfit}
+        visibleColumns={visibleColumns}
+      />
 
       <div className="print:hidden">
         <MonthlySoldProductsPagination

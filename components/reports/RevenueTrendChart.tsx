@@ -94,10 +94,10 @@ export default function RevenueTrendChart({ range }: Props) {
         } Z`
       : "";
 
-  function handleMouseMove(e: React.MouseEvent<HTMLDivElement>) {
+  function updateHoverFromClientX(clientX: number, container: HTMLDivElement) {
     if (points.length === 0) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const relativeX = e.clientX - rect.left;
+    const rect = container.getBoundingClientRect();
+    const relativeX = clientX - rect.left;
     let nearest = 0;
     let nearestDist = Infinity;
     points.forEach((p, i) => {
@@ -108,6 +108,19 @@ export default function RevenueTrendChart({ range }: Props) {
       }
     });
     setHoverIndex(nearest);
+  }
+
+  function handleMouseMove(e: React.MouseEvent<HTMLDivElement>) {
+    updateHoverFromClientX(e.clientX, e.currentTarget);
+  }
+
+  // Touch has no hover state, so tapping/dragging on the chart must reveal
+  // the same tooltip the mouse gets - without this the per-point value is
+  // completely unreachable on a touch device, not just harder to see.
+  function handleTouchMove(e: React.TouchEvent<HTMLDivElement>) {
+    const touch = e.touches[0];
+    if (!touch) return;
+    updateHoverFromClientX(touch.clientX, e.currentTarget);
   }
 
   const hovered = hoverIndex !== null ? points[hoverIndex] : null;
@@ -158,10 +171,13 @@ export default function RevenueTrendChart({ range }: Props) {
       ) : (
         <div
           ref={containerRef}
-          className="relative w-full"
+          className="relative w-full touch-pan-y"
           style={{ height: CHART_HEIGHT }}
           onMouseMove={handleMouseMove}
           onMouseLeave={() => setHoverIndex(null)}
+          onTouchStart={handleTouchMove}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={() => setHoverIndex(null)}
         >
           <svg width={width} height={CHART_HEIGHT} className="overflow-visible">
             {/* Recessive gridlines */}

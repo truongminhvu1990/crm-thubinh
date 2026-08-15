@@ -19,6 +19,19 @@ import { applyDataScopeWithFallback } from "@/lib/permission/dataScope";
  * and this codebase already accepts that tradeoff elsewhere (see the
  * `as unknown as X` casts throughout lib/*.service.ts).
  *
+ * Returns `Promise<{ query }>`, not `Promise<Q>` - `query` here is a
+ * Supabase PostgrestFilterBuilder, which is itself thenable. An async
+ * function that `return`s a thenable doesn't wrap it as the resolved
+ * value; JS adopts the thenable's own resolution instead, firing the query
+ * early and collapsing the awaited result to `{data, error, count}` rather
+ * than the builder - exactly the trap lib/permission/dataScope.ts's
+ * apply*Scope functions document (and wrap around) for the same reason,
+ * and exactly the pattern lib/monthlySoldProducts/monthlySoldProducts.
+ * repository.ts's own applyFilters already follows. This function used to
+ * `return query;` directly, which is what caused `query.order is not a
+ * function` in getSalesLedgerPage below - a plain object is never mistaken
+ * for a thenable, so callers must unwrap `.query`.
+ *
  * `staff` (Hotfix 3A): sentinel-typed `Staff | null | undefined`, not just
  * `Staff | null` - `undefined` (the default, every pre-Hotfix-3A caller)
  * means "resolve it yourself via getCurrentStaff() exactly as before" (the
@@ -36,7 +49,8 @@ async function applyFilters(
   query: any,
   filters: SalesLedgerFilters,
   staff?: Staff | null
-) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<{ query: any }> {
   if (filters.dateFrom) query = query.gte("sale_date", filters.dateFrom);
   if (filters.dateTo) query = query.lt("sale_date", filters.dateTo);
 
@@ -104,7 +118,7 @@ async function applyFilters(
     query = (await applyDataScopeWithFallback(query, resolvedStaff, "revenue", "salesperson_id", "salesperson")).query;
   }
 
-  return query;
+  return { query };
 }
 
 /** `client` defaults to the browser Supabase client so every existing
@@ -118,7 +132,7 @@ export async function getSalesLedgerPage(
   staff?: Staff | null
 ): Promise<SalesLedgerPage> {
   let query = client.from("sales_ledger").select("*", { count: "exact" });
-  query = await applyFilters(query, filters, staff);
+  query = (await applyFilters(query, filters, staff)).query;
   query = query.order(filters.sortField, { ascending: filters.sortDirection === "asc" });
 
   const from = (filters.page - 1) * SALES_LEDGER_PAGE_SIZE;
@@ -145,7 +159,7 @@ export async function getSalesLedgerAggregateRows(
   staff?: Staff | null
 ): Promise<{ sale_amount: number; commission_amount: number | null; is_revenue_recognized: boolean }[]> {
   let query = client.from("sales_ledger").select("sale_amount, commission_amount, is_revenue_recognized");
-  query = await applyFilters(query, filters, staff);
+  query = (await applyFilters(query, filters, staff)).query;
 
   const { data, error } = await query;
 
@@ -208,6 +222,35 @@ export async function getPrimaryImagesByProductIds(
     if (!byProduct.has(row.product_id)) byProduct.set(row.product_id, row.image_url);
   }
   return byProduct;
+}
+
+/** Batched cost_price lookup, keyed by product_id - Task 3 (Column
+ * Visibility), Cost/Profit export. Mirrors the same "select id, cost_price
+ * .in(productIds)" pattern lib/monthlySoldProducts/monthlySoldProducts.
+ * repository.ts already uses for its own Gross Profit column, so Reporting
+ * doesn't grow a second way of reading Product's cost basis. Owner/Manager
+ * gating happens at the call site (useIsOwnerOrManager), same as the
+ * on-screen Cost/Profit columns already do - this function itself has no
+ * permission check of its own, exactly like getPrimaryImagesByProductIds
+ * above. */
+export async function getCostPricesByProductIds(
+  productIds: string[],
+  client: SupabaseClient = supabase
+): Promise<Map<string, number>> {
+  if (productIds.length === 0) return new Map();
+
+  const { data, error } = await client.from("products").select("id, cost_price").in("id", productIds);
+
+  if (error) {
+    console.error("Error fetching product cost prices for sales ledger export:", error);
+    return new Map();
+  }
+
+  const map = new Map<string, number>();
+  for (const p of data as { id: string; cost_price: number | null }[]) {
+    if (typeof p.cost_price === "number") map.set(p.id, p.cost_price);
+  }
+  return map;
 }
 
 export async function getProductImagesForProduct(

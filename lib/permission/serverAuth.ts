@@ -91,3 +91,25 @@ export async function requirePermissionCenterAccess(
 
   return { staff };
 }
+
+/** Generic Authentication + Permission gate for any single `resource.action`
+ * permission key — for modules (like Partner Center) whose access rule is
+ * "authenticated staff holding this one permission," with no Data Scope or
+ * other module-specific rule layered on top. Not a replacement for
+ * `authorizeOrderWrite`-style helpers that DO need Data Scope. */
+export async function requirePermission(
+  request: NextRequest,
+  permissionKey: string
+): Promise<{ staff: Staff } | { error: NextResponse }> {
+  const staff = await getCurrentStaffFromRequest(request);
+  if (!staff) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  }
+
+  const allowed = await staffHasPermission(staff, permissionKey);
+  if (!allowed) {
+    return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  }
+
+  return { staff };
+}
