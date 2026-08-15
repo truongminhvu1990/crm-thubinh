@@ -1,5 +1,10 @@
 export type OrderStatus = "Draft" | "Reserved" | "Completed" | "Lost";
 export type PaymentStatus = "Unpaid" | "Partially Paid" | "Paid";
+/** Product Owner Decision 12a/Business Rule (LOCKED) — the only two Methods
+ * a user may pick for an Order's own Compensation. Not the same concept as
+ * CompensationMethod (types/compensation.ts), which also allows "Manual"
+ * for Policy configuration — that value is never valid here. */
+export type OrderCompensationMethod = "Percentage" | "Fixed Amount";
 
 export interface Order {
   id?: string;
@@ -7,6 +12,22 @@ export interface Order {
   customer_id: string;
   /** Populated by a join when fetched with customer — never write this back. */
   customer?: { id: string; full_name: string; customer_code: string; phone?: string } | null;
+  /** Partner Attribution (docs/12_PARTNER_CENTER_SPEC.md §7, confirmed;
+   * field added per Product Owner Revision 2026-07-31, Decision 4). Optional
+   * — an Order may exist without a Partner. Storage only: no Compensation
+   * calculation, Settlement, or Business Event is triggered by this field. */
+  partner_id?: string | null;
+  /** Order-level Compensation selection (Product Owner Decision 12a, LOCKED)
+   * — the user's direct Method + Value choice for THIS Order's Partner,
+   * read straight by createCompensationsForOrder instead of any
+   * Compensation Policy lookup. Required together whenever partner_id is
+   * set (order.validation.ts); both null when there is no Partner.
+   * Type-only compatibility declaration for the isolated Compensation
+   * release — no UI, validation, or database column ships with it here;
+   * those belong to the separate, not-yet-authorized Orders compensation
+   * selection feature (migration 2026081601). */
+  compensation_method?: OrderCompensationMethod | null;
+  compensation_value?: number | null;
   sales_owner: string;
   created_by: string;
   order_date: string;
