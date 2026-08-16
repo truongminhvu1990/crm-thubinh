@@ -6,6 +6,7 @@ import {
   MoneyDebtLedgerCurrency,
   CreateMoneyDebtLedgerEntryInput,
   CreateBuyCnyLedgerTransactionInput,
+  MoneyDebtReconciliationCandidate,
 } from "@/types/moneyDebtLedger";
 import { TECH_H_PAYMENT_METHODS } from "./moneyDebtLedger.constants";
 
@@ -200,6 +201,150 @@ export async function getTechHReconciliationCandidates(client: SupabaseClient = 
       return { ...payment, already_reconciled: alreadyReconciled, remaining: payment.amount - alreadyReconciled };
     })
     .filter((p) => p.remaining > 0);
+}
+
+interface RawReceivingAccountCandidateRow {
+  id: string;
+  amount: number;
+  payment_date: string;
+  order_id: string;
+  payment_method: string;
+  receiving_account_id: string;
+  order: { id: string; order_number: string; customer: { id: string; full_name: string } | null } | null;
+  receiving_account: {
+    id: string;
+    currency: string;
+    account_number: string;
+    label: string | null;
+    money_changer_partner_id: string | null;
+    bank: { value: string } | null;
+    owner: { name: string } | null;
+    money_changer: { name: string } | null;
+  } | null;
+}
+
+/** Stage 5 (Product Owner Locked Decisions, 2026-08-16), Phase 4 — the
+ * SECOND, generic reconciliation-candidate path, additive to (never
+ * replacing) getTechHReconciliationCandidates above. A payment qualifies
+ * when it has a Receiving Account AND that Receiving Account has an
+ * explicit Money Changer association (receiving_accounts.
+ * money_changer_partner_id IS NOT NULL) AND it isn't yet fully reconciled —
+ * exactly Phase 4's "receiving_account_money_changer_candidate" clause, no
+ * payment_method string matching involved at all (deliberately not
+ * "contains Tech", not case-insensitive, not bank/owner-name-based — Phase
+ * 4's own explicit prohibitions). The money_changer_partner_id IS NOT NULL
+ * filter is applied in JS rather than as a DB-level embedded-resource
+ * filter (`!inner` + `.not()` on the joined column) — both are equivalent
+ * in effect; JS filtering was chosen to keep the query shape simple and
+ * directly testable against this file's own fake `from()` client, matching
+ * getTechHReconciliationCandidates' own existing style. */
+export async function getReceivingAccountReconciliationCandidates(
+  client: SupabaseClient = supabase
+): Promise<MoneyDebtReconciliationCandidate[]> {
+  const { data: payments, error: paymentsError } = await client
+    .from("payments")
+    .select(
+      "id, amount, payment_date, order_id, payment_method, receiving_account_id, " +
+        "order:orders(id, order_number, customer:customers(id, full_name)), " +
+        "receiving_account:receiving_accounts(id, currency, account_number, label, money_changer_partner_id, " +
+        "bank:master_data(value), owner:partners!receiving_accounts_owner_partner_id_fkey(name), " +
+        "money_changer:partners!receiving_accounts_money_changer_partner_id_fkey(name))"
+    )
+    .not("receiving_account_id", "is", null)
+    .order("payment_date", { ascending: false });
+  if (paymentsError) {
+    console.error("Error fetching Receiving-Account-linked payments:", paymentsError);
+    return [];
+  }
+
+  const { data: reconciled, error: reconciledError } = await client
+    .from("money_debt_ledger_entries")
+    .select("linked_payment_id, amount")
+    .eq("transaction_type", "Customer Payment TECH_H");
+  if (reconciledError) {
+    console.error("Error fetching existing reconciliations:", reconciledError);
+    return [];
+  }
+
+  const reconciledByPayment = new Map<string, number>();
+  for (const row of (reconciled ?? []) as { linked_payment_id: string; amount: number }[]) {
+    reconciledByPayment.set(row.linked_payment_id, (reconciledByPayment.get(row.linked_payment_id) ?? 0) + row.amount);
+  }
+
+  return ((payments ?? []) as unknown as RawReceivingAccountCandidateRow[])
+    .filter((p) => p.receiving_account?.money_changer_partner_id != null)
+    .map((p) => {
+      const alreadyReconciled = reconciledByPayment.get(p.id) ?? 0;
+      return {
+        id: p.id,
+        order_id: p.order_id,
+        payment_method: p.payment_method,
+        amount: p.amount,
+        payment_date: p.payment_date,
+        already_reconciled: alreadyReconciled,
+        remaining: p.amount - alreadyReconciled,
+        order: p.order,
+        receiving_account_id: p.receiving_account_id,
+        bank: p.receiving_account?.bank?.value ?? null,
+        account_owner: p.receiving_account?.owner?.name ?? null,
+        account_currency: p.receiving_account?.currency ?? null,
+        account_label: p.receiving_account?.label ?? null,
+        account_number: p.receiving_account?.account_number ?? null,
+        money_changer_partner_id: p.receiving_account?.money_changer_partner_id ?? null,
+        money_changer_name: p.receiving_account?.money_changer?.name ?? null,
+      };
+    })
+    .filter((p) => p.remaining > 0);
+}
+
+/** Stage 5, Phase 4/5 — the unified candidate list: historical TECH_H/
+ * TechH (unchanged, payment_method-based) OR generic Receiving-Account +
+ * Money-Changer-association candidates, merged into one response shape for
+ * the reconciliation UI. Historical rows carry receiving_account_id=null,
+ * money_changer_partner_id=null (Phase 5: "That is valid. Do not fabricate
+ * receiving-account information."). Deduplicated by payment id defensively
+ * — in practice the two source sets can never overlap, since a payment
+ * only ever gets a receiving_account_id when payment_method is the
+ * Bank-Transfer-shaped value (order.validation.ts), which is never one of
+ * TECH_H_PAYMENT_METHODS. */
+export async function getReconciliationCandidates(client: SupabaseClient = supabase): Promise<MoneyDebtReconciliationCandidate[]> {
+  // Sequential, not Promise.all — keeps the two independent queries'
+  // table-call ordering deterministic and simple to fake in tests
+  // (each source function issues its own payments + money_debt_ledger_entries
+  // query pair; interleaving them would make per-table call sequencing
+  // ambiguous for no real performance benefit at this data volume).
+  const techH = await getTechHReconciliationCandidates(client);
+  const receivingAccountBased = await getReceivingAccountReconciliationCandidates(client);
+
+  const techHCandidates: MoneyDebtReconciliationCandidate[] = (
+    techH as { id: string; amount: number; payment_date: string; order_id: string; order: unknown; already_reconciled: number; remaining: number }[]
+  ).map((p) => ({
+    id: p.id,
+    order_id: p.order_id,
+    payment_method: "", // not selected by getTechHReconciliationCandidates' own query — irrelevant to its historical alias-based detection
+    amount: p.amount,
+    payment_date: p.payment_date,
+    already_reconciled: p.already_reconciled,
+    remaining: p.remaining,
+    order: p.order as MoneyDebtReconciliationCandidate["order"],
+    receiving_account_id: null,
+    bank: null,
+    account_owner: null,
+    account_currency: null,
+    account_label: null,
+    account_number: null,
+    money_changer_partner_id: null,
+    money_changer_name: null,
+  }));
+
+  const seen = new Set<string>();
+  const merged: MoneyDebtReconciliationCandidate[] = [];
+  for (const candidate of [...techHCandidates, ...receivingAccountBased]) {
+    if (seen.has(candidate.id)) continue;
+    seen.add(candidate.id);
+    merged.push(candidate);
+  }
+  return merged.sort((a, b) => (a.payment_date < b.payment_date ? 1 : -1));
 }
 
 /** Supabase's own RPC error (PostgrestError) is a plain object, not

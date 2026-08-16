@@ -5,7 +5,7 @@ import {
   MarkOrderLostInput,
   ReassignSalesOwnerInput,
 } from "@/types/order";
-import { ORDER_NUMBER_PATTERN } from "./order.constants";
+import { ORDER_NUMBER_PATTERN, BANK_TRANSFER_PAYMENT_METHOD } from "./order.constants";
 
 // Pure business-rule validation and derivation — no Supabase calls, no I/O.
 // Every rule/message traces to ORDERS_SPEC.md §4 or ORDERS_UI.md §17.
@@ -39,6 +39,25 @@ export function validateAddOrderItemInput(input: AddOrderItemInput): Record<stri
 
 export function validatePaymentAmount(input: Pick<AddPaymentInput, "amount">): string | null {
   return input.amount > 0 ? null : "Số tiền thanh toán phải lớn hơn 0";
+}
+
+/** Payment / Bank Account / Money-Debt domain redesign, Stage 3 (LOCKED) —
+ * structural half of the rule only (is the field present/absent when it
+ * should be); whether a supplied receiving_account_id actually exists and
+ * is active is a database-state check, done separately in
+ * order.service.ts's addPayment (this module stays pure, no I/O, matching
+ * every other function here). */
+export function validateReceivingAccountSelection(
+  input: Pick<AddPaymentInput, "payment_method" | "receiving_account_id">
+): string | null {
+  const requiresAccount = input.payment_method === BANK_TRANSFER_PAYMENT_METHOD;
+  if (requiresAccount && !input.receiving_account_id) {
+    return "Vui lòng chọn tài khoản nhận tiền";
+  }
+  if (!requiresAccount && input.receiving_account_id) {
+    return "Tài khoản nhận tiền chỉ áp dụng cho phương thức Chuyển khoản ngân hàng";
+  }
+  return null;
 }
 
 /** Non-blocking, per ORDERS_SPEC.md §4: overpayment is allowed, UI warns but never blocks submit. */

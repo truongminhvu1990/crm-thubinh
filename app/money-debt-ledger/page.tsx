@@ -103,7 +103,7 @@ export default function MoneyDebtLedgerPage() {
         <div className="flex flex-wrap gap-2">
           <Button data-testid="tech-h-reconcile-button" variant="secondary" size="md" onClick={() => setActiveModal("tech-h")}>
             <Link2 className="w-4 h-4" />
-            <span className="hidden sm:inline">Đối soát TECH_H</span>
+            <span className="hidden sm:inline">Đối soát Money/Debt</span>
           </Button>
           <Button data-testid="buy-cny-button" variant="secondary" size="md" onClick={() => setActiveModal("buy-cny")}>
             <ArrowLeftRight className="w-4 h-4" />

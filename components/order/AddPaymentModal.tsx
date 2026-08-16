@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { OrderPayment } from "@/types/order";
 import { calculateRemainingBalance } from "@/lib/orders/order.rules";
 import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
+import { BANK_TRANSFER_PAYMENT_METHOD } from "@/lib/orders/order.constants";
+import { getReceivingAccountOptions, ReceivingAccountOption } from "@/lib/receivingAccount.service";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
@@ -35,10 +37,28 @@ export default function AddPaymentModal({ open, orderId, totalAmount, payments, 
   const [paymentMethod, setPaymentMethod] = useState("");
   const [paymentDate, setPaymentDate] = useState(today());
   const [note, setNote] = useState("");
+  const [receivingAccountId, setReceivingAccountId] = useState("");
+  const [receivingAccountOptions, setReceivingAccountOptions] = useState<ReceivingAccountOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   const paymentMethodOptions = useMasterDataOptions("payment_method", paymentMethod);
+  const requiresReceivingAccount = paymentMethod === BANK_TRANSFER_PAYMENT_METHOD;
+
+  useEffect(() => {
+    if (!open || !requiresReceivingAccount) return;
+    getReceivingAccountOptions()
+      .then(setReceivingAccountOptions)
+      .catch(() => setReceivingAccountOptions([]));
+  }, [open, requiresReceivingAccount]);
+
+  useEffect(() => {
+    // Payment / Bank Account / Money-Debt domain redesign, Stage 3 (LOCKED)
+    // — receiving_account_id must become NULL the moment payment_method
+    // stops being the bank-transfer value, never left stale.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- derived-field reset on payment_method change, not an external-system subscription
+    if (!requiresReceivingAccount) setReceivingAccountId("");
+  }, [requiresReceivingAccount]);
 
   if (!open) return null;
 
@@ -58,6 +78,10 @@ export default function AddPaymentModal({ open, orderId, totalAmount, payments, 
       setError("Vui lòng nhập phương thức thanh toán");
       return;
     }
+    if (requiresReceivingAccount && !receivingAccountId) {
+      setError("Vui lòng chọn tài khoản nhận tiền");
+      return;
+    }
 
     setIsSaving(true);
     try {
@@ -69,6 +93,7 @@ export default function AddPaymentModal({ open, orderId, totalAmount, payments, 
           payment_method: paymentMethod,
           payment_date: paymentDate,
           note: note || null,
+          receiving_account_id: requiresReceivingAccount ? receivingAccountId : null,
         }),
       });
       if (!res.ok) {
@@ -120,6 +145,16 @@ export default function AddPaymentModal({ open, orderId, totalAmount, payments, 
           value={paymentMethod}
           onChange={(e) => setPaymentMethod(e.target.value)}
         />
+        {requiresReceivingAccount && (
+          <Select
+            data-testid="payment-receiving-account-select"
+            label="Tài khoản nhận tiền *"
+            placeholder="Chọn tài khoản nhận tiền"
+            options={receivingAccountOptions.map((o) => ({ value: o.id, label: o.label }))}
+            value={receivingAccountId}
+            onChange={(e) => setReceivingAccountId(e.target.value)}
+          />
+        )}
         <Input
           data-testid="payment-date-input"
           label="Ngày thanh toán"

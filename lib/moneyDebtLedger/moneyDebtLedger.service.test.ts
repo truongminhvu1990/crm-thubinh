@@ -369,6 +369,232 @@ test("getTechHReconciliationCandidates: queries payments using .in(\"payment_met
   assert.equal(bareEqCall, undefined, "Must not filter payments.payment_method via .eq() at all — must use the explicit alias set via .in()");
 });
 
+/**
+ * Stage 5 (Product Owner Locked Decisions, 2026-08-16), Phase 4/5/11 —
+ * getReconciliationCandidates() combines two independent, additive
+ * sources: getTechHReconciliationCandidates (unchanged, above) and the new
+ * getReceivingAccountReconciliationCandidates (payment_method-agnostic,
+ * driven entirely by receiving_accounts.money_changer_partner_id). Each
+ * call to getReconciliationCandidates queries `payments` and
+ * `money_debt_ledger_entries` twice — once per source function,
+ * sequentially (not Promise.all, by design) — so each fake table needs 2
+ * queued responses in call order: [historical, generic].
+ */
+
+function receivingAccountRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "ra-1",
+    currency: "VND",
+    account_number: "****1234",
+    label: null,
+    money_changer_partner_id: "mc-1",
+    bank: { value: "vcb" },
+    owner: { name: "Vũ" },
+    money_changer: { name: "H" },
+    ...overrides,
+  };
+}
+
+test("getReconciliationCandidates: includes a historical Tech_H payment (payment_method-based path, unchanged)", async () => {
+  const { getReconciliationCandidates } = await import("./moneyDebtLedger.service");
+  const historicalPayments = [
+    { id: "payment-1", amount: 5_000_000, payment_date: "2026-08-15", order_id: "order-1", order: { id: "order-1", order_number: "ORD-1" }, payment_method: "Tech_H" },
+  ];
+  const { client } = makeRpcClient(
+    makeFromClient({
+      payments: [{ data: historicalPayments }, { data: [] }],
+      money_debt_ledger_entries: [{ data: [] }, { data: [] }],
+    }),
+    {}
+  );
+
+  const result = await getReconciliationCandidates(client);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].id, "payment-1");
+  assert.equal(result[0].receiving_account_id, null, "Historical candidates must never fabricate receiving-account data");
+  assert.equal(result[0].money_changer_partner_id, null);
+});
+
+test("getReconciliationCandidates: includes a historical TechH payment (the other real legacy spelling, unchanged)", async () => {
+  const { getReconciliationCandidates } = await import("./moneyDebtLedger.service");
+  const historicalPayments = [
+    { id: "payment-2", amount: 10_000_000, payment_date: "2026-08-14", order_id: "order-2", order: { id: "order-2", order_number: "ORD-2" }, payment_method: "TechH" },
+  ];
+  const { client } = makeRpcClient(
+    makeFromClient({
+      payments: [{ data: historicalPayments }, { data: [] }],
+      money_debt_ledger_entries: [{ data: [] }, { data: [] }],
+    }),
+    {}
+  );
+
+  const result = await getReconciliationCandidates(client);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].id, "payment-2");
+});
+
+test("getReconciliationCandidates: includes a generic Receiving-Account candidate when its account has a configured Money Changer association", async () => {
+  const { getReconciliationCandidates } = await import("./moneyDebtLedger.service");
+  const genericPayments = [
+    {
+      id: "payment-3",
+      amount: 7_000_000,
+      payment_date: "2026-08-16",
+      order_id: "order-3",
+      payment_method: "Bank Transfer",
+      receiving_account_id: "ra-1",
+      order: { id: "order-3", order_number: "ORD-3", customer: null },
+      receiving_account: receivingAccountRow(),
+    },
+  ];
+  const { client } = makeRpcClient(
+    makeFromClient({
+      payments: [{ data: [] }, { data: genericPayments }],
+      money_debt_ledger_entries: [{ data: [] }, { data: [] }],
+    }),
+    {}
+  );
+
+  const result = await getReconciliationCandidates(client);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].id, "payment-3");
+  assert.equal(result[0].receiving_account_id, "ra-1");
+  assert.equal(result[0].bank, "vcb");
+  assert.equal(result[0].account_owner, "Vũ");
+  assert.equal(result[0].money_changer_partner_id, "mc-1");
+  assert.equal(result[0].money_changer_name, "H", "Pre-fill data contract: the UI reads this field to pre-select the Money Changer picker");
+});
+
+test("getReceivingAccountReconciliationCandidates: a payment with a Receiving Account that has NO configured Money Changer association is excluded — never inferred from owner_partner_id or bank/owner names", async () => {
+  const { getReceivingAccountReconciliationCandidates } = await import("./moneyDebtLedger.service");
+  const payments = [
+    {
+      id: "payment-4",
+      amount: 1_000_000,
+      payment_date: "2026-08-16",
+      order_id: "order-4",
+      payment_method: "Bank Transfer",
+      receiving_account_id: "ra-2",
+      order: null,
+      receiving_account: receivingAccountRow({ id: "ra-2", money_changer_partner_id: null, money_changer: null }),
+    },
+  ];
+  const { client } = makeRpcClient(
+    makeFromClient({ payments: [{ data: payments }], money_debt_ledger_entries: [{ data: [] }] }),
+    {}
+  );
+
+  const result = await getReceivingAccountReconciliationCandidates(client);
+  assert.equal(result.length, 0, "No money_changer_partner_id on the receiving account means no candidate — not even a coincidental owner match");
+});
+
+test("getReceivingAccountReconciliationCandidates: an unrelated payment_method (e.g. 'tiền mặt') with no receiving_account_id is simply never queried into this path at all (the .not(receiving_account_id, is, null) filter excludes it at the DB level)", async () => {
+  const { getReceivingAccountReconciliationCandidates } = await import("./moneyDebtLedger.service");
+  const { client, calls } = makeRpcClient(
+    makeFromClient({ payments: [{ data: [] }], money_debt_ledger_entries: [{ data: [] }] }),
+    {}
+  );
+
+  await getReceivingAccountReconciliationCandidates(client);
+  const notNullCall = calls.find((c) => c.table === "payments" && c.method === "not");
+  assert.ok(notNullCall, "Expected a .not() call filtering payments.receiving_account_id IS NOT NULL");
+  assert.deepEqual(notNullCall!.args, ["receiving_account_id", "is", null]);
+});
+
+test("getReceivingAccountReconciliationCandidates: partial reconciliation — an already-partially-reconciled generic candidate reports the correct remaining amount and stays included", async () => {
+  const { getReceivingAccountReconciliationCandidates } = await import("./moneyDebtLedger.service");
+  const payments = [
+    {
+      id: "payment-5",
+      amount: 10_000_000,
+      payment_date: "2026-08-16",
+      order_id: "order-5",
+      payment_method: "Bank Transfer",
+      receiving_account_id: "ra-1",
+      order: null,
+      receiving_account: receivingAccountRow(),
+    },
+  ];
+  const reconciled = [{ linked_payment_id: "payment-5", amount: 4_000_000 }];
+  const { client } = makeRpcClient(
+    makeFromClient({ payments: [{ data: payments }], money_debt_ledger_entries: [{ data: reconciled }] }),
+    {}
+  );
+
+  const result = await getReceivingAccountReconciliationCandidates(client);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].already_reconciled, 4_000_000);
+  assert.equal(result[0].remaining, 6_000_000);
+});
+
+test("getReceivingAccountReconciliationCandidates: over-reconciliation guard — a generic candidate already fully reconciled is excluded, same as the historical path", async () => {
+  const { getReceivingAccountReconciliationCandidates } = await import("./moneyDebtLedger.service");
+  const payments = [
+    {
+      id: "payment-6",
+      amount: 2_000_000,
+      payment_date: "2026-08-16",
+      order_id: "order-6",
+      payment_method: "Bank Transfer",
+      receiving_account_id: "ra-1",
+      order: null,
+      receiving_account: receivingAccountRow(),
+    },
+  ];
+  const reconciled = [{ linked_payment_id: "payment-6", amount: 2_000_000 }];
+  const { client } = makeRpcClient(
+    makeFromClient({ payments: [{ data: payments }], money_debt_ledger_entries: [{ data: reconciled }] }),
+    {}
+  );
+
+  const result = await getReceivingAccountReconciliationCandidates(client);
+  assert.equal(result.length, 0);
+});
+
+test("getReconciliationCandidates: candidate detection alone never calls any RPC — pure read, no automatic ledger entry (Phase 8/12/13)", async () => {
+  const { getReconciliationCandidates } = await import("./moneyDebtLedger.service");
+  const { client, rpcCalls } = makeRpcClient(
+    makeFromClient({
+      payments: [{ data: [] }, { data: [] }],
+      money_debt_ledger_entries: [{ data: [] }, { data: [] }],
+    }),
+    {}
+  );
+
+  await getReconciliationCandidates(client);
+  assert.equal(rpcCalls.length, 0);
+});
+
+test("getReconciliationCandidates: deduplicates by payment id if a payment somehow appears in both source lists (defensive — cannot happen given Stage 3's mutual-exclusivity rule, but must not double-count if it ever did)", async () => {
+  const { getReconciliationCandidates } = await import("./moneyDebtLedger.service");
+  const sharedId = "payment-7";
+  const historicalPayments = [
+    { id: sharedId, amount: 1_000_000, payment_date: "2026-08-16", order_id: "order-7", order: null, payment_method: "Tech_H" },
+  ];
+  const genericPayments = [
+    {
+      id: sharedId,
+      amount: 1_000_000,
+      payment_date: "2026-08-16",
+      order_id: "order-7",
+      payment_method: "Bank Transfer",
+      receiving_account_id: "ra-1",
+      order: null,
+      receiving_account: receivingAccountRow(),
+    },
+  ];
+  const { client } = makeRpcClient(
+    makeFromClient({
+      payments: [{ data: historicalPayments }, { data: genericPayments }],
+      money_debt_ledger_entries: [{ data: [] }, { data: [] }],
+    }),
+    {}
+  );
+
+  const result = await getReconciliationCandidates(client);
+  assert.equal(result.length, 1);
+});
+
 test("TECH_H_PAYMENT_METHODS: recognizes exactly the two real historical Production spellings (\"Tech_H\", \"TechH\") — narrow and explicit, not case-insensitive, not a literal \"TECH_H\", not unrelated methods", async () => {
   const { TECH_H_PAYMENT_METHODS } = await import("./moneyDebtLedger.constants");
 

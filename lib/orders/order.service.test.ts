@@ -44,6 +44,19 @@ mock.module("@/lib/commission/commission.repository", {
   },
 });
 
+/** Payment / Bank Account / Money-Debt domain redesign, Stage 3 —
+ * addPayment's own active-receiving-account existence check
+ * (order.service.ts) reads this via getReceivingAccountById; mocked
+ * wholesale for the same reason as compensation/notification above. Tests
+ * set `receivingAccountLookupResult` per-case. Deliberately does NOT
+ * mock lib/moneyDebtLedger/* at all — addPayment must never import it. */
+let receivingAccountLookupResult: { id: string; is_active: boolean } | null = { id: "account-1", is_active: true };
+mock.module("@/lib/receivingAccount.service", {
+  namedExports: {
+    getReceivingAccountById: async () => receivingAccountLookupResult,
+  },
+});
+
 function makeOrder(overrides: Partial<Order> = {}): Order {
   return {
     id: "order-1",
@@ -453,4 +466,161 @@ test("deleteOrder (admin, Owner): already-deleted/nonexistent order is handled s
     OrderNotFoundError
   );
   assert.equal(compensationCheckCalled, false);
+});
+
+// ============================================================
+// Payment / Bank Account / Money-Debt domain redesign, Stage 3 (LOCKED)
+// ============================================================
+
+test("addPayment: Bank Transfer without receiving_account_id is rejected with OrderValidationError, repository never reached", async () => {
+  const { createOrderService, OrderValidationError } = await import("./order.service");
+  let repositoryAddPaymentCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    addPayment: async (input) => {
+      repositoryAddPaymentCalled = true;
+      return { id: "payment-1", ...input } as OrderPayment;
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      createOrderService(repository).addPayment(
+        { order_id: "order-1", amount: 1000000, payment_method: "Bank Transfer", payment_date: "2026-08-16" } as never,
+        "actor"
+      ),
+    OrderValidationError
+  );
+  assert.equal(repositoryAddPaymentCalled, false);
+});
+
+test("addPayment: Bank Transfer with an active receiving_account_id succeeds and persists it", async () => {
+  const { createOrderService } = await import("./order.service");
+  receivingAccountLookupResult = { id: "account-1", is_active: true };
+  let persistedInput: unknown = null;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    addPayment: async (input) => {
+      persistedInput = input;
+      return { id: "payment-1", ...input } as OrderPayment;
+    },
+    findPaymentsByOrderId: async () => [],
+    updateOrderRollups: async (orderId, rollups) => makeOrder({ id: orderId, ...rollups }),
+  });
+
+  await createOrderService(repository).addPayment(
+    { order_id: "order-1", amount: 1000000, payment_method: "Bank Transfer", payment_date: "2026-08-16", receiving_account_id: "account-1" } as never,
+    "actor"
+  );
+
+  assert.equal((persistedInput as { receiving_account_id: string }).receiving_account_id, "account-1");
+});
+
+test("addPayment: Bank Transfer with an INACTIVE receiving_account_id is rejected with OrderRuleViolationError, repository never reached", async () => {
+  const { createOrderService, OrderRuleViolationError } = await import("./order.service");
+  receivingAccountLookupResult = { id: "account-1", is_active: false };
+  let repositoryAddPaymentCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    addPayment: async (input) => {
+      repositoryAddPaymentCalled = true;
+      return { id: "payment-1", ...input } as OrderPayment;
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      createOrderService(repository).addPayment(
+        { order_id: "order-1", amount: 1000000, payment_method: "Bank Transfer", payment_date: "2026-08-16", receiving_account_id: "account-1" } as never,
+        "actor"
+      ),
+    OrderRuleViolationError
+  );
+  assert.equal(repositoryAddPaymentCalled, false);
+  receivingAccountLookupResult = { id: "account-1", is_active: true }; // reset for later tests
+});
+
+test("addPayment: Bank Transfer with a non-existent receiving_account_id is rejected with OrderRuleViolationError", async () => {
+  const { createOrderService, OrderRuleViolationError } = await import("./order.service");
+  receivingAccountLookupResult = null;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    addPayment: async () => {
+      throw new Error("must not reach the repository");
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      createOrderService(repository).addPayment(
+        { order_id: "order-1", amount: 1000000, payment_method: "Bank Transfer", payment_date: "2026-08-16", receiving_account_id: "does-not-exist" } as never,
+        "actor"
+      ),
+    OrderRuleViolationError
+  );
+  receivingAccountLookupResult = { id: "account-1", is_active: true }; // reset for later tests
+});
+
+test("addPayment: Cash does not require receiving_account_id and persists it as absent", async () => {
+  const { createOrderService } = await import("./order.service");
+  let persistedInput: unknown = null;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    addPayment: async (input) => {
+      persistedInput = input;
+      return { id: "payment-1", ...input } as OrderPayment;
+    },
+    findPaymentsByOrderId: async () => [],
+    updateOrderRollups: async (orderId, rollups) => makeOrder({ id: orderId, ...rollups }),
+  });
+
+  await createOrderService(repository).addPayment(
+    { order_id: "order-1", amount: 1000000, payment_method: "Cash", payment_date: "2026-08-16" } as never,
+    "actor"
+  );
+
+  assert.equal((persistedInput as { receiving_account_id?: string }).receiving_account_id, undefined);
+});
+
+test("addPayment: PayPal does not require receiving_account_id (same rule as Cash, not the Bank Transfer literal)", async () => {
+  const { createOrderService } = await import("./order.service");
+  let repositoryAddPaymentCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    addPayment: async (input) => {
+      repositoryAddPaymentCalled = true;
+      return { id: "payment-1", ...input } as OrderPayment;
+    },
+    findPaymentsByOrderId: async () => [],
+    updateOrderRollups: async (orderId, rollups) => makeOrder({ id: orderId, ...rollups }),
+  });
+
+  await createOrderService(repository).addPayment(
+    { order_id: "order-1", amount: 1000000, payment_method: "PayPal", payment_date: "2026-08-16" } as never,
+    "actor"
+  );
+
+  assert.equal(repositoryAddPaymentCalled, true);
+});
+
+test("addPayment: a non-Bank-Transfer method with a receiving_account_id supplied anyway is rejected — must stay NULL, never silently accepted", async () => {
+  const { createOrderService, OrderValidationError } = await import("./order.service");
+  let repositoryAddPaymentCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    addPayment: async () => {
+      repositoryAddPaymentCalled = true;
+      throw new Error("must not reach the repository");
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      createOrderService(repository).addPayment(
+        { order_id: "order-1", amount: 1000000, payment_method: "Cash", payment_date: "2026-08-16", receiving_account_id: "account-1" } as never,
+        "actor"
+      ),
+    OrderValidationError
+  );
+  assert.equal(repositoryAddPaymentCalled, false);
 });

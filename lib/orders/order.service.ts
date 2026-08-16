@@ -41,8 +41,10 @@ import {
   validateCreateOrderInput,
   validateMarkOrderLostInput,
   validatePaymentAmount,
+  validateReceivingAccountSelection,
   validateReassignSalesOwnerInput,
 } from "./order.validation";
+import { getReceivingAccountById } from "@/lib/receivingAccount.service";
 
 export interface OrderListItem extends Order {
   item_count: number;
@@ -537,6 +539,17 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       const amountError = validatePaymentAmount(input);
       if (amountError) {
         throw new OrderValidationError({ amount: amountError });
+      }
+
+      const receivingAccountError = validateReceivingAccountSelection(input);
+      if (receivingAccountError) {
+        throw new OrderValidationError({ receiving_account_id: receivingAccountError });
+      }
+      if (input.receiving_account_id) {
+        const account = await getReceivingAccountById(input.receiving_account_id);
+        if (!account || !account.is_active) {
+          throw new OrderRuleViolationError("Tài khoản nhận tiền không tồn tại hoặc đã ngừng hoạt động");
+        }
       }
 
       const payment = await repository.addPayment(input);

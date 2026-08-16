@@ -92,3 +92,31 @@ export interface MoneyDebtLedgerBalance {
   total_out: number;
   balance: number;
 }
+
+/** Stage 5 (Product Owner Locked Decisions, 2026-08-16), Phase 5 — the
+ * unified reconciliation candidate shape, covering both detection paths
+ * (Phase 4): historical TECH_H/TechH (payment_method-based, unchanged) and
+ * the new generic Receiving-Account-based path
+ * (receiving_account.money_changer_partner_id IS NOT NULL). Historical
+ * candidates always have receiving_account_id/money_changer_partner_id
+ * null — that is a valid, expected state (Phase 5's own instruction: "Do
+ * not fabricate receiving-account information"), not an error. */
+export interface MoneyDebtReconciliationCandidate {
+  id: string;
+  order_id: string;
+  payment_method: string;
+  amount: number;
+  payment_date: string;
+  already_reconciled: number;
+  remaining: number;
+  order?: { id: string; order_number: string; customer?: { id: string; full_name: string } | null } | null;
+
+  receiving_account_id: string | null;
+  bank: string | null;
+  account_owner: string | null;
+  account_currency: string | null;
+  account_label: string | null;
+  account_number: string | null;
+  money_changer_partner_id: string | null;
+  money_changer_name: string | null;
+}

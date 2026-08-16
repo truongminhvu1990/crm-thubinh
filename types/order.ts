@@ -66,6 +66,25 @@ export interface OrderPayment {
   payment_date: string;
   note?: string | null;
   created_at?: string;
+  /** Payment / Bank Account / Money-Debt domain redesign, Stage 3 — WHERE
+   * the money was received, independent of payment_method (HOW it was
+   * paid). Always null for Cash/PayPal-style methods; only meaningful when
+   * payment_method is a bank-transfer-style value (see
+   * order.validation.ts's validateReceivingAccountSelection). Never
+   * auto-populated, never implies a Money & Debt Ledger counterparty by
+   * itself. */
+  receiving_account_id?: string | null;
+  /** Populated by a join when fetched with its receiving account — never
+   * write this back. Absent/null for every payment that has no
+   * receiving_account_id. */
+  receiving_account?: {
+    id: string;
+    currency: string;
+    account_number: string;
+    label?: string | null;
+    bank?: { value: string } | null;
+    owner?: { name: string } | null;
+  } | null;
 }
 
 export interface OrderEvent {
@@ -130,6 +149,10 @@ export interface AddPaymentInput {
   payment_method: string;
   payment_date: string;
   note?: string | null;
+  /** See OrderPayment.receiving_account_id. Required when payment_method
+   * is a bank-transfer-style value, must be omitted/null otherwise —
+   * enforced by order.validation.ts's validateReceivingAccountSelection. */
+  receiving_account_id?: string | null;
 }
 
 export interface MarkOrderLostInput {

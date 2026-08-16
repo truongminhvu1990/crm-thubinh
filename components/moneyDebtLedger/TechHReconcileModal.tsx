@@ -16,12 +16,23 @@ interface Counterparty {
   partner_type: string;
 }
 
-interface TechHCandidate {
+interface ReconciliationCandidate {
   id: string;
+  order_id: string;
+  payment_method: string;
   amount: number;
   payment_date: string;
+  already_reconciled: number;
   remaining: number;
   order?: { order_number: string; customer?: { full_name: string } | null } | null;
+  receiving_account_id: string | null;
+  bank: string | null;
+  account_owner: string | null;
+  account_currency: string | null;
+  account_label: string | null;
+  account_number: string | null;
+  money_changer_partner_id: string | null;
+  money_changer_name: string | null;
 }
 
 interface Props {
@@ -30,16 +41,22 @@ interface Props {
   onSaved: () => void;
 }
 
-/** docs/19_MONEY_DEBT_LEDGER_SPEC.md §12 — reconciles a TECH_H Payment
- * (payments.payment_method = 'TECH_H') to the downstream VND movement it
- * represents. Payment stays the source of truth (D9) — this only creates a
- * linked 'Customer Payment TECH_H' ledger row; nothing about the Payment
- * itself is touched. Only outstanding (not-yet-fully-reconciled) payments
- * are offered, and the amount field is capped at the remaining balance —
- * the server-side guard in create_money_debt_ledger_entry() is the
- * authoritative check either way. */
+/** docs/19_MONEY_DEBT_LEDGER_SPEC.md §12, extended by Stage 5 (Product
+ * Owner Locked Decisions, 2026-08-16) — reconciles a qualifying Payment to
+ * its downstream VND movement. Two candidate sources, merged (Phase 4):
+ * historical TECH_H/TechH (payment_method-based, unchanged) and the new
+ * generic Receiving-Account + Money-Changer-association path. Payment
+ * stays the source of truth (D9) — this only creates a linked
+ * 'Customer Payment TECH_H' ledger row via the existing governed
+ * create_money_debt_ledger_entry() RPC (Phase 8 — the write path itself is
+ * completely unchanged); nothing about the Payment or the Receiving
+ * Account is ever written back here. When the selected candidate has a
+ * money_changer_partner_id, the Money Changer picker is PRE-FILLED from it
+ * (Phase 8) — but it remains an ordinary editable Select and the user must
+ * still explicitly confirm (or change) it before saving; nothing is ever
+ * auto-submitted (Phase 6/12/13 — no automatic reconciliation). */
 export default function TechHReconcileModal({ open, onClose, onSaved }: Props) {
-  const [candidates, setCandidates] = useState<TechHCandidate[]>([]);
+  const [candidates, setCandidates] = useState<ReconciliationCandidate[]>([]);
   const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
   const [paymentId, setPaymentId] = useState("");
   const [partyId, setPartyId] = useState("");
@@ -51,10 +68,10 @@ export default function TechHReconcileModal({ open, onClose, onSaved }: Props) {
   useEffect(() => {
     if (!open) return;
     Promise.all([
-      fetch("/api/money-debt-ledger/tech-h-candidates").then((res) => res.json()),
+      fetch("/api/money-debt-ledger/reconciliation-candidates").then((res) => res.json()),
       fetch("/api/money-debt-ledger/counterparties").then((res) => res.json()),
     ])
-      .then(([paymentRows, partyRows]: [TechHCandidate[], Counterparty[]]) => {
+      .then(([paymentRows, partyRows]: [ReconciliationCandidate[], Counterparty[]]) => {
         setCandidates(paymentRows);
         setCounterparties(partyRows.filter((p) => p.partner_type === "Money Changer"));
       })
@@ -67,8 +84,15 @@ export default function TechHReconcileModal({ open, onClose, onSaved }: Props) {
   const selectedPayment = candidates.find((p) => p.id === paymentId);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- derived-field sync, not an external-system subscription
-    if (selectedPayment) setAmount(selectedPayment.remaining);
+    // Phase 8 pre-fill — amount always; party_id only when the candidate
+    // has a configured money_changer_partner_id (a Tech_H/TechH historical
+    // candidate never does, so its party picker starts empty, exactly as
+    // before Stage 5).
+    if (selectedPayment) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- derived-field sync, not an external-system subscription
+      setAmount(selectedPayment.remaining);
+      setPartyId(selectedPayment.money_changer_partner_id ?? "");
+    }
   }, [selectedPayment]);
 
   if (!open) return null;
@@ -82,7 +106,7 @@ export default function TechHReconcileModal({ open, onClose, onSaved }: Props) {
   async function handleSave() {
     setError(null);
     if (!paymentId || !selectedPayment) {
-      setError("Vui lòng chọn Payment TECH_H cần đối soát");
+      setError("Vui lòng chọn payment cần đối soát");
       return;
     }
     if (!partyId) {
@@ -126,26 +150,41 @@ export default function TechHReconcileModal({ open, onClose, onSaved }: Props) {
   }
 
   return (
-    <Modal open={open} title="Đối soát thanh toán TECH_H" onClose={onClose} testId="tech-h-reconcile-modal">
+    <Modal open={open} title="Đối soát Money/Debt" onClose={onClose} testId="tech-h-reconcile-modal">
       {error && <div className="mb-4 rounded-lg bg-red-100 text-red-700 text-sm px-3 py-2">{error}</div>}
 
       {candidates.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Không có Payment TECH_H nào còn cần đối soát.</p>
+        <p className="text-sm text-muted-foreground">Không có payment nào còn cần đối soát.</p>
       ) : (
         <div className="space-y-4">
           <Select
             data-testid="tech-h-payment-select"
-            label="Payment TECH_H *"
+            label="Payment *"
             placeholder="Chọn payment"
             options={paymentOptions}
             value={paymentId}
             onChange={(e) => setPaymentId(e.target.value)}
           />
           {selectedPayment && (
-            <p className="text-xs text-muted-foreground -mt-2">
-              Ngày thanh toán {formatDate(selectedPayment.payment_date)} · Tổng {vnd.format(selectedPayment.amount)} · Còn lại{" "}
-              {vnd.format(selectedPayment.remaining)}
-            </p>
+            <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground space-y-1">
+              <p>Ngày thanh toán {formatDate(selectedPayment.payment_date)}</p>
+              {selectedPayment.payment_method && <p>Phương thức: {selectedPayment.payment_method}</p>}
+              <p>
+                Tổng {vnd.format(selectedPayment.amount)} · Đã đối soát {vnd.format(selectedPayment.already_reconciled)} · Còn lại{" "}
+                {vnd.format(selectedPayment.remaining)}
+              </p>
+              {/* Receiving Account context is read-only — never written back here (Phase 6). */}
+              {selectedPayment.receiving_account_id ? (
+                <p>
+                  Tài khoản nhận: {selectedPayment.bank ?? "—"} · Chủ tài khoản {selectedPayment.account_owner ?? "—"} ·{" "}
+                  {selectedPayment.account_currency ?? "—"} · {selectedPayment.account_number ?? "—"}
+                  {selectedPayment.account_label ? ` (${selectedPayment.account_label})` : ""}
+                </p>
+              ) : (
+                <p>Tài khoản nhận: — (payment lịch sử, không có Receiving Account)</p>
+              )}
+              <p>Money Changer liên kết: {selectedPayment.money_changer_name ?? "— (chưa cấu hình, chọn thủ công bên dưới)"}</p>
+            </div>
           )}
           <Select
             data-testid="tech-h-party-select"

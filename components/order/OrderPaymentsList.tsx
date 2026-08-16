@@ -41,6 +41,7 @@ export default function OrderPaymentsList({ payments, totalAmount }: Props) {
               <th className="text-left font-semibold px-1 py-2">Ngày</th>
               <th className="text-right font-semibold px-1 py-2">Số tiền</th>
               <th className="text-left font-semibold px-1 py-2">Phương thức</th>
+              <th className="text-left font-semibold px-1 py-2">Tài khoản nhận</th>
               <th className="text-left font-semibold px-1 py-2">Ghi chú</th>
             </tr>
           </thead>
@@ -50,6 +51,11 @@ export default function OrderPaymentsList({ payments, totalAmount }: Props) {
                 <td className="px-1 py-2 whitespace-nowrap">{formatDate(payment.payment_date)}</td>
                 <td className="px-1 py-2 text-right font-medium">{currency.format(payment.amount)}</td>
                 <td className="px-1 py-2">{payment.payment_method}</td>
+                <td className="px-1 py-2 text-muted-foreground">
+                  {payment.receiving_account
+                    ? `${payment.receiving_account.bank?.value ?? "—"} — ${payment.receiving_account.owner?.name ?? "—"} — ${payment.receiving_account.currency} — ${payment.receiving_account.account_number}`
+                    : "—"}
+                </td>
                 <td className="px-1 py-2 text-muted-foreground">{payment.note || "—"}</td>
               </tr>
             ))}

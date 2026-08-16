@@ -205,7 +205,9 @@ export async function findOrderItemsByOrderId(orderId: string): Promise<OrderIte
 export async function findPaymentsByOrderId(orderId: string): Promise<OrderPayment[]> {
   const { data, error } = await supabase
     .from("payments")
-    .select("*")
+    .select(
+      "*, receiving_account:receiving_accounts(id, currency, account_number, label, bank:master_data(value), owner:partners!receiving_accounts_owner_partner_id_fkey(name))"
+    )
     .eq("order_id", orderId)
     .order("payment_date", { ascending: false })
     .order("created_at", { ascending: false });
