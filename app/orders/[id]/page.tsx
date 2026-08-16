@@ -4,11 +4,21 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { OrderDetail } from "@/lib/orders/order.service";
-import { canDeleteOrder, canEditOrderItems, canCompleteOrder, canMarkOrderLost, canAddPayment, validateOrderHasItems } from "@/lib/orders/order.rules";
+import {
+  canDeleteOrder,
+  canAdminDeleteOrder,
+  canEditOrderItems,
+  canCompleteOrder,
+  canMarkOrderLost,
+  canAddPayment,
+  validateOrderHasItems,
+} from "@/lib/orders/order.rules";
 import { getProducts, getProductById } from "@/lib/product.service";
 import { Product } from "@/types/product";
+import { ORDER_STATUS, PAYMENT_STATUS } from "@/lib/orders/order.constants";
 import { formatDate } from "@/lib/utils";
 import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
+import { useIsOwner } from "@/lib/hooks/useIsOwner";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
@@ -63,6 +73,15 @@ export default function OrderDetailPage() {
   const [orderProfit, setOrderProfit] = useState<number | null>(null);
   const canViewProfit = useIsOwnerOrManager();
 
+  // Admin/Owner Full Order Control (Product Owner Decision, 2026-08-14) —
+  // Owner bypasses the Draft/Unpaid-only Delete gate entirely (see
+  // isDeletable below). Client-side visibility only, matching this
+  // codebase's existing "server re-checks regardless" convention
+  // (authorizeOrderWrite + the role check inside
+  // delete_order_with_reconciliation itself, 2026081717 migration) — this
+  // hook never being the real authorization boundary.
+  const isOwner = useIsOwner();
+
   async function loadOrder() {
     if (!id) return;
     setIsLoading(true);
@@ -82,7 +101,9 @@ export default function OrderDetailPage() {
   }
 
   useEffect(() => {
-    loadOrder();
+    queueMicrotask(() => {
+      loadOrder();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -244,7 +265,18 @@ export default function OrderDetailPage() {
 
   const { order, items, payments, events } = detail;
   const isEditable = canEditOrderItems(order.order_status);
-  const isDeletable = canDeleteOrder(order.order_status, order.payment_status);
+  const isDeletable = isOwner ? canAdminDeleteOrder() : canDeleteOrder(order.order_status, order.payment_status);
+
+  // Delete confirmation must identify the order (Product Owner requirement,
+  // 2026-08-13) — the old fixed "Đơn hàng ở trạng thái Nháp..." copy was
+  // only ever true for the Draft-only Delete rule; now that Owner can also
+  // delete an order in any status, the dialog has to say which one.
+  const orderStatusLabel = ORDER_STATUS.find((s) => s.value === order.order_status)?.label ?? order.order_status;
+  const paymentStatusLabel =
+    PAYMENT_STATUS.find((s) => s.value === order.payment_status)?.label ?? order.payment_status;
+  const deleteConfirmDescription = `Đơn hàng ${order.order_number}${
+    order.customer ? ` — ${order.customer.full_name}` : ""
+  } · ${currency.format(order.total_amount)} · ${orderStatusLabel} / ${paymentStatusLabel} sẽ bị xóa vĩnh viễn. Hành động này không thể hoàn tác.`;
   const isCompletable = canCompleteOrder(order.order_status);
   const isLosable = canMarkOrderLost(order.order_status);
   const completeBlockedReason = isCompletable ? validateOrderHasItems(items.length) : null;
@@ -286,7 +318,7 @@ export default function OrderDetailPage() {
           {isDeletable && (
             <Button data-testid="order-delete-trigger-button" variant="danger" size="sm" onClick={() => setIsDeleteConfirmOpen(true)}>
               <Trash2 className="w-4 h-4" />
-              Xóa đơn nháp
+              Xóa đơn hàng
             </Button>
           )}
         </div>
@@ -411,8 +443,8 @@ export default function OrderDetailPage() {
       <AlertDialog
         testId="order-delete"
         open={isDeleteConfirmOpen}
-        title="Xóa đơn hàng nháp?"
-        description="Đơn hàng ở trạng thái Nháp sẽ bị xóa vĩnh viễn. Hành động này không thể hoàn tác."
+        title="Xóa đơn hàng?"
+        description={deleteConfirmDescription}
         confirmLabel={isDeleting ? "Đang xóa..." : "Xóa"}
         onConfirm={handleDeleteOrder}
         onOpenChange={setIsDeleteConfirmOpen}

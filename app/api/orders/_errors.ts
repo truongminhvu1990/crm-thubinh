@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
-import { OrderNotFoundError, OrderRuleViolationError, OrderValidationError } from "@/lib/orders/order.service";
-import { OrderRepositoryError } from "@/lib/orders/order.repository";
+import {
+  OrderNotFoundError,
+  OrderRuleViolationError,
+  OrderValidationError,
+  OrderDeleteCompensationConflictError,
+} from "@/lib/orders/order.service";
+import { OrderRepositoryError, OrderDeleteRevenueConflictError } from "@/lib/orders/order.repository";
 
 /** Maps the Service/Repository layers' typed errors to HTTP responses —
  * shared across every Orders API route so each route file only needs a
@@ -17,6 +22,21 @@ export function handleOrderServiceError(error: unknown, requestId: string = cryp
   }
   if (error instanceof OrderRuleViolationError) {
     return NextResponse.json({ error: error.message }, { status: 409 });
+  }
+  if (error instanceof OrderDeleteCompensationConflictError) {
+    return NextResponse.json({ error: error.message }, { status: 409 });
+  }
+  if (error instanceof OrderDeleteRevenueConflictError) {
+    // Defensive-only by this point (deleteOrderWithReconciliation's own RPC
+    // already reconciles customer_purchases/sales_commissions before the
+    // order_items cascade fires — this specific FK conflict should no
+    // longer occur through the admin path). Retained as a backstop for the
+    // simple non-admin deleteOrder() call, and for any future caller that
+    // reaches this FK without going through the reconciliation RPC.
+    return NextResponse.json(
+      { error: "Không thể xóa đơn hàng: đơn hàng đã có dữ liệu doanh thu được ghi nhận (customer_purchases) mà chưa được xử lý." },
+      { status: 409 }
+    );
   }
   if (error instanceof OrderRepositoryError) {
     const code = error.cause.code;

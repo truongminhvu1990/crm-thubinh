@@ -158,6 +158,33 @@ export function validateOrderDeletion(status: OrderStatus, paymentStatus: Paymen
   return null;
 }
 
+/**
+ * Admin/Owner Full Order Control (Product Owner Decision, 2026-08-14):
+ * role authorization takes precedence over the Draft/Unpaid-only gate
+ * above — Owner may delete an order in any lifecycle status, with or
+ * without payments recorded.
+ *
+ * This does NOT make every delete attempt succeed in practice: an order
+ * that was ever Completed has a `customer_purchases` row written by
+ * `complete_order_with_snapshots`, and `customer_purchases.order_item_id`
+ * has no `ON DELETE CASCADE` back from `order_items` (Postgres default
+ * `NO ACTION`). Deleting such an order's `order_items` still hits a real,
+ * pre-existing foreign-key violation at the database layer —
+ * `order.repository.ts`'s `deleteOrder` catches that specific error and
+ * surfaces a clear message instead of a raw 500 (see its own doc comment).
+ * The admin/reconciliation path (`deleteOrderWithReconciliation`) exists
+ * precisely to delete the rows that FK protects first, in the correct
+ * order, before the cascade ever fires.
+ *
+ * A Confirmed or Handed Off Compensation still blocks deletion even for
+ * Owner (LOCKED Traceability principle) — enforced both in
+ * `order.service.ts`'s `deleteOrder` and, independently, inside the
+ * `delete_order_with_reconciliation` database function itself.
+ */
+export function canAdminDeleteOrder(): boolean {
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Order Timeline (ORDERS_SPEC.md §8, simplified progress bar) — pure
 // derivation from current order_status/payment_status only, no I/O.

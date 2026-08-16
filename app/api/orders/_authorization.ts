@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Staff } from "@/types/staff";
 import { Order } from "@/types/order";
+import { Role } from "@/types/permissionCenter";
 import { getCurrentStaffFromRequest } from "@/lib/permission/serverAuth";
 import { resolveRoleForStaff } from "@/lib/permission/permissionCenter.service";
 import { getStaffByTeam } from "@/lib/permission/permissionCenter.repository";
@@ -82,7 +83,7 @@ async function isOrderInWriteScope(order: Order, staff: Staff, scope: OrderWrite
 export async function authorizeOrderWrite(
   request: NextRequest,
   order: Order
-): Promise<{ staff: Staff } | { error: NextResponse }> {
+): Promise<{ staff: Staff; role: Role } | { error: NextResponse }> {
   // 1. Authentication
   const staff = await getCurrentStaffFromRequest(request);
   if (!staff) {
@@ -92,7 +93,7 @@ export async function authorizeOrderWrite(
   // 2. Permission — does this role have any Orders write access at all?
   const role = await resolveRoleForStaff(staff);
   const scope = role ? ORDERS_WRITE_SCOPE_BY_ROLE_KEY[role.role_key] : undefined;
-  if (!scope) {
+  if (!scope || !role) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
 
@@ -102,5 +103,11 @@ export async function authorizeOrderWrite(
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
 
-  return { staff };
+  // Admin Order Delete/Reconciliation (Product Owner Decision, 2026-08-14) —
+  // `role` is returned so the DELETE handler can resolve `adminOverride`
+  // (role.role_key === "Owner") without a second staff/role lookup. Every
+  // other existing call site of this function (Complete, Record Payment,
+  // Mark Lost, Reassign Owner) is unaffected — they simply don't read the
+  // new field.
+  return { staff, role };
 }

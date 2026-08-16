@@ -16,7 +16,9 @@ import { computeLineTotal } from "./order.rules";
 import { Staff } from "@/types/staff";
 import { applyDataScopeByName } from "@/lib/permission/dataScope";
 import { CommissionStatus } from "@/types/commission";
+import { CompensationStatus } from "@/types/compensation";
 import { BusinessTime } from "@/lib/businessTime";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 /** Orders -> Sales Snapshot Integration. One element per order_item, built
  * by order.service.ts's completeOrder() and handed to the
@@ -82,6 +84,8 @@ const OPERATION_TABLE: Record<string, string> = {
   markProductSold: "products",
   addPayment: "payments",
   appendOrderEvent: "order_events",
+  findCompensationStatusesForOrder: "compensations",
+  deleteOrderWithReconciliation: "orders",
 };
 
 /** Data-layer error thrown by every write method below on a Supabase error —
@@ -101,6 +105,30 @@ export class OrderRepositoryError extends Error {
     super(`OrderRepository.${operation} failed: ${cause.message}`);
     this.name = "OrderRepositoryError";
     this.table = OPERATION_TABLE[operation] ?? "unknown";
+  }
+}
+
+/**
+ * Admin/Owner Full Order Control (Product Owner Decision, 2026-08-14) —
+ * deleteOrder's admin path has no remaining app-level status/payment/
+ * compensation gate, but a Completed order still has a `customer_purchases`
+ * row (written by `complete_order_with_snapshots`), and
+ * `customer_purchases.order_item_id` has no `ON DELETE CASCADE` back from
+ * `order_items` — Postgres raises SQLSTATE 23503 (foreign_key_violation)
+ * when the cascade from `orders` reaches that row. This is a real database
+ * constraint, not an app-level policy this task invented or is lifting —
+ * distinguishing it as its own error type (rather than the generic
+ * OrderRepositoryError -> 500) is purely about surfacing that fact clearly
+ * to the caller instead of a raw 500. It does NOT change what is allowed —
+ * the delete still fails exactly as it would without this class; only the
+ * message does.
+ */
+export class OrderDeleteRevenueConflictError extends Error {
+  constructor(orderId: string) {
+    super(
+      `Order ${orderId} cannot be deleted: it has recognized revenue/reporting records (customer_purchases) with no safe cascade path defined`
+    );
+    this.name = "OrderDeleteRevenueConflictError";
   }
 }
 
@@ -352,17 +380,86 @@ export async function updateOrder(id: string, changes: Partial<Order>): Promise<
  * existing deleteCustomer/deleteProduct behavior of returning the (possibly
  * null) Supabase error rather than asserting a row was actually affected.
  */
-export async function deleteOrder(id: string): Promise<void> {
-  const { error } = await supabase
-    .from("orders")
-    .delete()
-    .eq("id", id)
-    .eq("order_status", "Draft")
-    .eq("payment_status", "Unpaid");
+/**
+ * Admin/Owner Full Order Control (Product Owner Decision, 2026-08-14,
+ * SUPERSEDES the WHERE clause this doc comment used to describe): the
+ * admin path is now a plain delete-by-id — no status/payment/compensation
+ * condition remains here at all. The non-admin path is unchanged (Draft +
+ * Unpaid only, same as always).
+ *
+ * This does not make every admin delete succeed: `order_items` still
+ * `ON DELETE CASCADE`s from `orders`, and a Completed order's
+ * `customer_purchases` row (via `order_item_id`, no cascade defined) will
+ * still block that cascade at the database layer with a real foreign-key
+ * violation (SQLSTATE 23503) — caught below and re-thrown as
+ * OrderDeleteRevenueConflictError so the caller gets a clear signal instead
+ * of a raw 500.
+ */
+export async function deleteOrder(id: string, adminOverride = false): Promise<void> {
+  let query = supabase.from("orders").delete().eq("id", id);
+  if (!adminOverride) {
+    query = query.eq("order_status", "Draft").eq("payment_status", "Unpaid");
+  }
+
+  const { error } = await query;
 
   if (error) {
+    if (error.code === "23503") {
+      throw new OrderDeleteRevenueConflictError(id);
+    }
     console.error("Error deleting order:", error);
     throw new OrderRepositoryError("deleteOrder", error);
+  }
+}
+
+/**
+ * Admin Order Deletion pre-checks (Product Owner Decision, 2026-08-14) — a
+ * plain existence/status read against `compensations`, not a Compensation
+ * module integration. The service layer refuses to proceed if any status
+ * here is 'Confirmed' or 'Handed Off' (LOCKED Traceability principle) —
+ * this function only reads, never decides. The same condition is
+ * independently re-enforced inside delete_order_with_reconciliation itself
+ * (2026081717 migration) as a second, database-level layer.
+ */
+export async function findCompensationStatusesForOrder(orderId: string): Promise<CompensationStatus[]> {
+  const { data, error } = await supabase.from("compensations").select("status").eq("order_id", orderId);
+
+  if (error) {
+    console.error("Error checking compensation statuses for order:", error);
+    throw new OrderRepositoryError("findCompensationStatusesForOrder", error);
+  }
+
+  return (data || []).map((row) => row.status as CompensationStatus);
+}
+
+/**
+ * Admin Order Deletion's transactional reconciliation — see
+ * supabase/migrations/2026081702_admin_order_delete_reconciliation.sql for
+ * the exact deletion sequence and why each step is safe, and
+ * supabase/migrations/2026081717_admin_order_delete_execute_privilege_fix.sql
+ * for the database-level authorization this call now depends on.
+ *
+ * Security boundary (2026-08-16): delete_order_with_reconciliation is
+ * SECURITY DEFINER, granted to `service_role` only (never `anon`/
+ * `authenticated`) — the browser can never reach it directly, and this is
+ * the ONLY place in the codebase that calls it. `staffId` is the
+ * server-verified actor (already role-checked by
+ * app/api/orders/[id]/route.ts's authorizeOrderWrite before this is ever
+ * reached) — the RPC independently re-verifies that staff id resolves to
+ * an active Owner role and that no Confirmed/Handed-Off compensation
+ * exists, so this call is safe even if some future caller forgot the
+ * app-level checks.
+ */
+export async function deleteOrderWithReconciliation(staffId: string, orderId: string): Promise<void> {
+  const adminClient = createAdminClient();
+  const { error } = await adminClient.rpc("delete_order_with_reconciliation", {
+    p_staff_id: staffId,
+    p_order_id: orderId,
+  });
+
+  if (error) {
+    console.error("Error deleting order with reconciliation:", error);
+    throw new OrderRepositoryError("deleteOrderWithReconciliation", error);
   }
 }
 
@@ -773,9 +870,18 @@ export interface OrderWriteRepository {
   /** Generic field update — see ORDER_WRITABLE_FIELDS for scope. Added this
    * increment, additive only (no existing signature changed). */
   updateOrder(id: string, changes: Partial<Order>): Promise<Order>;
-  /** Draft + Unpaid only — see the implementation's doc comment for the
-   * full guard rationale. */
-  deleteOrder(id: string): Promise<void>;
+  /** Non-admin path only: Draft + Unpaid. The admin path
+   * (deleteOrderWithReconciliation below) is a separate method, not a
+   * parameter on this one, since it performs a fundamentally different,
+   * multi-table transactional operation (Product Owner Full Order Control
+   * Decision, 2026-08-14). `adminOverride` here only widens which
+   * order_status/payment_status this simple single-table delete matches —
+   * see the implementation's doc comment. */
+  deleteOrder(id: string, adminOverride?: boolean): Promise<void>;
+  /** Admin Order Deletion pre-check/execution — see each implementation's
+   * own doc comment. Never called for the non-admin path. */
+  findCompensationStatusesForOrder(orderId: string): Promise<CompensationStatus[]>;
+  deleteOrderWithReconciliation(staffId: string, orderId: string): Promise<void>;
   /** Dedicated, narrow status-transition methods — not a generic status
    * setter (per this increment's explicit instruction). */
   reserveOrder(orderId: string): Promise<Order>;
@@ -818,6 +924,8 @@ export const supabaseOrderRepository: OrderRepository = {
   createOrder,
   updateOrder,
   deleteOrder,
+  findCompensationStatusesForOrder,
+  deleteOrderWithReconciliation,
   reserveOrder,
   cancelReservation,
   addOrderItem,

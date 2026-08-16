@@ -59,7 +59,16 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
  * persists no audit record today (order + its order_events cascade-delete
  * together, per order.service.ts's own "deleteOrder logs nothing" design),
  * so this value has no observable effect yet; passed for interface
- * consistency and in case that changes. */
+ * consistency and in case that changes.
+ *
+ * `adminOverride` (Product Owner Decision, 2026-08-14): Owner is the only
+ * role_key this lifts the lifecycle-status gate for — resolved via the same
+ * `role` authorizeOrderWrite already computes, never inferred from anything
+ * client-supplied. `authResult.staff.id` is passed through as the server-
+ * verified actor for the admin/reconciliation path only — this is the
+ * value delete_order_with_reconciliation's own `p_staff_id` argument
+ * independently re-verifies as an active Owner (2026081717 migration); the
+ * browser never has any path to call that RPC directly. */
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
@@ -72,7 +81,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     const authResult = await authorizeOrderWrite(request, detail.order);
     if ("error" in authResult) return authResult.error;
 
-    await orderService.deleteOrder(id, authResult.staff.full_name);
+    const adminOverride = authResult.role.role_key === "Owner";
+    await orderService.deleteOrder(id, authResult.staff.full_name, adminOverride, authResult.staff.id);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     return handleOrderServiceError(error, request.headers.get("x-vercel-id") ?? crypto.randomUUID());

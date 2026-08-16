@@ -89,6 +89,8 @@ function makeRepository(overrides: Partial<OrderRepository> = {}): OrderReposito
     createOrder: notImplemented as unknown as OrderRepository["createOrder"],
     updateOrder: notImplemented as unknown as OrderRepository["updateOrder"],
     deleteOrder: notImplemented as unknown as OrderRepository["deleteOrder"],
+    findCompensationStatusesForOrder: notImplemented as unknown as OrderRepository["findCompensationStatusesForOrder"],
+    deleteOrderWithReconciliation: notImplemented as unknown as OrderRepository["deleteOrderWithReconciliation"],
     reserveOrder: notImplemented as unknown as OrderRepository["reserveOrder"],
     cancelReservation: notImplemented as unknown as OrderRepository["cancelReservation"],
     addOrderItem: notImplemented as unknown as OrderRepository["addOrderItem"],
@@ -282,4 +284,173 @@ test("completeOrder: no matching commission rule blocks completion entirely (ord
   // repository.completeOrder() (the irreversible status flip) must never
   // even be attempted.
   assert.equal(completeOrderCalled, false);
+});
+
+/**
+ * Admin Order Deletion (Product Owner Full Order Control Decision,
+ * 2026-08-14, security-hardened 2026-08-16). Service-layer coverage only —
+ * these tests exercise createOrderService(repository)'s business logic via
+ * the fake OrderRepository (DI), never the real Supabase-backed
+ * lib/orders/order.repository.ts. The database-level authorization
+ * (Owner-role check, Confirmed/Handed-Off check re-enforced inside
+ * delete_order_with_reconciliation itself, and the anon/authenticated
+ * EXECUTE-privilege denial) is verified separately, live, against Dev — see
+ * this release's own verification notes; a unit test running without a
+ * live Postgres connection cannot exercise real RPC-level GRANT/REVOKE
+ * behavior, and this file does not pretend otherwise.
+ */
+
+test("deleteOrder (non-admin): unchanged — Draft/Unpaid gate still applies, still releases items' products, no compensation check, no RPC call", async () => {
+  const { createOrderService } = await import("./order.service");
+
+  const deleteOrderCalls: { id: string; adminOverride?: boolean }[] = [];
+  const releasedProductIds: string[] = [];
+  let reconciliationCalled = false;
+
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    findOrderItemsByOrderId: async () => [makeItem({ product_id: "product-1" })],
+    deleteOrder: async (id, adminOverride) => {
+      deleteOrderCalls.push({ id, adminOverride });
+    },
+    releaseProduct: async (productId) => {
+      releasedProductIds.push(productId);
+    },
+    deleteOrderWithReconciliation: async () => {
+      reconciliationCalled = true;
+    },
+  });
+
+  await createOrderService(repository).deleteOrder("order-1", "actor");
+
+  assert.deepEqual(deleteOrderCalls, [{ id: "order-1", adminOverride: false }]);
+  assert.deepEqual(releasedProductIds, ["product-1"]);
+  assert.equal(reconciliationCalled, false);
+});
+
+test("deleteOrder (non-admin): rejects when order is not Draft/Unpaid — never reaches repository.deleteOrder", async () => {
+  const { createOrderService, OrderRuleViolationError } = await import("./order.service");
+
+  let deleteOrderCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Reserved", payment_status: "Unpaid" }),
+    deleteOrder: async () => {
+      deleteOrderCalled = true;
+    },
+  });
+
+  await assert.rejects(() => createOrderService(repository).deleteOrder("order-1", "actor"), OrderRuleViolationError);
+  assert.equal(deleteOrderCalled, false);
+});
+
+test("deleteOrder (admin, Owner): eligible order — checks Compensation status, then calls deleteOrderWithReconciliation with the server-verified staffId, never the simple deleteOrder", async () => {
+  const { createOrderService } = await import("./order.service");
+
+  let simpleDeleteCalled = false;
+  const reconciliationCalls: { staffId: string; orderId: string }[] = [];
+
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Completed", payment_status: "Paid" }),
+    findCompensationStatusesForOrder: async () => [],
+    deleteOrder: async () => {
+      simpleDeleteCalled = true;
+    },
+    deleteOrderWithReconciliation: async (staffId, orderId) => {
+      reconciliationCalls.push({ staffId, orderId });
+    },
+  });
+
+  await createOrderService(repository).deleteOrder("order-1", "actor", true, "staff-owner-1");
+
+  assert.equal(simpleDeleteCalled, false);
+  assert.deepEqual(reconciliationCalls, [{ staffId: "staff-owner-1", orderId: "order-1" }]);
+});
+
+test("deleteOrder (admin, Owner): a Confirmed compensation blocks deletion — reconciliation is never called", async () => {
+  const { createOrderService, OrderDeleteCompensationConflictError } = await import("./order.service");
+
+  let reconciliationCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Completed", payment_status: "Paid" }),
+    findCompensationStatusesForOrder: async () => ["Confirmed"],
+    deleteOrderWithReconciliation: async () => {
+      reconciliationCalled = true;
+    },
+  });
+
+  await assert.rejects(
+    () => createOrderService(repository).deleteOrder("order-1", "actor", true, "staff-owner-1"),
+    OrderDeleteCompensationConflictError
+  );
+  assert.equal(reconciliationCalled, false);
+});
+
+test("deleteOrder (admin, Owner): a Handed Off compensation blocks deletion — reconciliation is never called", async () => {
+  const { createOrderService, OrderDeleteCompensationConflictError } = await import("./order.service");
+
+  let reconciliationCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Completed", payment_status: "Paid" }),
+    findCompensationStatusesForOrder: async () => ["Handed Off"],
+    deleteOrderWithReconciliation: async () => {
+      reconciliationCalled = true;
+    },
+  });
+
+  await assert.rejects(
+    () => createOrderService(repository).deleteOrder("order-1", "actor", true, "staff-owner-1"),
+    OrderDeleteCompensationConflictError
+  );
+  assert.equal(reconciliationCalled, false);
+});
+
+test("deleteOrder (admin, Owner): a Draft/Pending/Cancelled compensation does NOT block deletion", async () => {
+  const { createOrderService } = await import("./order.service");
+
+  let reconciliationCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Completed", payment_status: "Paid" }),
+    findCompensationStatusesForOrder: async () => ["Draft", "Pending", "Cancelled"],
+    deleteOrderWithReconciliation: async () => {
+      reconciliationCalled = true;
+    },
+  });
+
+  await createOrderService(repository).deleteOrder("order-1", "actor", true, "staff-owner-1");
+  assert.equal(reconciliationCalled, true);
+});
+
+test("deleteOrder (admin): missing staffId is rejected before reconciliation is ever attempted — the caller (API route) must always supply the server-verified actor", async () => {
+  const { createOrderService, OrderRuleViolationError } = await import("./order.service");
+
+  let reconciliationCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Completed", payment_status: "Paid" }),
+    findCompensationStatusesForOrder: async () => [],
+    deleteOrderWithReconciliation: async () => {
+      reconciliationCalled = true;
+    },
+  });
+
+  await assert.rejects(() => createOrderService(repository).deleteOrder("order-1", "actor", true), OrderRuleViolationError);
+  assert.equal(reconciliationCalled, false);
+});
+
+test("deleteOrder (admin, Owner): already-deleted/nonexistent order is handled safely — requireOrder's existing 404 path, never reaches the compensation check or reconciliation", async () => {
+  const { createOrderService, OrderNotFoundError } = await import("./order.service");
+
+  let compensationCheckCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => null,
+    findCompensationStatusesForOrder: async () => {
+      compensationCheckCalled = true;
+      return [];
+    },
+  });
+
+  await assert.rejects(
+    () => createOrderService(repository).deleteOrder("order-does-not-exist", "actor", true, "staff-owner-1"),
+    OrderNotFoundError
+  );
+  assert.equal(compensationCheckCalled, false);
 });

@@ -240,7 +240,16 @@ export async function getOrdersRevenueForRange(start: string, end: string): Prom
 export interface OrderWriteService {
   createOrder(input: CreateOrderInput, actor: string): Promise<Order>;
   updateOrder(input: UpdateOrderInput, actor: string): Promise<Order>;
-  deleteOrder(orderId: string, actor: string): Promise<void>;
+  /**
+   * `adminOverride` (Product Owner Full Order Control Decision, 2026-08-14) —
+   * Owner only, resolved and passed by the caller (the API route), never
+   * inferred here. `staffId` is required whenever `adminOverride` is true —
+   * it is the server-verified actor's staff id, passed through to
+   * `delete_order_with_reconciliation`'s own `p_staff_id` argument so the
+   * database can independently re-verify the Owner role itself (2026081717
+   * migration) rather than trusting this layer alone.
+   */
+  deleteOrder(orderId: string, actor: string, adminOverride?: boolean, staffId?: string): Promise<void>;
   reserveOrder(orderId: string, actor: string): Promise<Order>;
   cancelReservation(orderId: string, actor: string): Promise<Order>;
   addProductToOrder(input: AddOrderItemInput, actor: string): Promise<OrderItem>;
@@ -267,6 +276,19 @@ export class OrderValidationError extends Error {
 }
 
 export class OrderRuleViolationError extends Error {}
+
+/**
+ * Admin Order Deletion pre-check failure (Product Owner Full Order Control
+ * Decision, 2026-08-14). Distinct from OrderRuleViolationError so
+ * app/api/orders/_errors.ts can give it a specific, named 409 message
+ * instead of a generic business-rule string — represents a known,
+ * pre-computed business condition, never a raw database failure (that's
+ * OrderDeleteRevenueConflictError, order.repository.ts, for the one case
+ * that genuinely can't be pre-checked in TypeScript — see its own doc
+ * comment). The same condition is independently re-enforced inside
+ * delete_order_with_reconciliation itself (2026081717 migration).
+ */
+export class OrderDeleteCompensationConflictError extends Error {}
 
 async function requireOrder(repository: OrderRepository, orderId: string): Promise<Order> {
   const order = await repository.findOrderById(orderId);
@@ -326,22 +348,49 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       return repository.updateOrder(order_id, changes);
     },
 
-    async deleteOrder(orderId) {
+    async deleteOrder(orderId, _actor, adminOverride = false, staffId) {
       const order = await requireOrder(repository, orderId);
 
-      const deletionError = validateOrderDeletion(order.order_status, order.payment_status);
-      if (deletionError) {
-        throw new OrderRuleViolationError(deletionError);
+      if (!adminOverride) {
+        const deletionError = validateOrderDeletion(order.order_status, order.payment_status);
+        if (deletionError) {
+          throw new OrderRuleViolationError(deletionError);
+        }
+
+        // Draft orders can already hold Reserved items (addProductToOrder
+        // reserves on add regardless of order status, per ORDERS_SPEC.md
+        // §7) — order_items cascade-deletes with the order, so their
+        // products must be released first or they'd be stranded Reserved
+        // with no order left holding them.
+        const items = await repository.findOrderItemsByOrderId(orderId);
+        await repository.deleteOrder(orderId, false);
+        await Promise.all(items.map((item) => repository.releaseProduct(item.product_id)));
+        return;
       }
 
-      // Draft orders can already hold Reserved items (addProductToOrder
-      // reserves on add regardless of order status, per ORDERS_SPEC.md §7).
-      // order_items cascade-deletes with the order (ORDERS_DATABASE.md FK),
-      // so their products must be released first or they'd be stranded
-      // Reserved with no order left holding them.
-      const items = await repository.findOrderItemsByOrderId(orderId);
-      await repository.deleteOrder(orderId);
-      await Promise.all(items.map((item) => repository.releaseProduct(item.product_id)));
+      // Admin/Owner Full Order Control (Product Owner Decision, 2026-08-14):
+      // no lifecycle-status/payment gate remains for the admin path. The one
+      // pre-check that still stands is a genuine LOCKED-financial-history
+      // protection: Compensation Confirmed/Handed Off — "a Confirmed/Handed
+      // Off record is never deleted" (Traceability principle). Since Handed
+      // Off is a hard prerequisite for a Compensation ever entering a
+      // settlement_items row, refusing every Handed-Off compensation here
+      // transitively refuses every settlement-bound one too. This same
+      // condition is re-checked, independently, inside
+      // delete_order_with_reconciliation itself (2026081717 migration) —
+      // this call is defense in depth, not the only enforcement point.
+      const compensationStatuses = await repository.findCompensationStatusesForOrder(orderId);
+      if (compensationStatuses.some((s) => s === "Confirmed" || s === "Handed Off")) {
+        throw new OrderDeleteCompensationConflictError(
+          "Đơn hàng có hoa hồng đối tác đã Xác nhận hoặc Bàn giao — không thể xóa vì sẽ làm mất lịch sử tài chính đã ghi nhận."
+        );
+      }
+
+      if (!staffId) {
+        throw new OrderRuleViolationError("Không xác định được nhân viên thực hiện thao tác xóa");
+      }
+
+      await repository.deleteOrderWithReconciliation(staffId, orderId);
     },
 
     async reserveOrder(orderId, actor) {
