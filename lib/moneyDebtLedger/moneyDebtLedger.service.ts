@@ -7,6 +7,7 @@ import {
   CreateMoneyDebtLedgerEntryInput,
   CreateBuyCnyLedgerTransactionInput,
 } from "@/types/moneyDebtLedger";
+import { TECH_H_PAYMENT_METHODS } from "./moneyDebtLedger.constants";
 
 /** Money & Debt Ledger (docs/19_MONEY_DEBT_LEDGER_SPEC.md, DRAFT Rev 1).
  * Every write in this file goes through one of the two SECURITY DEFINER
@@ -157,12 +158,21 @@ export async function getLedgerCounterparties(client: SupabaseClient = supabase)
  * the picker data source for the TECH_H Reconciliation flow (Phase 5/9).
  * "Fully reconciled" = Σ linked 'Customer Payment TECH_H' ledger rows for
  * that Payment equals the Payment's own amount, matching the same guard
- * enforced server-side in create_money_debt_ledger_entry(). */
+ * enforced server-side in create_money_debt_ledger_entry().
+ *
+ * 2026-08-16 fix: matches TECH_H_PAYMENT_METHODS (the explicit, narrow set
+ * of real historical `payments.payment_method` spellings — "Tech_H"/
+ * "TechH"), not the literal "TECH_H", which has zero historical Production
+ * payments (payment_method has no FK to master_data, so a "TECH_H"
+ * master-data option — which does not and will not exist per Product Owner
+ * decision — would never have retroactively matched existing rows anyway).
+ * See moneyDebtLedger.constants.ts's own doc comment for the full
+ * Production-data reasoning. */
 export async function getTechHReconciliationCandidates(client: SupabaseClient = supabase) {
   const { data: payments, error: paymentsError } = await client
     .from("payments")
     .select("id, amount, payment_date, order_id, order:orders(id, order_number, customer:customers(id, full_name))")
-    .eq("payment_method", "TECH_H")
+    .in("payment_method", TECH_H_PAYMENT_METHODS)
     .order("payment_date", { ascending: false });
   if (paymentsError) {
     console.error("Error fetching TECH_H payments:", paymentsError);

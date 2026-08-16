@@ -320,9 +320,13 @@ test("createBuyCnyTransaction: calls create_buy_cny_ledger_transaction once and 
 
 test("getTechHReconciliationCandidates: excludes a payment already fully reconciled, includes a partially reconciled one with the correct remaining amount", async () => {
   const { getTechHReconciliationCandidates } = await import("./moneyDebtLedger.service");
+  // payment_method values reflect real Production data (2026-08-16 audit):
+  // "Tech_H" (canonical master-data spelling) and "TechH" (legacy, no
+  // master-data row) are both real historical spellings of the same
+  // channel — see moneyDebtLedger.constants.ts's TECH_H_PAYMENT_METHODS.
   const payments = [
-    { id: "payment-1", amount: 5_000_000, payment_date: "2026-08-15", order_id: "order-1", order: { id: "order-1", order_number: "ORD-1" } },
-    { id: "payment-2", amount: 10_000_000, payment_date: "2026-08-14", order_id: "order-2", order: { id: "order-2", order_number: "ORD-2" } },
+    { id: "payment-1", amount: 5_000_000, payment_date: "2026-08-15", order_id: "order-1", order: { id: "order-1", order_number: "ORD-1" }, payment_method: "Tech_H" },
+    { id: "payment-2", amount: 10_000_000, payment_date: "2026-08-14", order_id: "order-2", order: { id: "order-2", order_number: "ORD-2" }, payment_method: "TechH" },
   ];
   const reconciledRows = [
     { linked_payment_id: "payment-1", amount: 5_000_000 }, // fully reconciled -> excluded
@@ -340,4 +344,48 @@ test("getTechHReconciliationCandidates: excludes a payment already fully reconci
   assert.equal(result.length, 1);
   assert.equal(result[0].id, "payment-2");
   assert.equal(result[0].remaining, 6_000_000);
+});
+
+test("getTechHReconciliationCandidates: queries payments using .in(\"payment_method\", TECH_H_PAYMENT_METHODS) — the explicit historical alias set, never a bare .eq(\"payment_method\", \"TECH_H\")", async () => {
+  const { getTechHReconciliationCandidates } = await import("./moneyDebtLedger.service");
+  const { TECH_H_PAYMENT_METHODS } = await import("./moneyDebtLedger.constants");
+  const { calls, client } = makeRpcClient(
+    makeFromClient({
+      payments: [{ data: [] }],
+      money_debt_ledger_entries: [{ data: [] }],
+    }),
+    {}
+  );
+
+  await getTechHReconciliationCandidates(client);
+
+  const paymentsFilterCall = calls.find((c) => c.table === "payments" && c.method === "in");
+  assert.ok(paymentsFilterCall, "Expected an .in() call filtering the payments table");
+  assert.deepEqual(paymentsFilterCall!.args, ["payment_method", TECH_H_PAYMENT_METHODS]);
+
+  // Root-cause regression guard: the original bug was a bare .eq("payment_method", "TECH_H"),
+  // which matched zero real Production payments. Must never come back.
+  const bareEqCall = calls.find((c) => c.table === "payments" && c.method === "eq" && c.args[0] === "payment_method");
+  assert.equal(bareEqCall, undefined, "Must not filter payments.payment_method via .eq() at all — must use the explicit alias set via .in()");
+});
+
+test("TECH_H_PAYMENT_METHODS: recognizes exactly the two real historical Production spellings (\"Tech_H\", \"TechH\") — narrow and explicit, not case-insensitive, not a literal \"TECH_H\", not unrelated methods", async () => {
+  const { TECH_H_PAYMENT_METHODS } = await import("./moneyDebtLedger.constants");
+
+  // 1 & 2: both real historical spellings recognized.
+  assert.ok(TECH_H_PAYMENT_METHODS.includes("Tech_H"), "Canonical master-data spelling must be recognized");
+  assert.ok(TECH_H_PAYMENT_METHODS.includes("TechH"), "Legacy alias (no master-data row) must be recognized");
+
+  // 3: "TECH_H" (the original, incorrect literal — zero real Production
+  // payments) must NOT be silently treated as a valid payment-method value.
+  assert.ok(!TECH_H_PAYMENT_METHODS.includes("TECH_H"), "\"TECH_H\" has zero historical Production payments and must not be included");
+
+  // 4: unrelated existing payment methods must not be swept in.
+  for (const unrelated of ["Tech_HKD", "Tech_B", "Cash"]) {
+    assert.ok(!TECH_H_PAYMENT_METHODS.includes(unrelated), `"${unrelated}" is a distinct payment method and must not be included`);
+  }
+
+  // Narrow and explicit: exactly these two values, nothing broader (e.g. no
+  // case-insensitive/contains-based matching was introduced as a side effect).
+  assert.deepEqual([...TECH_H_PAYMENT_METHODS].sort(), ["TechH", "Tech_H"]);
 });

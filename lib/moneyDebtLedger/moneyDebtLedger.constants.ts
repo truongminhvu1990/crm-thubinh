@@ -38,3 +38,25 @@ export function moneyDebtLedgerTypeLabel(type: string): string {
  * derived server-side (create_money_debt_ledger_entry(), §9). Kept here so
  * the UI only offers a direction picker when it's meaningful. */
 export const MONEY_DEBT_LEDGER_CALLER_CHOOSES_DIRECTION: readonly string[] = ["VND Held By Money Changer", "Adjustment"];
+
+/** Production `payments.payment_method` text values that represent the
+ * TECH_H channel (2026-08-16 Product Owner decision, post read-only
+ * Production audit). `payments.payment_method` is plain text with no FK to
+ * `master_data` — a payment's stored value never changes once written, even
+ * if the `master_data` option is later renamed. Production's real
+ * historical data already existed under two spellings before this ledger
+ * was ever built: "Tech_H" (12 payments, still the current canonical
+ * `master_data` option) and "TechH" (4 payments, a legacy value with no
+ * matching `master_data` row at all). Neither was ever "TECH_H" — that
+ * spelling has zero historical Production payments and is deliberately NOT
+ * included here, so a caller cannot silently pick up a spelling that was
+ * never real data. This list is intentionally the exact, narrow historical
+ * set — not a case-insensitive match, not a "contains Tech" match — per
+ * explicit Product Owner instruction not to broaden matching beyond what
+ * was verified against real data. Unrelated existing methods ("Tech_HKD",
+ * "Tech_B") are distinct payment channels and are correctly excluded.
+ *
+ * Independent of `money_debt_ledger_entries.transaction_type`'s own literal
+ * 'Customer Payment TECH_H' value (a different table/column, always that
+ * exact string regardless of which payment-method spelling it reconciles). */
+export const TECH_H_PAYMENT_METHODS: readonly string[] = ["Tech_H", "TechH"];
