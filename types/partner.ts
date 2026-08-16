@@ -10,8 +10,16 @@
 export type PartnerStatus = "Onboarding" | "Active" | "Inactive" | "Terminated";
 
 /** §6 — starting set, explicitly "not assumed final" in the LOCKED spec.
- * Stored as free text (not an enum/CHECK), same reasoning as PartnerStatus. */
-export type PartnerType = "Collaborator" | "Sales Agent" | "Dealer" | "Affiliate" | "Referral Partner";
+ * Stored as free text (not an enum/CHECK), same reasoning as PartnerStatus.
+ * "Money Changer"/"Supplier" added per docs/19_MONEY_DEBT_LEDGER_SPEC.md §6/D2
+ * (Money & Debt Ledger Implementation, 2026-08-15) — financial-counterparty
+ * roles, distinct from the original sales-side set; `partners.partner_type`
+ * itself was never CHECK-constrained, so this union documents the allowed
+ * set without requiring a migration (same reasoning as PartnerStatus). This
+ * `Partner` interface's own `partner_type` field remains plain `string`
+ * below (unchanged) — this union is not (and was never) enforced by the
+ * compiler against it. */
+export type PartnerType = "Collaborator" | "Sales Agent" | "Dealer" | "Affiliate" | "Referral Partner" | "Money Changer" | "Supplier";
 
 export interface Partner {
   id: string;

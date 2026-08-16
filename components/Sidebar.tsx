@@ -28,6 +28,7 @@ import {
   Gift,
   Ticket,
   X,
+  ArrowRightLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getFollowUpSummaryCounts } from "@/lib/customer.service";
@@ -64,6 +65,7 @@ const LINKS: NavEntry[] = [
   { href: "/data-verification", icon: ShieldCheck, label: "Xác minh dữ liệu", enabled: true },
   { href: "/commissions", icon: Percent, label: "Hoa hồng", enabled: true },
   { href: "/market-intelligence", icon: TrendingUp, label: "Thị trường", enabled: true },
+  { href: "/money-debt-ledger", icon: ArrowRightLeft, label: "Money & Debt Ledger", enabled: true },
   {
     label: "Marketing",
     icon: Megaphone,

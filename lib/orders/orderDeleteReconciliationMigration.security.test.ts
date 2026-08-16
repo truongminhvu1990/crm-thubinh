@@ -28,7 +28,7 @@ const MIGRATION_PATH = path.join(
   "..",
   "supabase",
   "migrations",
-  "2026081717_admin_order_delete_execute_privilege_fix.sql"
+  "2026081718_admin_order_delete_execute_privilege_fix.sql"
 );
 const sql = fs.readFileSync(MIGRATION_PATH, "utf8");
 

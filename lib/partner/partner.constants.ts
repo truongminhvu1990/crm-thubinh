@@ -10,13 +10,19 @@ export const PARTNER_STATUS_OPTIONS: { value: PartnerStatus; label: string }[] =
   { value: "Terminated", label: "Đã chấm dứt" },
 ];
 
-/** §6 — starting set, explicitly "not assumed final" in the LOCKED spec. */
+/** §6 — starting set, explicitly "not assumed final" in the LOCKED spec.
+ * "Money Changer"/"Supplier" added per docs/19_MONEY_DEBT_LEDGER_SPEC.md §6/D2
+ * (Money & Debt Ledger Implementation, 2026-08-15) — financial-counterparty
+ * roles that money_debt_ledger_entries.party_id references; every other
+ * existing sales-side type/behavior below is unchanged. */
 export const PARTNER_TYPE_OPTIONS: { value: PartnerType; label: string }[] = [
   { value: "Collaborator", label: "Cộng tác viên" },
   { value: "Sales Agent", label: "Đại lý bán hàng" },
   { value: "Dealer", label: "Nhà phân phối" },
   { value: "Affiliate", label: "Đối tác liên kết" },
   { value: "Referral Partner", label: "Đối tác giới thiệu" },
+  { value: "Money Changer", label: "Đơn vị đổi tiền" },
+  { value: "Supplier", label: "Nhà cung cấp" },
 ];
 
 export function partnerStatusLabel(status: string): string {

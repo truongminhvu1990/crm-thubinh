@@ -436,8 +436,10 @@ export async function findCompensationStatusesForOrder(orderId: string): Promise
  * Admin Order Deletion's transactional reconciliation — see
  * supabase/migrations/2026081702_admin_order_delete_reconciliation.sql for
  * the exact deletion sequence and why each step is safe, and
- * supabase/migrations/2026081717_admin_order_delete_execute_privilege_fix.sql
- * for the database-level authorization this call now depends on.
+ * supabase/migrations/2026081718_admin_order_delete_execute_privilege_fix.sql
+ * for the database-level authorization this call now depends on. (Renamed
+ * from 2026081717 during Financial RC integration — 2026081717 is used by
+ * 2026081717_compensation_ledger_immutability_guard.sql; content unchanged.)
  *
  * Security boundary (2026-08-16): delete_order_with_reconciliation is
  * SECURITY DEFINER, granted to `service_role` only (never `anon`/
