@@ -39,6 +39,20 @@ export function handleOrderServiceError(error: unknown, requestId: string = cryp
     );
   }
   if (error instanceof OrderRepositoryError) {
+    // Stage 21D — sync_payment_to_money_debt_ledger()'s own new
+    // is_active guard (supabase/migrations/2026081724_...) raises this
+    // exact, controlled business message (never a raw Postgres
+    // constraint string) when create_payment_with_ledger_sync() is
+    // called with a retired Receiving Account — the whole transaction
+    // already rolled back (no orphan payment) by the time this error
+    // reaches here. Recognized narrowly by its exact message text (not a
+    // blanket SQLSTATE match) so no other check_violation from this same
+    // repository operation is accidentally reclassified. A genuine
+    // business-rule rejection reads better as 400 than the generic 500
+    // every other OrderRepositoryError gets below.
+    if (error.cause.message === "Receiving Account is inactive / Tài khoản nhận tiền đang tạm ngưng.") {
+      return NextResponse.json({ error: error.cause.message }, { status: 400 });
+    }
     const code = error.cause.code;
     console.error("OrderRepositoryError", {
       operation: error.operation,
