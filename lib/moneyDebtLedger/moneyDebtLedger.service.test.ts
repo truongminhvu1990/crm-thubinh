@@ -157,6 +157,58 @@ test("getLedgerEntries: searchTerm matches entry_code, party name, reference, or
   assert.equal(result[0].id, "b");
 });
 
+test("getLedgerEntries: attaches group_counterparty for a paired transaction (e.g. Supplier Payment via Money Changer's Money-Changer leg resolves the Supplier via transaction_group)", async () => {
+  const { getLedgerEntries } = await import("./moneyDebtLedger.service");
+  const moneyChangerParty = { id: "mc-1", name: "Hạnh", partner_code: "PTR-1", partner_type: "Money Changer" };
+  const supplierParty = { id: "sup-1", name: "Nhà Hoa", partner_code: "PTR-2", partner_type: "Supplier" };
+  const vndLeg = entry({
+    id: "mdl-vnd",
+    transaction_type: "Supplier Payment via Money Changer",
+    party_id: "mc-1",
+    party_type: "Money Changer",
+    party: moneyChangerParty,
+    currency: "VND",
+    amount: 32_000_000,
+    direction: "OUT",
+    transaction_group: "SPMC-20260817-000001",
+    fx_rate: 4000,
+  });
+  // First queued response = the main filtered query; second = the
+  // transaction_group counterparty lookup (both legs, since the fake
+  // .in() is a no-op and returns whatever's queued).
+  const { client } = makeRpcClient(
+    makeFromClient({
+      money_debt_ledger_entries: [
+        { data: [vndLeg] },
+        {
+          data: [
+            { id: "mdl-vnd", transaction_group: "SPMC-20260817-000001", party_id: "mc-1", party: moneyChangerParty },
+            { id: "mdl-cny", transaction_group: "SPMC-20260817-000001", party_id: "sup-1", party: supplierParty },
+          ],
+        },
+      ],
+    }),
+    {}
+  );
+
+  const result = await getLedgerEntries({}, client);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].group_counterparty?.id, "sup-1");
+  assert.equal(result[0].group_counterparty?.name, "Nhà Hoa");
+});
+
+test("getLedgerEntries: a row with no transaction_group never triggers the counterparty lookup query, and group_counterparty stays unset", async () => {
+  const { getLedgerEntries } = await import("./moneyDebtLedger.service");
+  const { client, calls } = makeRpcClient(makeFromClient({ money_debt_ledger_entries: [{ data: [entry()] }] }), {});
+
+  const result = await getLedgerEntries({}, client);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].group_counterparty, undefined);
+  // Only one .from("money_debt_ledger_entries") round trip happened —
+  // no counterparty lookup was issued for an ungrouped row.
+  assert.equal(calls.filter((c) => c.table === "money_debt_ledger_entries" && c.method === "select").length, 1);
+});
+
 test("createLedgerEntry: rejects non-positive amount before ever calling the RPC", async () => {
   const { createLedgerEntry, MoneyDebtLedgerRuleViolationError } = await import("./moneyDebtLedger.service");
   const { client, rpcCalls } = makeRpcClient(makeFromClient({}), {});
@@ -614,4 +666,218 @@ test("TECH_H_PAYMENT_METHODS: recognizes exactly the two real historical Product
   // Narrow and explicit: exactly these two values, nothing broader (e.g. no
   // case-insensitive/contains-based matching was introduced as a side effect).
   assert.deepEqual([...TECH_H_PAYMENT_METHODS].sort(), ["TechH", "Tech_H"]);
+});
+
+// ============================================================
+// Stage 19 (Product Owner Locked Business Contract, 2026-08-17) —
+// syncPaymentToMoneyDebtLedger: pure RPC-call-shape coverage. The DB
+// function's own eligibility/idempotency/concurrency behavior is verified
+// live against real Dev (this stage's E2E report), not re-derived here —
+// this suite only proves the JS wrapper calls the right RPC with the
+// right parameters and surfaces errors the same way every other RPC call
+// in this file already does.
+// ============================================================
+
+test("syncPaymentToMoneyDebtLedger: calls sync_payment_to_money_debt_ledger with the mapped p_* parameters", async () => {
+  const { syncPaymentToMoneyDebtLedger } = await import("./moneyDebtLedger.service");
+  const { client, rpcCalls } = makeRpcClient(makeFromClient({}), {
+    sync_payment_to_money_debt_ledger: { data: entry({ transaction_type: "Customer Payment via Money Changer", linked_payment_id: "payment-1" }) },
+  });
+
+  await syncPaymentToMoneyDebtLedger("payment-1", "staff-1", client);
+
+  assert.equal(rpcCalls.length, 1);
+  assert.equal(rpcCalls[0].fn, "sync_payment_to_money_debt_ledger");
+  assert.equal(rpcCalls[0].params.p_payment_id, "payment-1");
+  assert.equal(rpcCalls[0].params.p_staff_id, "staff-1");
+});
+
+test("syncPaymentToMoneyDebtLedger: returns null (not an error) when the payment is not eligible — the DB function's own valid 'nothing to sync' outcome", async () => {
+  const { syncPaymentToMoneyDebtLedger } = await import("./moneyDebtLedger.service");
+  const { client } = makeRpcClient(makeFromClient({}), {
+    sync_payment_to_money_debt_ledger: { data: null },
+  });
+
+  const result = await syncPaymentToMoneyDebtLedger("payment-2", "staff-1", client);
+  assert.equal(result, null);
+});
+
+test("syncPaymentToMoneyDebtLedger: an RPC-level rejection (e.g. staff lacks money_debt_ledger.create) surfaces as MoneyDebtLedgerRuleViolationError, same as every other governed write in this file", async () => {
+  const { syncPaymentToMoneyDebtLedger, MoneyDebtLedgerRuleViolationError } = await import("./moneyDebtLedger.service");
+  const { client } = makeRpcClient(makeFromClient({}), {
+    sync_payment_to_money_debt_ledger: { data: null, error: { message: "Forbidden: money_debt_ledger.create permission required" } },
+  });
+
+  await assert.rejects(() => syncPaymentToMoneyDebtLedger("payment-3", "staff-without-permission", client), MoneyDebtLedgerRuleViolationError);
+});
+
+// ============================================================
+// Stage 19B (Product Owner "COMPLETE MONEY/DEBT BUSINESS FLOW", 2026-08-17)
+// — createSupplierPaymentViaMoneyChanger / createMoneyDebtLedgerCorrection:
+// pure RPC-call-shape coverage, same reasoning as syncPaymentToMoneyDebt-
+// Ledger's own suite above. Balance-guard/negative-rejection behavior is
+// verified live against real Dev (this stage's E2E report), not re-derived
+// here.
+// ============================================================
+
+test("createSupplierPaymentViaMoneyChanger: rejects non-positive fx_rate before calling the RPC", async () => {
+  const { createSupplierPaymentViaMoneyChanger, MoneyDebtLedgerRuleViolationError } = await import("./moneyDebtLedger.service");
+  const { client, rpcCalls } = makeRpcClient(makeFromClient({}), {});
+
+  await assert.rejects(
+    () =>
+      createSupplierPaymentViaMoneyChanger(
+        { money_changer_partner_id: "mc-1", supplier_partner_id: "sup-1", cny_amount: 8_000, fx_rate: 0 },
+        "staff-1",
+        client
+      ),
+    MoneyDebtLedgerRuleViolationError
+  );
+  assert.equal(rpcCalls.length, 0);
+});
+
+test("createSupplierPaymentViaMoneyChanger: rejects a null staffId before ever calling the RPC", async () => {
+  const { createSupplierPaymentViaMoneyChanger, MoneyDebtLedgerRuleViolationError } = await import("./moneyDebtLedger.service");
+  const { client, rpcCalls } = makeRpcClient(makeFromClient({}), {});
+
+  await assert.rejects(
+    () =>
+      createSupplierPaymentViaMoneyChanger(
+        { money_changer_partner_id: "mc-1", supplier_partner_id: "sup-1", cny_amount: 8_000, fx_rate: 4_000 },
+        null,
+        client
+      ),
+    MoneyDebtLedgerRuleViolationError
+  );
+  assert.equal(rpcCalls.length, 0);
+});
+
+test("createSupplierPaymentViaMoneyChanger: calls create_supplier_payment_via_money_changer once and returns both rows (VND OUT against Money Changer, CNY OUT against Supplier)", async () => {
+  const { createSupplierPaymentViaMoneyChanger } = await import("./moneyDebtLedger.service");
+  const vndRow = entry({
+    id: "mdl-vnd",
+    transaction_type: "Supplier Payment via Money Changer",
+    party_type: "Money Changer",
+    party_id: "mc-1",
+    currency: "VND",
+    amount: 32_000_000,
+    direction: "OUT",
+    transaction_group: "SPMC-20260817-000001",
+    fx_rate: 4_000,
+    linked_payment_id: null,
+  });
+  const cnyRow = entry({
+    id: "mdl-cny",
+    transaction_type: "Supplier Payment via Money Changer",
+    party_type: "Supplier",
+    party_id: "sup-1",
+    currency: "CNY",
+    amount: 8_000,
+    direction: "OUT",
+    transaction_group: "SPMC-20260817-000001",
+    fx_rate: 4_000,
+    linked_payment_id: null,
+  });
+  const { client, rpcCalls } = makeRpcClient(makeFromClient({}), {
+    create_supplier_payment_via_money_changer: { data: [cnyRow, vndRow] },
+  });
+
+  const result = await createSupplierPaymentViaMoneyChanger(
+    { money_changer_partner_id: "mc-1", supplier_partner_id: "sup-1", cny_amount: 8_000, fx_rate: 4_000 },
+    "staff-1",
+    client
+  );
+
+  assert.equal(rpcCalls.length, 1);
+  assert.equal(rpcCalls[0].fn, "create_supplier_payment_via_money_changer");
+  assert.equal(rpcCalls[0].params.p_money_changer_partner_id, "mc-1");
+  assert.equal(rpcCalls[0].params.p_supplier_partner_id, "sup-1");
+  assert.equal(rpcCalls[0].params.p_cny_amount, 8_000);
+  assert.equal(rpcCalls[0].params.p_fx_rate, 4_000);
+  assert.equal(rpcCalls[0].params.p_staff_id, "staff-1");
+  assert.equal(result.length, 2);
+  assert.deepEqual(
+    result.map((r) => r.transaction_group),
+    ["SPMC-20260817-000001", "SPMC-20260817-000001"]
+  );
+});
+
+test("createSupplierPaymentViaMoneyChanger: an RPC-level rejection (insufficient Money Changer balance) surfaces as MoneyDebtLedgerRuleViolationError", async () => {
+  const { createSupplierPaymentViaMoneyChanger, MoneyDebtLedgerRuleViolationError } = await import("./moneyDebtLedger.service");
+  const { client } = makeRpcClient(makeFromClient({}), {
+    create_supplier_payment_via_money_changer: { data: null, error: { message: "Insufficient Money Changer VND balance: has 0, needs 32000000 (CNY 8000 x rate 4000)" } },
+  });
+
+  await assert.rejects(
+    () =>
+      createSupplierPaymentViaMoneyChanger(
+        { money_changer_partner_id: "mc-1", supplier_partner_id: "sup-1", cny_amount: 8_000, fx_rate: 4_000 },
+        "staff-1",
+        client
+      ),
+    MoneyDebtLedgerRuleViolationError
+  );
+});
+
+test("createMoneyDebtLedgerCorrection: rejects a non-positive amount before calling the RPC", async () => {
+  const { createMoneyDebtLedgerCorrection, MoneyDebtLedgerRuleViolationError } = await import("./moneyDebtLedger.service");
+  const { client, rpcCalls } = makeRpcClient(makeFromClient({}), {});
+
+  await assert.rejects(
+    () => createMoneyDebtLedgerCorrection({ corrects_entry_id: "mdl-1", amount: 0, direction: "IN" }, "staff-1", client),
+    MoneyDebtLedgerRuleViolationError
+  );
+  assert.equal(rpcCalls.length, 0);
+});
+
+test("createMoneyDebtLedgerCorrection: rejects a null staffId before ever calling the RPC", async () => {
+  const { createMoneyDebtLedgerCorrection, MoneyDebtLedgerRuleViolationError } = await import("./moneyDebtLedger.service");
+  const { client, rpcCalls } = makeRpcClient(makeFromClient({}), {});
+
+  await assert.rejects(
+    () => createMoneyDebtLedgerCorrection({ corrects_entry_id: "mdl-1", amount: 500_000, direction: "IN" }, null, client),
+    MoneyDebtLedgerRuleViolationError
+  );
+  assert.equal(rpcCalls.length, 0);
+});
+
+test("createMoneyDebtLedgerCorrection: calls create_money_debt_ledger_correction with the mapped p_* parameters and returns the new Adjustment row", async () => {
+  const { createMoneyDebtLedgerCorrection } = await import("./moneyDebtLedger.service");
+  const correctionRow = entry({
+    id: "mdl-correction",
+    transaction_type: "Adjustment",
+    currency: "VND",
+    amount: 500_000,
+    direction: "IN",
+    corrects_entry_id: "mdl-original",
+  });
+  const { client, rpcCalls } = makeRpcClient(makeFromClient({}), {
+    create_money_debt_ledger_correction: { data: correctionRow },
+  });
+
+  const result = await createMoneyDebtLedgerCorrection(
+    { corrects_entry_id: "mdl-original", amount: 500_000, direction: "IN", reference: "Correction of MDL-20260817-000001" },
+    "staff-1",
+    client
+  );
+
+  assert.equal(rpcCalls.length, 1);
+  assert.equal(rpcCalls[0].fn, "create_money_debt_ledger_correction");
+  assert.equal(rpcCalls[0].params.p_corrects_entry_id, "mdl-original");
+  assert.equal(rpcCalls[0].params.p_amount, 500_000);
+  assert.equal(rpcCalls[0].params.p_direction, "IN");
+  assert.equal(rpcCalls[0].params.p_staff_id, "staff-1");
+  assert.equal(result.corrects_entry_id, "mdl-original");
+});
+
+test("createMoneyDebtLedgerCorrection: an RPC-level rejection (correction would take balance negative) surfaces as MoneyDebtLedgerRuleViolationError", async () => {
+  const { createMoneyDebtLedgerCorrection, MoneyDebtLedgerRuleViolationError } = await import("./moneyDebtLedger.service");
+  const { client } = makeRpcClient(makeFromClient({}), {
+    create_money_debt_ledger_correction: { data: null, error: { message: "This correction would take Money Changer mc-1's VND balance negative: has 12000000, correction reduces by 22000000" } },
+  });
+
+  await assert.rejects(
+    () => createMoneyDebtLedgerCorrection({ corrects_entry_id: "mdl-original", amount: 22_000_000, direction: "OUT" }, "staff-1", client),
+    MoneyDebtLedgerRuleViolationError
+  );
 });

@@ -42,6 +42,37 @@ export async function getMasterDataOptions(
   }));
 }
 
+/** Dev fix (2026-08-17) — for the one master_data-backed field in this
+ * codebase whose target column is a real UUID FK to master_data.id, not a
+ * plain text value: receiving_accounts.bank_id (REFERENCES master_data(id),
+ * §receivingAccount.service.ts's assertBankCategory). getMasterDataOptions()
+ * above stays exactly as-is for every other master-data dropdown, all of
+ * which store the plain text `value` column directly (payment_method,
+ * etc.) — changing its behavior would break those. This is a separate,
+ * dedicated function so the option's `value` IS the row's `id` directly,
+ * and no caller ever needs to resolve/convert a text value into a UUID at
+ * submit time (Product Owner's explicit preference: "form submit UUID
+ * trực tiếp và không phải parse/convert ở nhiều tầng"). */
+export async function getMasterDataOptionsWithId(category: MasterDataCategory): Promise<Option[]> {
+  const { data, error } = await supabase
+    .from("master_data")
+    .select("*")
+    .eq("category", category)
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true })
+    .order("value", { ascending: true });
+
+  if (error) {
+    console.error("Error fetching master data options (id-valued):", error);
+    return [];
+  }
+
+  return (data as MasterDataItem[]).map((item) => ({
+    value: item.id,
+    label: item.value,
+  }));
+}
+
 export async function addMasterDataItem(category: MasterDataCategory, value: string) {
   const existing = await getMasterDataItems(category);
   const nextSortOrder = existing.length;

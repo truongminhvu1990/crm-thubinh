@@ -23,6 +23,12 @@ export const MONEY_DEBT_LEDGER_ALL_TYPE_OPTIONS: { value: MoneyDebtLedgerTransac
   { value: "Deposit Consumed", label: "Sử dụng tiền đặt cọc" },
   { value: "Supplier Payment", label: "Thanh toán nhà cung cấp" },
   { value: "Adjustment", label: "Điều chỉnh" },
+  // Stage 19 — automatic-sync only, never in MONEY_DEBT_LEDGER_CREATABLE_TYPE_OPTIONS
+  // (same exclusion shape as 'Buy CNY' above): no manual create path exists for this type.
+  { value: "Customer Payment via Money Changer", label: "Thanh toán khách hàng qua Money Changer" },
+  // Stage 19B — paired write, its own dedicated modal (same exclusion shape
+  // as 'Buy CNY'): never in MONEY_DEBT_LEDGER_CREATABLE_TYPE_OPTIONS.
+  { value: "Supplier Payment via Money Changer", label: "Thanh toán nhà cung cấp qua Money Changer" },
 ];
 
 export const MONEY_DEBT_LEDGER_CURRENCY_OPTIONS: { value: MoneyDebtLedgerCurrency; label: string }[] = [

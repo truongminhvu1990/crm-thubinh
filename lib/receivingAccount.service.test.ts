@@ -57,7 +57,8 @@ function makeFromClient(perTableSequence: Record<string, FakeResult[]>) {
   };
 }
 
-const BANK_ROW = { id: "bank-1", category: "bank" };
+const BANK_ROW = { id: "bank-1", category: "bank", is_active: true };
+const INACTIVE_BANK_ROW = { id: "bank-inactive", category: "bank", is_active: false };
 const OWNER_ROW = { id: "owner-1" };
 const MONEY_CHANGER_ROW = { id: "mc-1", partner_type: "Money Changer" };
 const COLLABORATOR_ROW = { id: "collab-1", partner_type: "Collaborator" };
@@ -149,6 +150,35 @@ test("5: a nonexistent partner id is rejected as a Money Changer association", a
     () =>
       createReceivingAccount(
         { bank_id: "bank-1", owner_partner_id: "owner-1", currency: "VND", account_number: "****1234", money_changer_partner_id: "ghost-1" },
+        "staff-1",
+        client
+      ),
+    ReceivingAccountRuleViolationError
+  );
+});
+
+test("Dev fix: a bank_id that fails Postgres's own UUID parsing (code 22P02, e.g. a text value/code like \"vcb\" reaching the service) surfaces as a clean ReceivingAccountRuleViolationError, never the raw Postgres error", async () => {
+  const { createReceivingAccount, ReceivingAccountRuleViolationError } = await import("./receivingAccount.service");
+  const { client } = makeFromClient({
+    master_data: [{ data: null, error: { code: "22P02", message: 'invalid input syntax for type uuid: "vcb"' } }],
+  });
+
+  await assert.rejects(
+    () => createReceivingAccount({ bank_id: "vcb", owner_partner_id: "owner-1", currency: "VND", account_number: "****1234" }, "staff-1", client),
+    ReceivingAccountRuleViolationError
+  );
+});
+
+test("Dev fix: an inactive bank is rejected with a clear business error, not silently accepted", async () => {
+  const { createReceivingAccount, ReceivingAccountRuleViolationError } = await import("./receivingAccount.service");
+  const { client } = makeFromClient({
+    master_data: [{ data: INACTIVE_BANK_ROW }],
+  });
+
+  await assert.rejects(
+    () =>
+      createReceivingAccount(
+        { bank_id: "bank-inactive", owner_partner_id: "owner-1", currency: "VND", account_number: "****1234" },
         "staff-1",
         client
       ),

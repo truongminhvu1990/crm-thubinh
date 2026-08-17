@@ -17,12 +17,32 @@ import { logActivity } from "@/lib/activityLog.service";
 
 export class ReceivingAccountRuleViolationError extends Error {}
 
+/** Dev fix (2026-08-17) — bank_id is a real UUID FK to master_data.id
+ * (receiving_accounts.bank_id REFERENCES master_data(id)), never a plain
+ * text `value` like other master-data-backed fields. A malformed bank_id
+ * (e.g. a text value/code such as "vcb" reaching here instead of a UUID —
+ * the exact bug this fix addresses, root-caused to the UI layer and fixed
+ * there too) must never surface as Postgres's own raw 22P02 "invalid input
+ * syntax for type uuid" — it's caught here and translated into the same
+ * clean ReceivingAccountRuleViolationError shape every other rule
+ * violation in this file already uses. This is a defense-in-depth check
+ * (the UI can no longer produce this today), not a replacement for the UI
+ * fix — any other caller of this service (a future API consumer, a script)
+ * gets the same protection. */
 async function assertBankCategory(bankId: string, client: SupabaseClient): Promise<void> {
-  const { data, error } = await client.from("master_data").select("id, category").eq("id", bankId).maybeSingle();
-  if (error) throw error;
+  const { data, error } = await client.from("master_data").select("id, category, is_active").eq("id", bankId).maybeSingle();
+  if (error) {
+    if ((error as { code?: string }).code === "22P02") {
+      throw new ReceivingAccountRuleViolationError(`bank_id không hợp lệ (không phải UUID): "${bankId}"`);
+    }
+    throw error;
+  }
   if (!data) throw new ReceivingAccountRuleViolationError(`Bank ${bankId} không tồn tại`);
   if (data.category !== "bank") {
     throw new ReceivingAccountRuleViolationError(`master_data ${bankId} không thuộc category 'bank' (category hiện tại: ${data.category})`);
+  }
+  if (!data.is_active) {
+    throw new ReceivingAccountRuleViolationError(`Ngân hàng ${bankId} hiện không hoạt động (is_active=false)`);
   }
 }
 

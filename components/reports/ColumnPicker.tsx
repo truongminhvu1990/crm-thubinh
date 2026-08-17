@@ -18,6 +18,10 @@ interface Props<K extends string> {
   columns: ColumnPickerOption<K>[];
   visibleKeys: Set<K>;
   onChange: (visible: Set<K>) => void;
+  /** Optional "Reset về mặc định" action, rendered below the checklist when
+   * provided. Omitted by every existing Reports caller (unchanged
+   * behavior) — added for Money & Debt Ledger's own column picker. */
+  onReset?: () => void;
 }
 
 /** Generic "Cột hiển thị" (Customize Columns) dropdown - pure presentation,
@@ -29,7 +33,7 @@ interface Props<K extends string> {
  * Set its caller passes in. Toggling a column here never touches a query,
  * filter, sort, or calculation - only which columns the caller's own
  * table/export currently include. */
-export default function ColumnPicker<K extends string>({ testId, columns, visibleKeys, onChange }: Props<K>) {
+export default function ColumnPicker<K extends string>({ testId, columns, visibleKeys, onChange, onReset }: Props<K>) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -73,6 +77,22 @@ export default function ColumnPicker<K extends string>({ testId, columns, visibl
               {c.label}
             </label>
           ))}
+          {onReset && (
+            <>
+              <div className="my-1 border-t border-border" />
+              <button
+                type="button"
+                data-testid={`${testId}-reset`}
+                onClick={() => {
+                  onReset();
+                  setOpen(false);
+                }}
+                className="w-full text-left px-2 py-1.5 rounded-md text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                Reset về mặc định
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

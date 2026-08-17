@@ -6,6 +6,8 @@ import {
   MoneyDebtLedgerCurrency,
   CreateMoneyDebtLedgerEntryInput,
   CreateBuyCnyLedgerTransactionInput,
+  CreateSupplierPaymentViaMoneyChangerInput,
+  CreateMoneyDebtLedgerCorrectionInput,
   MoneyDebtReconciliationCandidate,
 } from "@/types/moneyDebtLedger";
 import { TECH_H_PAYMENT_METHODS } from "./moneyDebtLedger.constants";
@@ -49,13 +51,59 @@ import { TECH_H_PAYMENT_METHODS } from "./moneyDebtLedger.constants";
 export class MoneyDebtLedgerRuleViolationError extends Error {}
 
 const WITH_JOINS =
-  "*, party:partners(id, name, partner_code, partner_type), payment:payments(id, amount, payment_method), order:orders(id, order_number)";
+  "*, party:partners(id, name, partner_code, partner_type), payment:payments(id, amount, payment_method, receiving_account:receiving_accounts(id, account_number, label, bank:master_data(value))), order:orders(id, order_number, customer:customers(id, full_name)), created_by_staff:staff(id, full_name)";
+
+/** Stage (Money/Debt Ledger reporting — column config + relation links) —
+ * a paired transaction ('Supplier Payment via Money Changer', 'Buy CNY')
+ * produces 2 rows sharing one transaction_group, each with its own party.
+ * The row for one leg doesn't carry the OTHER leg's party on itself (e.g.
+ * the Money Changer's VND OUT row has no direct reference to the Supplier
+ * it paid) — that relationship only exists via transaction_group, the same
+ * relationship the DB functions themselves already establish (§Phase 4:
+ * "party / transaction_group / linked transaction", no new column, no
+ * duplicated Supplier data). This does one extra read query (only when the
+ * current page actually has grouped rows) and mutates `rows` in place by
+ * attaching each row's sibling party as `group_counterparty` — additive,
+ * read-only, never touches a write path. */
+async function attachGroupCounterparties(rows: MoneyDebtLedgerEntry[], client: SupabaseClient): Promise<void> {
+  const groups = [...new Set(rows.map((r) => r.transaction_group).filter((g): g is string => !!g))];
+  if (groups.length === 0) return;
+
+  const { data, error } = await client
+    .from("money_debt_ledger_entries")
+    .select("id, transaction_group, party_id, party:partners(id, name, partner_code, partner_type)")
+    .in("transaction_group", groups);
+  if (error || !data) {
+    console.error("Error resolving transaction_group counterparties:", error);
+    return;
+  }
+
+  const byGroup = new Map<string, { id: string; party_id: string; party: MoneyDebtLedgerEntry["party"] }[]>();
+  for (const row of data as unknown as { id: string; transaction_group: string; party_id: string; party: MoneyDebtLedgerEntry["party"] }[]) {
+    const list = byGroup.get(row.transaction_group) ?? [];
+    list.push(row);
+    byGroup.set(row.transaction_group, list);
+  }
+
+  for (const entry of rows) {
+    if (!entry.transaction_group) continue;
+    const siblings = byGroup.get(entry.transaction_group) ?? [];
+    const counterpart = siblings.find((s) => s.party_id !== entry.party_id);
+    entry.group_counterparty = counterpart?.party ?? null;
+  }
+}
 
 export interface LedgerListFilters {
   searchTerm?: string;
   partyId?: string;
   currency?: string;
   transactionType?: string;
+  /** Stage 20 (UI/Reporting refactor) — pure read-query additions, same
+   * shape/precedent as the filters above. No new business logic, no new
+   * write path, no new table. */
+  direction?: "IN" | "OUT";
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 export async function getLedgerEntries(
@@ -66,22 +114,31 @@ export async function getLedgerEntries(
   if (filters.partyId) query = query.eq("party_id", filters.partyId);
   if (filters.currency) query = query.eq("currency", filters.currency);
   if (filters.transactionType) query = query.eq("transaction_type", filters.transactionType);
+  if (filters.direction) query = query.eq("direction", filters.direction);
+  if (filters.dateFrom) query = query.gte("transaction_date", filters.dateFrom);
+  if (filters.dateTo) query = query.lte("transaction_date", filters.dateTo);
 
-  const { data, error } = await query.order("created_at", { ascending: false });
+  const { data, error } = await query.order("transaction_date", { ascending: false }).order("created_at", { ascending: false });
   if (error) {
     console.error("Error fetching money/debt ledger entries:", error);
     return [];
   }
 
   let rows = data as unknown as MoneyDebtLedgerEntry[];
+  await attachGroupCounterparties(rows, client);
+
   if (filters.searchTerm) {
     const term = filters.searchTerm.toLowerCase();
     rows = rows.filter(
       (e) =>
         e.entry_code.toLowerCase().includes(term) ||
         e.party?.name?.toLowerCase().includes(term) ||
+        e.group_counterparty?.name?.toLowerCase().includes(term) ||
         e.reference?.toLowerCase().includes(term) ||
-        e.transaction_group?.toLowerCase().includes(term)
+        e.transaction_group?.toLowerCase().includes(term) ||
+        e.order?.order_number?.toLowerCase().includes(term) ||
+        e.order?.customer?.full_name?.toLowerCase().includes(term) ||
+        e.payment?.payment_method?.toLowerCase().includes(term)
     );
   }
   return rows;
@@ -434,4 +491,94 @@ export async function createBuyCnyTransaction(
   // create_buy_cny_ledger_transaction() already writes one activity_logs
   // row per leg itself.
   return data as MoneyDebtLedgerEntry[];
+}
+
+/** Stage 19 (Product Owner Locked Business Contract, 2026-08-17) — the
+ * standalone, idempotent Payment -> Money/Debt Ledger sync entry point.
+ * Wraps sync_payment_to_money_debt_ledger()
+ * (supabase/migrations/2026081721_money_debt_ledger_automatic_sync.sql),
+ * which itself calls the existing, unmodified
+ * create_money_debt_ledger_entry() — never a direct INSERT into
+ * money_debt_ledger_entries. Returns `null` (not an error) when the
+ * payment simply isn't eligible (no receiving account, or the receiving
+ * account has no Money Changer association) — that is Phase 12
+ * scenario C's own expected, valid outcome, not a failure. Safe to call
+ * repeatedly for the same paymentId (Phase 13/14): the DB function's own
+ * SELECT-then-insert-with-unique-index-backstop guarantees at most one
+ * 'Customer Payment via Money Changer' row per payment even under
+ * concurrent invocation — this wrapper adds no additional
+ * application-level duplicate check of its own, since one would not be
+ * race-safe and the DB-level guarantee is already authoritative. */
+export async function syncPaymentToMoneyDebtLedger(
+  paymentId: string,
+  staffId: string,
+  client: SupabaseClient = supabase
+): Promise<MoneyDebtLedgerEntry | null> {
+  const { data, error } = await client.rpc("sync_payment_to_money_debt_ledger", {
+    p_staff_id: staffId,
+    p_payment_id: paymentId,
+  });
+  if (error) throw toRuleViolation(error);
+  return (data as MoneyDebtLedgerEntry | null) ?? null;
+}
+
+/** Stage 19B — paired write path (same shape as createBuyCnyTransaction):
+ * always produces exactly 2 rows sharing one transaction_group, created
+ * atomically inside create_supplier_payment_via_money_changer(). The VND
+ * amount is never sent by the caller — the DB function derives it from
+ * cny_amount x fx_rate and rejects the call outright if the Money
+ * Changer's current VND balance can't cover it (§ the migration's own doc
+ * comment, Phase 11's "reject negative balance by default"). */
+export async function createSupplierPaymentViaMoneyChanger(
+  input: CreateSupplierPaymentViaMoneyChangerInput,
+  staffId: string | null,
+  client: SupabaseClient = supabase
+): Promise<MoneyDebtLedgerEntry[]> {
+  if (input.cny_amount <= 0) throw new MoneyDebtLedgerRuleViolationError("Số tiền CNY phải lớn hơn 0");
+  if (input.fx_rate <= 0) throw new MoneyDebtLedgerRuleViolationError("Tỷ giá phải lớn hơn 0");
+  if (!input.money_changer_partner_id) throw new MoneyDebtLedgerRuleViolationError("Vui lòng chọn đơn vị đổi tiền (Money Changer)");
+  if (!input.supplier_partner_id) throw new MoneyDebtLedgerRuleViolationError("Vui lòng chọn nhà cung cấp");
+  if (!staffId) throw new MoneyDebtLedgerRuleViolationError("Không xác định được nhân viên thực hiện giao dịch");
+
+  const { data, error } = await client.rpc("create_supplier_payment_via_money_changer", {
+    p_staff_id: staffId,
+    p_money_changer_partner_id: input.money_changer_partner_id,
+    p_supplier_partner_id: input.supplier_partner_id,
+    p_cny_amount: input.cny_amount,
+    p_fx_rate: input.fx_rate,
+    p_transaction_date: input.transaction_date ?? new Date().toISOString().slice(0, 10),
+    p_reference: input.reference ?? null,
+    p_note: input.note ?? null,
+  });
+  if (error) throw toRuleViolation(error);
+  return data as MoneyDebtLedgerEntry[];
+}
+
+/** Stage 19B — the sole "Edit voucher" mechanism. Never updates/deletes the
+ * original row (D7, still enforced by the unconditional immutability
+ * trigger) — always creates a new Adjustment row carrying the delta and a
+ * corrects_entry_id back-reference, inheriting party/currency/linked_
+ * payment_id/linked_order_id from the entry it corrects.
+ * create_money_debt_ledger_correction() rejects the call if it would take
+ * a Money Changer's balance negative — the same guard as
+ * createSupplierPaymentViaMoneyChanger. */
+export async function createMoneyDebtLedgerCorrection(
+  input: CreateMoneyDebtLedgerCorrectionInput,
+  staffId: string | null,
+  client: SupabaseClient = supabase
+): Promise<MoneyDebtLedgerEntry> {
+  if (input.amount <= 0) throw new MoneyDebtLedgerRuleViolationError("Số tiền điều chỉnh phải lớn hơn 0");
+  if (!input.corrects_entry_id) throw new MoneyDebtLedgerRuleViolationError("Thiếu tham chiếu đến giao dịch cần sửa");
+  if (!staffId) throw new MoneyDebtLedgerRuleViolationError("Không xác định được nhân viên thực hiện giao dịch");
+
+  const { data, error } = await client.rpc("create_money_debt_ledger_correction", {
+    p_staff_id: staffId,
+    p_corrects_entry_id: input.corrects_entry_id,
+    p_amount: input.amount,
+    p_direction: input.direction,
+    p_reference: input.reference ?? null,
+    p_note: input.note ?? null,
+  });
+  if (error) throw toRuleViolation(error);
+  return data as MoneyDebtLedgerEntry;
 }

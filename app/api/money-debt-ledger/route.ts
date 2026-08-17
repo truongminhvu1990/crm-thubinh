@@ -14,12 +14,16 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = request.nextUrl;
   const client = await createClient();
+  const direction = searchParams.get("direction");
   const entries = await getLedgerEntries(
     {
       searchTerm: searchParams.get("search") ?? undefined,
       partyId: searchParams.get("partyId") ?? undefined,
       currency: searchParams.get("currency") ?? undefined,
       transactionType: searchParams.get("transactionType") ?? undefined,
+      direction: direction === "IN" || direction === "OUT" ? direction : undefined,
+      dateFrom: searchParams.get("dateFrom") ?? undefined,
+      dateTo: searchParams.get("dateTo") ?? undefined,
     },
     client
   );

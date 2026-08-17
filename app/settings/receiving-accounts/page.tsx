@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Landmark, Plus, Pencil, Power } from "lucide-react";
-import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
+import { useMasterDataIdOptions } from "@/lib/hooks/useMasterDataOptions";
 import { getPartners } from "@/lib/partner/partner.service";
 import { getReceivingAccounts } from "@/lib/receivingAccount.service";
 import { ReceivingAccount, CreateReceivingAccountInput, UpdateReceivingAccountInput } from "@/types/receivingAccount";
@@ -39,7 +39,13 @@ export default function ReceivingAccountsPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  const bankOptions = useMasterDataOptions("bank", bankId);
+  // Dev fix (2026-08-17) — bank_id is a real UUID FK to master_data.id
+  // (receiving_accounts.bank_id REFERENCES master_data(id)), not the plain
+  // text `value` column every other master-data dropdown in this codebase
+  // uses. useMasterDataIdOptions returns options whose `value` IS the id
+  // directly, so bankId always holds a UUID from the moment it's set — no
+  // resolve/convert step needed anywhere before this form submits.
+  const bankOptions = useMasterDataIdOptions("bank", bankId);
   const bankById = new Map(bankOptions.map((b) => [b.value, b.label]));
   // Stage 5 (Product Owner Locked Decisions, 2026-08-16), Phase 3 — only
   // partners whose partner_type is exactly "Money Changer" may appear here

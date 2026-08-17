@@ -12,7 +12,27 @@ export type MoneyDebtLedgerTransactionType =
   | "Deposit"
   | "Deposit Consumed"
   | "Supplier Payment"
-  | "Adjustment";
+  | "Adjustment"
+  /** Stage 19 (Product Owner Locked Business Contract, 2026-08-17) — the
+   * generic, automatic-sync counterpart to the historical-only
+   * "Customer Payment TECH_H". Created exclusively by
+   * sync_payment_to_money_debt_ledger()/create_payment_with_ledger_sync()
+   * (supabase/migrations/2026081721_money_debt_ledger_automatic_sync.sql)
+   * — never manually selectable in RecordMovementModal's dropdown, never
+   * hand-written elsewhere. Eligibility is derived purely from
+   * payment.receiving_account_id -> receiving_accounts
+   * .money_changer_partner_id; never from payment_method text, bank name,
+   * owner name, or any hardcoded H/K pattern. */
+  | "Customer Payment via Money Changer"
+  /** Stage 19B (Product Owner "COMPLETE MONEY/DEBT BUSINESS FLOW",
+   * 2026-08-17) — a Money Changer's VND pool pays a Supplier in CNY.
+   * Created exclusively by create_supplier_payment_via_money_changer()
+   * (supabase/migrations/2026081722_..._supplier_payment_and_correction.sql)
+   * as a paired transaction (same transaction_group/fx_rate mechanism as
+   * 'Buy CNY'): one VND OUT row against the Money Changer, one CNY OUT row
+   * against the Supplier. Never manually selectable in RecordMovementModal's
+   * plain dropdown — has its own dedicated modal, same shape as Buy CNY. */
+  | "Supplier Payment via Money Changer";
 
 export type MoneyDebtLedgerPartyType = "Money Changer" | "Supplier";
 export type MoneyDebtLedgerCurrency = "VND" | "CNY";
@@ -30,6 +50,12 @@ export interface MoneyDebtLedgerEntry {
   party_id: string;
   /** Populated by a join when fetched with party — never write this back. */
   party?: { id: string; name: string; partner_code: string; partner_type: string } | null;
+  /** The OTHER leg's party for a paired transaction (same transaction_group,
+   * different party_id) — e.g. on a "Supplier Payment via Money Changer"
+   * Money-Changer-leg row, this is the Supplier. Null for single-row
+   * transaction types. Resolved read-only from transaction_group, never
+   * written back, never a new column. */
+  group_counterparty?: { id: string; name: string; partner_code: string; partner_type: string } | null;
 
   currency: MoneyDebtLedgerCurrency;
   amount: number;
@@ -44,14 +70,27 @@ export interface MoneyDebtLedgerEntry {
   linked_payment_id: string | null;
   linked_order_id: string | null;
   /** Populated by a join when fetched with payment/order — never write back. */
-  payment?: { id: string; amount: number; payment_method: string } | null;
-  order?: { id: string; order_number: string } | null;
+  payment?: {
+    id: string;
+    amount: number;
+    payment_method: string;
+    receiving_account?: { id: string; account_number: string; label: string | null; bank?: { value: string } | null } | null;
+  } | null;
+  order?: { id: string; order_number: string; customer?: { id: string; full_name: string } | null } | null;
 
   reference: string | null;
   note: string | null;
   status: MoneyDebtLedgerStatus;
 
+  /** Stage 19B — set only on correction Adjustment rows (created via
+   * create_money_debt_ledger_correction()); points at the entry being
+   * corrected. Null on every other row, including the entry being
+   * corrected itself — the original is never modified (D7). */
+  corrects_entry_id: string | null;
+
   created_by: string | null;
+  /** Populated by a join when fetched with created_by_staff — never write back. */
+  created_by_staff?: { id: string; full_name: string } | null;
   created_at: string;
 }
 
@@ -69,6 +108,32 @@ export interface CreateMoneyDebtLedgerEntryInput {
   transaction_date?: string;
   linked_payment_id?: string | null;
   linked_order_id?: string | null;
+  reference?: string | null;
+  note?: string | null;
+}
+
+/** Input for the Stage 19B paired write path — maps 1:1 to
+ * create_supplier_payment_via_money_changer()'s own parameters. VND amount
+ * is never supplied by the caller; it's always cny_amount x fx_rate,
+ * computed server-side so the two can never drift. */
+export interface CreateSupplierPaymentViaMoneyChangerInput {
+  money_changer_partner_id: string;
+  supplier_partner_id: string;
+  cny_amount: number;
+  fx_rate: number;
+  transaction_date?: string;
+  reference?: string | null;
+  note?: string | null;
+}
+
+/** Input for the Stage 19B "Edit voucher" mechanism — maps 1:1 to
+ * create_money_debt_ledger_correction()'s own parameters. `amount`/
+ * `direction` describe the delta to apply, not a restated total (§ the
+ * migration's own doc comment). */
+export interface CreateMoneyDebtLedgerCorrectionInput {
+  corrects_entry_id: string;
+  amount: number;
+  direction: MoneyDebtLedgerDirection;
   reference?: string | null;
   note?: string | null;
 }
