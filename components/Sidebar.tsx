@@ -12,6 +12,8 @@ import {
   ReceiptText,
   Handshake,
   Coins,
+  Landmark,
+  BarChart3,
   Wallet,
   TrendingUp,
   BookOpen,
@@ -29,6 +31,9 @@ import {
   Ticket,
   X,
   ArrowRightLeft,
+  PackageSearch,
+  PackageOpen,
+  Warehouse,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getFollowUpSummaryCounts } from "@/lib/customer.service";
@@ -50,22 +55,87 @@ function isGroup(entry: NavEntry): entry is NavGroup {
   return "children" in entry && Array.isArray(entry.children);
 }
 
+/** Sidebar Information Architecture (PO Direction, 2026-08-18) — pure
+ * navigation grouping, no route/permission/business-logic change. Every
+ * href below is unchanged from the previous flat list; only label text and
+ * group placement moved. `/commissions` (Commission module) and
+ * `/compensations` (Compensation module) are distinct modules that both
+ * concern "hoa hồng" — PO explicitly resolved the label collision: keep
+ * `/compensations` = "Hoa hồng" (the requested standard label) and
+ * `/commissions` = "Bồi hoàn hoa hồng" (kept visible, same group, distinct
+ * label). Marketing's own submenu is left exactly as it was, per PO
+ * instruction ("giữ cấu trúc submenu hiện tại").
+ *
+ * Production Release Scope (2026-08-19) — this file carries ONLY the
+ * approved Customer Consignment + Sidebar IA release. Four nav entries
+ * from the full working-tree version are deliberately NOT included here
+ * because their modules (Business Intelligence, Settlement, Compensation
+ * Ledger, Notification) are not yet Production-authorized:
+ * `/business-intelligence`, `/settlements`, `/compensation-ledger`,
+ * `/notifications`. Their routes/code are untouched wherever they already
+ * exist — this is a navigation-visibility scope decision only, not a
+ * deletion. `/settings` stays a flat top-level link (its original,
+ * already-approved baseline form) rather than a new "Hệ thống" group of
+ * one, since that group only existed to hold it alongside the
+ * now-excluded `/notifications`. */
 const LINKS: NavEntry[] = [
-  { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard", enabled: true },
-  { href: "/customers", icon: Users, label: "Khách hàng", enabled: true },
-  { href: "/follow-up", icon: CalendarClock, label: "Follow-up Center", enabled: true },
-  { href: "/partners", icon: Handshake, label: "Đối tác", enabled: true },
-  { href: "/compensations", icon: Coins, label: "Compensation", enabled: true },
-  { href: "/products", icon: Gem, label: "Sản phẩm", enabled: true },
-  { href: "/batches", icon: Package, label: "Lô hàng", enabled: true },
-  { href: "/inventory", icon: Boxes, label: "Tồn kho", enabled: true },
-  { href: "/orders", icon: ReceiptText, label: "Đơn hàng", enabled: true },
-  { href: "/reports", icon: Wallet, label: "Báo cáo", enabled: true },
-  { href: "/reports/sales-ledger", icon: ScrollText, label: "Sổ bán hàng", enabled: true },
-  { href: "/data-verification", icon: ShieldCheck, label: "Xác minh dữ liệu", enabled: true },
-  { href: "/commissions", icon: Percent, label: "Hoa hồng", enabled: true },
-  { href: "/market-intelligence", icon: TrendingUp, label: "Thị trường", enabled: true },
-  { href: "/money-debt-ledger", icon: ArrowRightLeft, label: "Money & Debt Ledger", enabled: true },
+  { href: "/dashboard", icon: LayoutDashboard, label: "Tổng quan", enabled: true },
+  {
+    label: "Khách hàng",
+    icon: Users,
+    children: [
+      { href: "/customers", icon: Users, label: "Khách hàng", enabled: true },
+      { href: "/follow-up", icon: CalendarClock, label: "Chăm sóc khách hàng", enabled: true },
+    ],
+  },
+  {
+    label: "Bán hàng",
+    icon: ReceiptText,
+    children: [
+      { href: "/orders", icon: ReceiptText, label: "Đơn hàng", enabled: true },
+      { href: "/reports/sales-ledger", icon: ScrollText, label: "Sổ bán hàng", enabled: true },
+      { href: "/reports", icon: Wallet, label: "Báo cáo", enabled: true },
+    ],
+  },
+  {
+    label: "Hàng hóa",
+    icon: Warehouse,
+    children: [
+      { href: "/products", icon: Gem, label: "Sản phẩm", enabled: true },
+      { href: "/batches", icon: Package, label: "Lô hàng", enabled: true },
+      { href: "/inventory", icon: Boxes, label: "Tồn kho", enabled: true },
+    ],
+  },
+  {
+    label: "Khách gửi bán",
+    icon: PackageOpen,
+    children: [
+      { href: "/consignments", icon: PackageOpen, label: "Hàng khách gửi", enabled: true },
+      { href: "/consignment-settlements", icon: PackageSearch, label: "Đối soát hàng khách gửi", enabled: true },
+    ],
+  },
+  {
+    label: "Đối tác & Hoa hồng",
+    icon: Handshake,
+    children: [
+      { href: "/partners", icon: Handshake, label: "Đối tác", enabled: true },
+      { href: "/compensations", icon: Coins, label: "Hoa hồng", enabled: true },
+      { href: "/commissions", icon: Percent, label: "Bồi hoàn hoa hồng", enabled: true },
+    ],
+  },
+  {
+    label: "Tài chính & Công nợ",
+    icon: Landmark,
+    children: [{ href: "/money-debt-ledger", icon: ArrowRightLeft, label: "Sổ tiền & công nợ", enabled: true }],
+  },
+  {
+    label: "Phân tích & Kiểm soát",
+    icon: BarChart3,
+    children: [
+      { href: "/data-verification", icon: ShieldCheck, label: "Xác minh dữ liệu", enabled: true },
+      { href: "/market-intelligence", icon: TrendingUp, label: "Thị trường", enabled: true },
+    ],
+  },
   {
     label: "Marketing",
     icon: Megaphone,
@@ -139,7 +209,7 @@ export default function Sidebar({ open, onClose }: Props) {
       <aside
         className={cn(
           "fixed inset-y-0 left-0 z-50 w-64 bg-sidebar text-sidebar-foreground",
-          "flex flex-col p-5 transition-transform duration-200 ease-out",
+          "flex flex-col px-5 pt-[calc(1.25rem+env(safe-area-inset-top))] pb-[calc(1.25rem+env(safe-area-inset-bottom))] transition-transform duration-200 ease-out",
           "lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full"
         )}
@@ -177,6 +247,7 @@ export default function Sidebar({ open, onClose }: Props) {
                   onToggle={() => toggleGroup(entry.label)}
                   activeHref={pathname}
                   onNavigate={onClose}
+                  badges={{ "/follow-up": overdueCount }}
                 />
               );
             }
@@ -202,8 +273,6 @@ export default function Sidebar({ open, onClose }: Props) {
               );
             }
 
-            const showOverdueBadge = href === "/follow-up" && overdueCount > 0;
-
             return (
               <Link
                 key={href}
@@ -220,16 +289,6 @@ export default function Sidebar({ open, onClose }: Props) {
                   <Icon size={18} strokeWidth={1.75} />
                   {label}
                 </span>
-                {showOverdueBadge && (
-                  <span
-                    className={cn(
-                      "text-[11px] font-semibold px-1.5 py-0.5 rounded-full min-w-[20px] text-center",
-                      active ? "bg-white/20 text-primary-foreground" : "bg-destructive/90 text-white"
-                    )}
-                  >
-                    {overdueCount}
-                  </span>
-                )}
               </Link>
             );
           })}

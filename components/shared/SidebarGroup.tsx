@@ -19,6 +19,9 @@ interface Props {
   onToggle: () => void;
   activeHref: string | null;
   onNavigate: () => void;
+  /** Optional badge count per child href (e.g. Follow-up's overdue count),
+   * keyed the same way the top-level Sidebar badge already is. */
+  badges?: Partial<Record<string, number>>;
 }
 
 /** Reusable expandable/nested Sidebar group primitive - first built for
@@ -29,7 +32,7 @@ interface Props {
  * @radix-ui/react-accordion in package.json) - expand/collapse is a plain
  * local boolean, styled with the same Tailwind tokens every other Sidebar
  * row already uses. */
-export default function SidebarGroup({ label, icon: Icon, items, expanded, onToggle, activeHref, onNavigate }: Props) {
+export default function SidebarGroup({ label, icon: Icon, items, expanded, onToggle, activeHref, onNavigate, badges }: Props) {
   const hasActiveChild = items.some((c) => activeHref?.startsWith(c.href));
 
   return (
@@ -56,6 +59,7 @@ export default function SidebarGroup({ label, icon: Icon, items, expanded, onTog
         <div className="mt-0.5 space-y-0.5 pl-4 border-l border-white/10 ml-4">
           {items.map(({ href, icon: ChildIcon, label: childLabel, enabled }) => {
             const active = activeHref?.startsWith(href);
+            const badgeCount = badges?.[href];
 
             if (!enabled) {
               return (
@@ -79,14 +83,26 @@ export default function SidebarGroup({ label, icon: Icon, items, expanded, onTog
                 href={href}
                 onClick={onNavigate}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 touch-manipulation",
+                  "flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 touch-manipulation",
                   active
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground"
                 )}
               >
-                <ChildIcon size={16} strokeWidth={1.75} />
-                {childLabel}
+                <span className="flex items-center gap-3">
+                  <ChildIcon size={16} strokeWidth={1.75} />
+                  {childLabel}
+                </span>
+                {!!badgeCount && (
+                  <span
+                    className={cn(
+                      "text-[11px] font-semibold px-1.5 py-0.5 rounded-full min-w-[20px] text-center",
+                      active ? "bg-white/20 text-primary-foreground" : "bg-destructive/90 text-white"
+                    )}
+                  >
+                    {badgeCount}
+                  </span>
+                )}
               </Link>
             );
           })}

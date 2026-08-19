@@ -3,6 +3,7 @@ import { CommissionSnapshotInput, OrderRepository, PurchaseSnapshotInput, Scopin
 import { getStaffByName } from "@/lib/staff.service";
 import { getActiveCommissionRules } from "@/lib/commission/commission.repository";
 import { calculateCommissionAmount, findMatchingRule } from "@/lib/commission/commission.service";
+import { createConsignmentFinancialRecordsForOrder } from "@/lib/consignment/consignmentFinancialRecord.service";
 import {
   AddOrderItemInput,
   AddPaymentInput,
@@ -675,6 +676,19 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
         event_detail: `Trạng thái thay đổi: ${order.order_status} → Completed`,
         actor,
       });
+
+      // Consignment (Customer Consignment specification, D1/D2/D11,
+      // LOCKED) — Order Completion is the only trigger point: Sale Price
+      // is locked here (docs/03_ORDER_SPEC.md §7), which is what Fee/
+      // Customer Payable are computed from. For any completed Order Item
+      // whose Product has an active Consignment, this creates the
+      // Consignment Financial Record and transitions that Consignment to
+      // SOLD; Products with no Consignment are silently skipped (the
+      // ordinary case). Best-effort — never blocks or fails order
+      // completion (see createConsignmentFinancialRecordsForOrder's own
+      // doc comment).
+      await createConsignmentFinancialRecordsForOrder(updated, items);
+
       return updated;
     },
 
