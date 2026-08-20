@@ -38,6 +38,10 @@ export interface Product {
   batch_id?: string | null;
   /** Populated by a join when the product was fetched with its batch - never write this back. */
   batch?: { batch_code: string } | null;
+  /** Set only by returnProductToSupplier() (lib/product.service.ts), atomically
+   * with status -> "Returned". Never NULL-out once set, never backfilled for
+   * historical rows (Lot Product-Level Status, Decision 2, LOCKED). */
+  returned_at?: string | null;
 
   // Media
   /** No longer editable from the Product form (see Product Images V1) - column kept so existing data isn't lost, backfilled into product_images. */

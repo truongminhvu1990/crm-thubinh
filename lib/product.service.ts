@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import { Product } from "@/types/product";
 import { Customer } from "@/types/customer";
 import { parseMultiValue } from "./utils";
+import { logStatusChange } from "./auditLog.service";
 
 /** Extracts a [min, max] VND range from a free-text budget string like
  * "10-20 triệu" or "dưới 5tr". Returns null if no number can be parsed -
@@ -394,7 +395,46 @@ export async function updateProduct(id: string, product: Partial<Product>) {
   return { data, error: null };
 }
 
+/**
+ * Lot Product-Level Status, D4 (Product Owner Authorization, 2026-08-19,
+ * Decision 4, LOCKED): a Product with historical business data must never
+ * be hard-deleted. `customer_purchases.product_id` and `order_items.
+ * product_id` already enforce this at the DB layer via `ON DELETE RESTRICT`
+ * (supabase/migrations/2026081902_customer_purchases_product_restrict.sql,
+ * 20260716_orders_database_foundation.sql) - this pre-check exists only to
+ * surface a clear, specific reason instead of a raw Postgres FK error, and
+ * to cover the two categories no FK protects: compensation history
+ * (`compensations.product_id` stays `ON DELETE SET NULL` - unresolved scope
+ * question, Implementation Plan mục 21) and Lot history (no FK exists for
+ * "was ever part of a batch" since deleting the product IS the loss of that
+ * relationship - checked directly here instead).
+ */
 export async function deleteProduct(id: string) {
+  const [purchaseCheck, orderCheck, compensationCheck, productCheck] = await Promise.all([
+    supabase.from("customer_purchases").select("id").eq("product_id", id).limit(1),
+    supabase.from("order_items").select("id").eq("product_id", id).limit(1),
+    supabase.from("compensations").select("id").eq("product_id", id).limit(1),
+    supabase.from("products").select("batch_id, status").eq("id", id).maybeSingle(),
+  ]);
+
+  const hasPurchaseHistory = (purchaseCheck.data?.length ?? 0) > 0;
+  const hasOrderRelationship = (orderCheck.data?.length ?? 0) > 0;
+  const hasCompensationHistory = (compensationCheck.data?.length ?? 0) > 0;
+  const hasLotHistory =
+    !!productCheck.data?.batch_id ||
+    productCheck.data?.status === "Sold" ||
+    productCheck.data?.status === "Returned";
+
+  if (hasPurchaseHistory || hasOrderRelationship || hasCompensationHistory || hasLotHistory) {
+    const reasons: string[] = [];
+    if (hasPurchaseHistory || hasOrderRelationship) reasons.push("đã có lịch sử bán hàng");
+    if (hasCompensationHistory) reasons.push("đã có lịch sử hoa hồng/compensation");
+    if (hasLotHistory) reasons.push("đang hoặc đã từng thuộc một Lô hàng");
+    const message = `Không thể xóa sản phẩm vì ${reasons.join(", ")}. Đây là dữ liệu lịch sử, không thể xóa cứng.`;
+    console.error("deleteProduct blocked (historical business data):", { id, reasons });
+    return { code: "PRODUCT_HAS_HISTORY", message };
+  }
+
   const { error } = await supabase.from("products").delete().eq("id", id);
 
   if (error) {
@@ -402,6 +442,64 @@ export async function deleteProduct(id: string) {
   }
 
   return error;
+}
+
+/**
+ * Lot Product-Level Status, D3/D6 (Product Owner Authorization, 2026-08-19).
+ * Dedicated, narrow, WHERE-guarded function - same pattern already used by
+ * lib/orders/order.repository.ts's reserveProduct/releaseProduct/
+ * markProductSold - rather than exposing `returned_at` as a freely-writable
+ * field through the generic updateProduct()/WRITABLE_FIELDS path. Sets
+ * status and returned_at together, in one UPDATE, so the two can never
+ * drift apart.
+ *
+ * Guarded to Active/Paused only, matching BatchProductsTable.tsx's existing
+ * `canReturn` UI condition. Reserved -> Returned is deliberately NOT
+ * allowed here (Decision 6 / Implementation Plan mục 8-9: a Reserved
+ * product is held by an open Order, and how that Order should be handled
+ * when its product is returned to the supplier is an unresolved Product
+ * Owner decision, out of D1-D10 scope) - Sold/Discontinued/Returned are
+ * excluded for the same "not a valid source status" reason the UI already
+ * enforces.
+ */
+export async function returnProductToSupplier(productId: string, actor?: string | null) {
+  const returnedAt = new Date().toISOString();
+
+  const { data: previous, error: readError } = await supabase
+    .from("products")
+    .select("status")
+    .eq("id", productId)
+    .maybeSingle();
+
+  if (readError || !previous) {
+    return { data: null, error: readError ?? new Error("Không tìm thấy sản phẩm") };
+  }
+
+  const { data, error } = await supabase
+    .from("products")
+    .update({ status: "Returned", returned_at: returnedAt })
+    .eq("id", productId)
+    .in("status", ["Active", "Paused"])
+    .select()
+    .single();
+
+  if (error || !data) {
+    console.error("Error returning product to supplier:", error);
+    return {
+      data: null,
+      error: error ?? new Error("Sản phẩm không ở trạng thái có thể trả về nhà cung cấp"),
+    };
+  }
+
+  await logStatusChange({
+    tableName: "products",
+    recordId: productId,
+    before: previous.status ?? null,
+    after: "Returned",
+    actor,
+  });
+
+  return { data: data as Product, error: null };
 }
 
 /** Batched duplicate check for Quick Import - one query for every product

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { PackageCheck, PackageX, Undo2 } from "lucide-react";
 import { Product } from "@/types/product";
 import { getBatchStats, BatchStats } from "@/lib/productBatch.service";
@@ -33,7 +34,19 @@ export default function ProductInventory({ product }: Props) {
 
   return (
     <div>
-      <h2 className="text-lg font-semibold text-foreground mb-3">📦 Tồn kho</h2>
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-x-4 gap-y-1">
+        <h2 className="text-lg font-semibold text-foreground">📦 Tồn kho</h2>
+        <p className="text-sm">
+          <span className="text-muted-foreground">Lô hàng: </span>
+          {product.batch_id && product.batch ? (
+            <Link href={`/batches/${product.batch_id}`} className="text-primary hover:underline font-medium">
+              {product.batch.batch_code}
+            </Link>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+        </p>
+      </div>
 
       {!product.batch_id ? (
         <p className="text-sm text-muted-foreground bg-card border border-border rounded-xl p-4">

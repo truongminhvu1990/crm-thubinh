@@ -245,7 +245,10 @@ export default function ProductsPage() {
       if (error) throw error;
       await loadProducts();
     } catch (error) {
-      alert("Lỗi khi xóa sản phẩm");
+      const message = error instanceof Error || (error && typeof error === "object" && "message" in error)
+        ? String((error as { message?: unknown }).message)
+        : "Lỗi khi xóa sản phẩm";
+      alert(message);
       console.error(error);
     } finally {
       setIsLoading(false);

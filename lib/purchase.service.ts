@@ -4,6 +4,7 @@ import { createSnapshotForPurchase } from "@/lib/commission/commission.service";
 import { getStaffByName } from "@/lib/staff.service";
 import { getCurrentStaff } from "@/lib/permission";
 import { applyPurchaseHistoryVisibility } from "@/lib/permission/purchaseHistoryVisibility";
+import { logStatusChange } from "@/lib/auditLog.service";
 
 const WRITABLE_FIELDS: (keyof CustomerPurchase)[] = [
   "customer_id",
@@ -24,7 +25,16 @@ function pickWritableFields(purchase: Partial<CustomerPurchase>): Partial<Custom
 }
 
 const WITH_PRODUCT = "*, product:products(id, product_name, product_code)";
-const WITH_CUSTOMER = "*, customer:customers(id, full_name, customer_code)";
+/** Inventory Traceability (Product Owner Authorization, 2026-08-20) -
+ * getPurchaseForProduct's own select: customer embed (unchanged from before
+ * this feature) plus the historical Order (via order_item_id -> order_items
+ * -> orders), nullable
+ * end-to-end for legacy/manually-entered purchases that were never
+ * completed through the Orders module. Only the fields Product Detail's
+ * Order link actually needs (id, order_number, order_status) - no
+ * payment/financial data. */
+const WITH_CUSTOMER_AND_ORDER =
+  "*, customer:customers(id, full_name, customer_code), order_item:order_items(order:orders(id, order_number, order_status))";
 
 /** Customer Visibility Engine (Package 4B) - `customer_purchases`'
  * ownership prefers `salesperson_id` (uuid) when populated, falling back
@@ -62,7 +72,7 @@ export async function getPurchasesByCustomer(customerId: string): Promise<Custom
  * getPurchasesByCustomer - a Sales rep must never see another rep's sale
  * price/buyer surfaced here just because they viewed the product. */
 export async function getPurchaseForProduct(productId: string): Promise<CustomerPurchase | null> {
-  let query = supabase.from("customer_purchases").select(WITH_CUSTOMER).eq("product_id", productId);
+  let query = supabase.from("customer_purchases").select(WITH_CUSTOMER_AND_ORDER).eq("product_id", productId);
 
   const staff = await getCurrentStaff();
   if (staff) query = (await applyPurchaseHistoryVisibility(query, staff, "salesperson_id", "salesperson")).query;
@@ -82,14 +92,46 @@ export async function getPurchaseForProduct(productId: string): Promise<Customer
 // `products` itself - it's only ever derived by looking up customer_purchases
 // by product_id (see getPurchaseForProduct), so products stays independent
 // of customers in the schema.
+/** Lot Product-Level Status, D5 (Product Owner Authorization, 2026-08-19):
+ * reads the current status first purely so the audit_log entry records the
+ * true before-value, rather than assuming - this flow has no WHERE-guard
+ * to lean on for that (unlike order.repository.ts's reserveProduct). */
 async function markProductSold(productId: string) {
+  const { data: previous } = await supabase.from("products").select("status").eq("id", productId).maybeSingle();
+
   const { error } = await supabase.from("products").update({ status: "Sold" }).eq("id", productId);
-  if (error) console.error("Error marking product as sold:", error);
+  if (error) {
+    console.error("Error marking product as sold:", error);
+    return;
+  }
+
+  const staff = await getCurrentStaff();
+  await logStatusChange({
+    tableName: "products",
+    recordId: productId,
+    before: previous?.status ?? null,
+    after: "Sold",
+    actor: staff?.email ?? null,
+  });
 }
 
 async function revertProduct(productId: string) {
+  const { data: previous } = await supabase.from("products").select("status").eq("id", productId).maybeSingle();
+
   const { error } = await supabase.from("products").update({ status: "Active" }).eq("id", productId);
-  if (error) console.error("Error reverting product after purchase change:", error);
+  if (error) {
+    console.error("Error reverting product after purchase change:", error);
+    return;
+  }
+
+  const staff = await getCurrentStaff();
+  await logStatusChange({
+    tableName: "products",
+    recordId: productId,
+    before: previous?.status ?? null,
+    after: "Active",
+    actor: staff?.email ?? null,
+  });
 }
 
 // Source/salesperson are never typed in on the purchase form (requirement:

@@ -21,7 +21,8 @@ import {
   getBatchStats,
   BatchStats,
 } from "@/lib/productBatch.service";
-import { updateProduct } from "@/lib/product.service";
+import { returnProductToSupplier } from "@/lib/product.service";
+import { getCurrentStaff } from "@/lib/permission";
 import { BATCH_STATUS, labelFor } from "@/lib/product.constants";
 import { formatDate } from "@/lib/utils";
 import Button from "@/components/ui/Button";
@@ -97,9 +98,10 @@ export default function BatchDetailPage() {
   }
 
   async function handleReturnToSupplier(product: Product) {
-    const { error } = await updateProduct(product.id!, { status: "Returned" });
+    const staff = await getCurrentStaff();
+    const { error } = await returnProductToSupplier(product.id!, staff?.email ?? null);
     if (error) {
-      alert("Lỗi khi trả sản phẩm về nhà cung cấp");
+      alert(error instanceof Error ? error.message : "Lỗi khi trả sản phẩm về nhà cung cấp");
       console.error(error);
       return;
     }

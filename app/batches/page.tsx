@@ -9,6 +9,8 @@ import {
   updateBatch,
   deleteBatch,
   getNextBatchCode,
+  getBatchListStats,
+  BatchCounts,
 } from "@/lib/productBatch.service";
 import BatchTable from "@/components/batch/BatchTable";
 import BatchModal from "@/components/batch/BatchModal";
@@ -21,6 +23,7 @@ const EMPTY_BATCH: Partial<ProductBatch> = {
 
 export default function BatchesPage() {
   const [batches, setBatches] = useState<ProductBatch[]>([]);
+  const [statsByBatchId, setStatsByBatchId] = useState<Map<string, BatchCounts>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -30,8 +33,12 @@ export default function BatchesPage() {
 
   async function loadBatches() {
     setIsLoading(true);
-    const data = await getBatches();
+    // Lot List Overview KPI (Product Owner Authorization, 2026-08-20) - one
+    // extra query for every Lot's KPI at once (getBatchListStats), not one
+    // per Lot - see that function's own doc comment for the N+1 reasoning.
+    const [data, stats] = await Promise.all([getBatches(), getBatchListStats()]);
     setBatches(data);
+    setStatsByBatchId(stats);
     setIsLoading(false);
   }
 
@@ -129,6 +136,7 @@ export default function BatchesPage() {
 
       <BatchTable
         batches={batches}
+        statsByBatchId={statsByBatchId}
         onEdit={handleEditBatch}
         onDelete={handleDeleteBatch}
         isLoading={isLoading}

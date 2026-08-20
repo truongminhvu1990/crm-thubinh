@@ -26,6 +26,14 @@ export interface CustomerPurchase {
   product?: { id: string; product_name: string; product_code: string } | null;
   /** Joined via customer_id - only present when fetched with the customer embed. */
   customer?: { id: string; full_name: string; customer_code: string } | null;
+  /** Joined via order_item_id -> order_items -> orders - only present when
+   * fetched with the order embed (getPurchaseForProduct). Null for every
+   * legacy/manually-entered purchase (order_item_id is null - see above),
+   * not an error case. Inventory Traceability (Product Owner Authorization,
+   * 2026-08-20): backs Product Detail's Order/Customer traceability link. */
+  order_item?: {
+    order: { id: string; order_number: string; order_status: string } | null;
+  } | null;
 }
 
 export interface CustomerPurchaseSummary {
