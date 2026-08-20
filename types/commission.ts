@@ -8,7 +8,11 @@ export interface CommissionRule {
   updated_at: string;
 }
 
-export type CommissionStatus = "Pending" | "Approved" | "Paid";
+/** "Void" (Compensation/Commission Void, Product Owner Authorization,
+ * 2026-08-20) — reached only when the Commission's Order is Cancelled while
+ * the Commission itself is still Pending/Approved (never Paid). Terminal,
+ * same as Paid - no forward transition out of it. */
+export type CommissionStatus = "Pending" | "Approved" | "Paid" | "Void";
 
 export interface SalesCommission {
   id: string;

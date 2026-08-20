@@ -1,4 +1,6 @@
+import { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { logStatusChange } from "@/lib/auditLog.service";
 import {
   AddOrderItemInput,
   AddPaymentInput,
@@ -85,7 +87,10 @@ const OPERATION_TABLE: Record<string, string> = {
   addPayment: "payments",
   appendOrderEvent: "order_events",
   findCompensationStatusesForOrder: "compensations",
+  hasFinancialHistoryForOrder: "compensations",
+  findVoidableFinancialRecordsForOrder: "compensations",
   deleteOrderWithReconciliation: "orders",
+  cancelOrder: "orders",
 };
 
 /** Data-layer error thrown by every write method below on a Supabase error —
@@ -435,6 +440,171 @@ export async function findCompensationStatusesForOrder(orderId: string): Promise
 }
 
 /**
+ * D12 Order Cancellation (Product Owner Authorization, 2026-08-19, Decision
+ * D/LOCKED) — "UI phải cảnh báo rõ nếu Order đã có compensation/commission".
+ * Read-only, existence-only (never decides anything, same posture as
+ * findCompensationStatusesForOrder). `sales_commissions.purchase_id` has no
+ * real FK (deliberate, see 20260721_sales_commission_module.sql's header),
+ * so it can't be reached via a single embedded PostgREST select — walked
+ * manually: order_items -> customer_purchases -> sales_commissions.
+ */
+export async function hasFinancialHistoryForOrder(
+  orderId: string
+): Promise<{ hasCompensation: boolean; hasCommission: boolean }> {
+  const { data: compensations, error: compensationError } = await supabase
+    .from("compensations")
+    .select("id")
+    .eq("order_id", orderId)
+    .limit(1);
+  if (compensationError) {
+    console.error("Error checking compensation existence for order:", compensationError);
+    throw new OrderRepositoryError("hasFinancialHistoryForOrder", compensationError);
+  }
+
+  const { data: items, error: itemsError } = await supabase.from("order_items").select("id").eq("order_id", orderId);
+  if (itemsError) {
+    console.error("Error fetching order items for commission check:", itemsError);
+    throw new OrderRepositoryError("hasFinancialHistoryForOrder", itemsError);
+  }
+  const itemIds = (items || []).map((i) => i.id as string);
+
+  let hasCommission = false;
+  if (itemIds.length > 0) {
+    const { data: purchases, error: purchasesError } = await supabase
+      .from("customer_purchases")
+      .select("id")
+      .in("order_item_id", itemIds);
+    if (purchasesError) {
+      console.error("Error fetching purchases for commission check:", purchasesError);
+      throw new OrderRepositoryError("hasFinancialHistoryForOrder", purchasesError);
+    }
+    const purchaseIds = (purchases || []).map((p) => p.id as string);
+
+    if (purchaseIds.length > 0) {
+      const { data: commissions, error: commissionsError } = await supabase
+        .from("sales_commissions")
+        .select("id")
+        .in("purchase_id", purchaseIds)
+        .limit(1);
+      if (commissionsError) {
+        console.error("Error checking commission existence for order:", commissionsError);
+        throw new OrderRepositoryError("hasFinancialHistoryForOrder", commissionsError);
+      }
+      hasCommission = (commissions || []).length > 0;
+    }
+  }
+
+  return { hasCompensation: (compensations || []).length > 0, hasCommission };
+}
+
+/**
+ * Compensation/Commission Void (Product Owner Authorization, 2026-08-20) —
+ * a pre-cancel snapshot of every Compensation/Commission tied to this
+ * order, restricted to the statuses the RPC (cancel_order_with_disposition,
+ * 2026082002 migration) is about to Void: Compensation Draft/Pending/
+ * Confirmed, Commission Pending/Approved. Called BEFORE cancelOrder() so
+ * the caller (order.service.ts) knows each row's real *previous* status
+ * for an accurate audit_log before/after entry - the RPC itself doesn't
+ * return which rows it touched, only the updated `orders` row. Read-only,
+ * same "never decides anything" posture as hasFinancialHistoryForOrder;
+ * reuses its exact 3-hop walk for Commission (no real FK on purchase_id).
+ */
+export interface VoidableFinancialRecords {
+  compensations: { id: string; status: string }[];
+  commissions: { id: string; status: string }[];
+}
+
+export async function findVoidableFinancialRecordsForOrder(orderId: string): Promise<VoidableFinancialRecords> {
+  const { data: compensations, error: compensationError } = await supabase
+    .from("compensations")
+    .select("id, status")
+    .eq("order_id", orderId)
+    .in("status", ["Draft", "Pending", "Confirmed"]);
+  if (compensationError) {
+    console.error("Error fetching voidable compensations for order:", compensationError);
+    throw new OrderRepositoryError("findVoidableFinancialRecordsForOrder", compensationError);
+  }
+
+  const { data: items, error: itemsError } = await supabase.from("order_items").select("id").eq("order_id", orderId);
+  if (itemsError) {
+    console.error("Error fetching order items for voidable commissions:", itemsError);
+    throw new OrderRepositoryError("findVoidableFinancialRecordsForOrder", itemsError);
+  }
+  const itemIds = (items || []).map((i) => i.id as string);
+
+  let commissions: { id: string; status: string }[] = [];
+  if (itemIds.length > 0) {
+    const { data: purchases, error: purchasesError } = await supabase
+      .from("customer_purchases")
+      .select("id")
+      .in("order_item_id", itemIds);
+    if (purchasesError) {
+      console.error("Error fetching purchases for voidable commissions:", purchasesError);
+      throw new OrderRepositoryError("findVoidableFinancialRecordsForOrder", purchasesError);
+    }
+    const purchaseIds = (purchases || []).map((p) => p.id as string);
+
+    if (purchaseIds.length > 0) {
+      const { data: commissionRows, error: commissionsError } = await supabase
+        .from("sales_commissions")
+        .select("id, status")
+        .in("purchase_id", purchaseIds)
+        .in("status", ["Pending", "Approved"]);
+      if (commissionsError) {
+        console.error("Error fetching voidable commissions for order:", commissionsError);
+        throw new OrderRepositoryError("findVoidableFinancialRecordsForOrder", commissionsError);
+      }
+      commissions = (commissionRows || []) as { id: string; status: string }[];
+    }
+  }
+
+  return { compensations: (compensations || []) as { id: string; status: string }[], commissions };
+}
+
+/**
+ * D12 Order Cancellation (Product Owner Authorization, 2026-08-19) — the one
+ * atomic write, mirroring completeOrder's own RPC-call shape (see
+ * cancel_order_with_disposition's own doc comment,
+ * supabase/migrations/2026081904_cancel_order_with_disposition.sql).
+ * `audit` follows the same OrderAuditContext contract as reserveProduct/
+ * releaseProduct/markProductSold (D5 completion) — the Order's own
+ * Completed -> Cancelled audit_log entry and each Product's Sold -> ...
+ * entry are both best-effort, logged after this RPC succeeds (see this
+ * function's own comment on why that's not inside the transaction).
+ */
+export async function cancelOrder(
+  orderId: string,
+  dispositions: { order_item_id: string; disposition: string }[],
+  audit?: OrderAuditContext
+): Promise<Order> {
+  const { data, error } = await supabase.rpc("cancel_order_with_disposition", {
+    p_order_id: orderId,
+    p_dispositions: dispositions,
+  });
+
+  if (error) {
+    console.error("Error cancelling order with disposition:", error);
+    throw new OrderRepositoryError("cancelOrder", error);
+  }
+
+  // Only the Order's own transition is logged here. order_item_id ->
+  // product_id isn't known at this layer without re-querying - the caller
+  // (order.service.ts's cancelOrder) already has that mapping from the
+  // items it validated dispositions against, so it logs each Product's own
+  // Sold -> ... entry itself, right after this call succeeds.
+  if (audit) {
+    await logStatusChange(
+      { tableName: "orders", recordId: orderId, before: "Completed", after: "Cancelled", actor: audit.actor },
+      audit.client
+    );
+  } else {
+    logMissingAuditContext("cancelOrder", orderId);
+  }
+
+  return data as Order;
+}
+
+/**
  * Admin Order Deletion's transactional reconciliation — see
  * supabase/migrations/2026081702_admin_order_delete_reconciliation.sql for
  * the exact deletion sequence and why each step is safe, and
@@ -706,12 +876,39 @@ export async function removeOrderItem(orderId: string, id: string): Promise<void
 // markOrderLost) — not a new architecture, just applied to `products`.
 // ---------------------------------------------------------------------------
 
+/**
+ * D5 completion (Product Owner Authorization, 2026-08-19): the authenticated
+ * client + actor a route handler resolved from the request's own session
+ * cookies (lib/supabase/server.ts's createClient(), same mechanism
+ * getCurrentStaffFromRequest already uses) — required so the audit_log
+ * INSERT that follows a successful status transition runs under
+ * `authenticated`, not this file's own anon-context `supabase` import.
+ * Optional here (not on OrderRepository's own product-lifecycle methods) so
+ * every existing caller/fake in order.service.test.ts stays valid; each
+ * function below treats a missing context as a loud, visible failure of the
+ * audit step specifically — never a silent skip, and never a fabricated
+ * actor — while the status transition itself (the primary action) still
+ * completes normally, matching this codebase's established log-don't-block
+ * convention for side-effect writes.
+ */
+export interface OrderAuditContext {
+  actor: string;
+  client: SupabaseClient;
+}
+
+function logMissingAuditContext(fn: string, productId: string): void {
+  console.error(
+    `AUDIT LOG SKIPPED: ${fn} was called without an authenticated OrderAuditContext — this must never happen from a real, session-gated Orders route. Product status changed but was NOT recorded in audit_log.`,
+    { productId }
+  );
+}
+
 /** Available → Reserved. Guarded on `status = 'Active'`, which is what makes
  * this the actual concurrency check ORDERS_SPEC.md §9/§17 requires: if
  * another order already holds this product (or it isn't sellable for any
  * other reason), the guard matches 0 rows and this throws instead of
  * layering a second reservation on top. */
-export async function reserveProduct(productId: string): Promise<void> {
+export async function reserveProduct(productId: string, audit?: OrderAuditContext): Promise<void> {
   const { data, error } = await supabase
     .from("products")
     .update({ status: "Reserved" })
@@ -728,6 +925,15 @@ export async function reserveProduct(productId: string): Promise<void> {
       code: "PRODUCT_NOT_AVAILABLE",
     });
   }
+
+  if (audit) {
+    await logStatusChange(
+      { tableName: "products", recordId: productId, before: "Active", after: "Reserved", actor: audit.actor },
+      audit.client
+    );
+  } else {
+    logMissingAuditContext("reserveProduct", productId);
+  }
 }
 
 /** Reserved → Active. Fires on "order marked Lost" (ORDERS_SPEC.md §7) and
@@ -737,29 +943,56 @@ export async function reserveProduct(productId: string): Promise<void> {
  * left holding it. Best-effort like this file's other status-adjacent
  * guarded updates (deleteOrder, reserveOrder): 0 rows affected (already not
  * Reserved) is not treated as an error. */
-export async function releaseProduct(productId: string): Promise<void> {
-  const { error } = await supabase
+export async function releaseProduct(productId: string, audit?: OrderAuditContext): Promise<void> {
+  const { data, error } = await supabase
     .from("products")
     .update({ status: "Active" })
     .eq("id", productId)
-    .eq("status", "Reserved");
+    .eq("status", "Reserved")
+    .select("id");
 
   if (error) {
     throw new OrderRepositoryError("releaseProduct", error);
+  }
+
+  // Best-effort update (0 rows affected — already not Reserved — is not an
+  // error, per this function's own existing contract above): only log a
+  // transition that actually happened.
+  if (!data || data.length === 0) return;
+
+  if (audit) {
+    await logStatusChange(
+      { tableName: "products", recordId: productId, before: "Reserved", after: "Active", actor: audit.actor },
+      audit.client
+    );
+  } else {
+    logMissingAuditContext("releaseProduct", productId);
   }
 }
 
 /** Reserved → Sold, on order Completion (ORDERS_SPEC.md §7). Same
  * best-effort reasoning as releaseProduct. */
-export async function markProductSold(productId: string): Promise<void> {
-  const { error } = await supabase
+export async function markProductSold(productId: string, audit?: OrderAuditContext): Promise<void> {
+  const { data, error } = await supabase
     .from("products")
     .update({ status: "Sold" })
     .eq("id", productId)
-    .eq("status", "Reserved");
+    .eq("status", "Reserved")
+    .select("id");
 
   if (error) {
     throw new OrderRepositoryError("markProductSold", error);
+  }
+
+  if (!data || data.length === 0) return;
+
+  if (audit) {
+    await logStatusChange(
+      { tableName: "products", recordId: productId, before: "Reserved", after: "Sold", actor: audit.actor },
+      audit.client
+    );
+  } else {
+    logMissingAuditContext("markProductSold", productId);
   }
 }
 
@@ -885,6 +1118,12 @@ export interface OrderWriteRepository {
   /** Admin Order Deletion pre-check/execution — see each implementation's
    * own doc comment. Never called for the non-admin path. */
   findCompensationStatusesForOrder(orderId: string): Promise<CompensationStatus[]>;
+  /** D12 Order Cancellation, Decision D (LOCKED) — existence-only read for
+   * the UI's pre-confirm warning. See implementation's own doc comment. */
+  hasFinancialHistoryForOrder(orderId: string): Promise<{ hasCompensation: boolean; hasCommission: boolean }>;
+  /** Compensation/Commission Void (Product Owner Authorization, 2026-08-20)
+   * — pre-cancel snapshot, see implementation's own doc comment. */
+  findVoidableFinancialRecordsForOrder(orderId: string): Promise<VoidableFinancialRecords>;
   deleteOrderWithReconciliation(staffId: string, orderId: string): Promise<void>;
   /** Dedicated, narrow status-transition methods — not a generic status
    * setter (per this increment's explicit instruction). */
@@ -894,10 +1133,11 @@ export interface OrderWriteRepository {
   updateOrderItem(input: UpdateOrderItemInput): Promise<OrderItem>;
   removeOrderItem(orderId: string, id: string): Promise<void>;
   /** Product lifecycle (ORDERS_SPEC.md §7) — see the implementations above
-   * for the exact guard/throw semantics of each. */
-  reserveProduct(productId: string): Promise<void>;
-  releaseProduct(productId: string): Promise<void>;
-  markProductSold(productId: string): Promise<void>;
+   * for the exact guard/throw semantics of each. `audit`: see
+   * OrderAuditContext's own doc comment. */
+  reserveProduct(productId: string, audit?: OrderAuditContext): Promise<void>;
+  releaseProduct(productId: string, audit?: OrderAuditContext): Promise<void>;
+  markProductSold(productId: string, audit?: OrderAuditContext): Promise<void>;
   addPayment(input: AddPaymentInput): Promise<OrderPayment>;
   markOrderLost(input: MarkOrderLostInput): Promise<Order>;
   completeOrder(
@@ -906,6 +1146,13 @@ export interface OrderWriteRepository {
     commissionRows: CommissionSnapshotInput[]
   ): Promise<Order>;
   reassignSalesOwner(input: ReassignSalesOwnerInput): Promise<Order>;
+  /** D12 Order Cancellation — see cancel_order_with_disposition's own doc
+   * comment (supabase/migrations/2026081904_cancel_order_with_disposition.sql). */
+  cancelOrder(
+    orderId: string,
+    dispositions: { order_item_id: string; disposition: string }[],
+    audit?: OrderAuditContext
+  ): Promise<Order>;
   appendOrderEvent(event: Omit<OrderEvent, "id" | "event_timestamp">): Promise<OrderEvent>;
   /** Persists rollup fields the service layer recomputes after every
    * order_items/payments mutation (ORDERS_DATABASE.md §4, "Derived"). */
@@ -929,6 +1176,8 @@ export const supabaseOrderRepository: OrderRepository = {
   updateOrder,
   deleteOrder,
   findCompensationStatusesForOrder,
+  hasFinancialHistoryForOrder,
+  findVoidableFinancialRecordsForOrder,
   deleteOrderWithReconciliation,
   reserveOrder,
   cancelReservation,
@@ -941,6 +1190,7 @@ export const supabaseOrderRepository: OrderRepository = {
   addPayment,
   markOrderLost,
   completeOrder,
+  cancelOrder,
   reassignSalesOwner,
   appendOrderEvent,
   updateOrderRollups,

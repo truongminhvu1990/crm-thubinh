@@ -103,6 +103,8 @@ function makeRepository(overrides: Partial<OrderRepository> = {}): OrderReposito
     updateOrder: notImplemented as unknown as OrderRepository["updateOrder"],
     deleteOrder: notImplemented as unknown as OrderRepository["deleteOrder"],
     findCompensationStatusesForOrder: notImplemented as unknown as OrderRepository["findCompensationStatusesForOrder"],
+    hasFinancialHistoryForOrder: async () => ({ hasCompensation: false, hasCommission: false }),
+    findVoidableFinancialRecordsForOrder: async () => ({ compensations: [], commissions: [] }),
     deleteOrderWithReconciliation: notImplemented as unknown as OrderRepository["deleteOrderWithReconciliation"],
     reserveOrder: notImplemented as unknown as OrderRepository["reserveOrder"],
     cancelReservation: notImplemented as unknown as OrderRepository["cancelReservation"],
@@ -115,6 +117,7 @@ function makeRepository(overrides: Partial<OrderRepository> = {}): OrderReposito
     addPayment: notImplemented as unknown as OrderRepository["addPayment"],
     markOrderLost: notImplemented as unknown as OrderRepository["markOrderLost"],
     completeOrder: async (orderId: string) => makeOrder({ id: orderId, order_status: "Completed" }),
+    cancelOrder: notImplemented as unknown as OrderRepository["cancelOrder"],
     reassignSalesOwner: notImplemented as unknown as OrderRepository["reassignSalesOwner"],
     appendOrderEvent: async () =>
       ({ id: "event-1", order_id: "order-1", event_type: "Status Changed", event_detail: "", actor: "", event_timestamp: "2026-07-23" }) as OrderEvent,

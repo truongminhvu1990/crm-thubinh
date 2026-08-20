@@ -111,3 +111,32 @@ export async function authorizeOrderWrite(
   // new field.
   return { staff, role };
 }
+
+/**
+ * D12 Order Cancellation (Product Owner Authorization, 2026-08-19, Decision
+ * B/LOCKED) — "Cancellation chỉ dành cho: Owner, Manager. Không cho Sales
+ * thực hiện." A straight role check, not the same shape as
+ * authorizeOrderWrite's Data Scope model (no "own"/"team" narrowing — a
+ * Manager cancelling is either allowed or not, full stop, per the LOCKED
+ * decision text). Reuses the same role-resolution infrastructure
+ * (getCurrentStaffFromRequest + resolveRoleForStaff) already used
+ * throughout this file and by lib/hooks/useIsOwnerOrManager.ts's identical
+ * two-role check (same "fixed mapping, no new permission key" pattern that
+ * hook's own doc comment cites as established precedent) — no new
+ * permission key, no new role.
+ */
+export async function authorizeOrderCancellation(
+  request: NextRequest
+): Promise<{ staff: Staff } | { error: NextResponse }> {
+  const staff = await getCurrentStaffFromRequest(request);
+  if (!staff) {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  }
+
+  const role = await resolveRoleForStaff(staff);
+  if (role?.role_key !== "Owner" && role?.role_key !== "Manager") {
+    return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  }
+
+  return { staff };
+}

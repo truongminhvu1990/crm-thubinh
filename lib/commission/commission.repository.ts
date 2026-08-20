@@ -73,6 +73,75 @@ export async function getCommissionById(
   return data as SalesCommission;
 }
 
+/**
+ * Compensation/Commission Void (Product Owner Authorization, 2026-08-20,
+ * §5 LOCKED) — the 3-hop lookup approveCommission/markCommissionPaid use to
+ * find the Order behind a Commission, since sales_commissions.purchase_id
+ * carries no real FK (deliberate, see this file's own header / 20260721_
+ * sales_commission_module.sql). `purchase_id -> customer_purchases.id ->
+ * order_item_id -> order_items.order_id -> orders.order_status`.
+ *
+ * Tri-state result, deliberately NOT a plain `string | null`:
+ *   - "no_order_link": customer_purchases.order_item_id is NULL by design
+ *     (a manually-entered/legacy row predating the Orders module - the same
+ *     category lib/reports/reports.service.ts's isRevenueRecognized already
+ *     treats as "always recognized," never Order-gated). This commission
+ *     was never subject to Order Cancellation in the first place, so the
+ *     gate does not apply - the caller must NOT fail-closed here, or every
+ *     legacy commission would become permanently unapprovable/unpayable.
+ *   - "orphan": an order_item_id IS set but a later hop couldn't resolve
+ *     (missing order_item, or an order_item with no order) - a genuine
+ *     data-integrity problem, not "no link by design". The caller MUST
+ *     fail-closed here (Product Owner Authorization §5, LOCKED: "Không tự
+ *     suy đoán Order. Không fail-open").
+ *   - "resolved": the Order was found; `orderStatus` is its current value.
+ */
+export type CommissionOrderLookup =
+  | { kind: "no_order_link" }
+  | { kind: "orphan" }
+  | { kind: "resolved"; orderStatus: string };
+
+export async function resolveOrderStatusForCommission(
+  purchaseId: string,
+  client: SupabaseClient = supabase
+): Promise<CommissionOrderLookup> {
+  const { data: purchase, error: purchaseError } = await client
+    .from("customer_purchases")
+    .select("order_item_id")
+    .eq("id", purchaseId)
+    .maybeSingle();
+  if (purchaseError) {
+    console.error("Error resolving purchase for commission order-status lookup:", purchaseError);
+    return { kind: "orphan" };
+  }
+  if (!purchase) return { kind: "orphan" }; // purchase_id itself doesn't resolve - genuinely broken, not "no link by design"
+  if (!purchase.order_item_id) return { kind: "no_order_link" };
+
+  const { data: item, error: itemError } = await client
+    .from("order_items")
+    .select("order_id")
+    .eq("id", purchase.order_item_id)
+    .maybeSingle();
+  if (itemError) {
+    console.error("Error resolving order_item for commission order-status lookup:", itemError);
+    return { kind: "orphan" };
+  }
+  if (!item?.order_id) return { kind: "orphan" };
+
+  const { data: order, error: orderError } = await client
+    .from("orders")
+    .select("order_status")
+    .eq("id", item.order_id)
+    .maybeSingle();
+  if (orderError) {
+    console.error("Error resolving order for commission order-status lookup:", orderError);
+    return { kind: "orphan" };
+  }
+  if (!order?.order_status) return { kind: "orphan" };
+
+  return { kind: "resolved", orderStatus: order.order_status };
+}
+
 export async function updateCommissionStatusFields(
   id: string,
   fields: Partial<Pick<SalesCommission, "status" | "paid_at" | "paid_by" | "note">>

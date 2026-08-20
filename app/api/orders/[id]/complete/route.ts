@@ -3,6 +3,7 @@ import { getOrderDetail } from "@/lib/orders/order.service";
 import { orderService } from "../../_service";
 import { handleOrderServiceError } from "../../_errors";
 import { authorizeOrderWrite } from "../../_authorization";
+import { createClient } from "@/lib/supabase/server";
 
 /** ORDERS_UI.md §6 — Complete action. Authorization Engine V2 (Package 4A) —
  * Authentication/Permission/Data Scope enforced via authorizeOrderWrite
@@ -20,7 +21,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const authResult = await authorizeOrderWrite(request, detail.order);
     if ("error" in authResult) return authResult.error;
 
-    const order = await orderService.completeOrder(id, authResult.staff.full_name);
+    // D5 completion (Product Owner Authorization, 2026-08-19): an
+    // authenticated client bound to this request's own validated session
+    // cookies, so the audit_log entry for Reserved -> Sold passes RLS.
+    const auditClient = await createClient();
+    const order = await orderService.completeOrder(id, authResult.staff.full_name, auditClient);
     return NextResponse.json(order);
   } catch (error) {
     return handleOrderServiceError(error, request.headers.get("x-vercel-id") ?? crypto.randomUUID());

@@ -137,9 +137,34 @@ export async function getDashboardCommissionStats(
   for (const c of all) {
     const amount = Number(c.commission_amount) || 0;
     if (c.created_at.slice(0, 10) >= monthStart) thisMonth += amount;
-    if (c.status !== "Paid") outstanding += amount;
+    // Compensation/Commission Void (Product Owner Authorization,
+    // 2026-08-20, §3) — a Voided commission (Order Cancelled before it was
+    // Paid) will never be paid out, so it must not count as outstanding,
+    // same reasoning as Decision 6's Outstanding Compensation fix.
+    if (c.status !== "Paid" && c.status !== "Void") outstanding += amount;
   }
   return { thisMonth, outstanding };
+}
+
+/**
+ * Compensation/Commission Void (Product Owner Authorization, 2026-08-20,
+ * §5 LOCKED) — shared gate for approveCommission/markCommissionPaid: reject
+ * if the Commission's Order is Cancelled, or if the Order link can't be
+ * resolved cleanly (fail-closed, never fail-open - see
+ * resolveOrderStatusForCommission's own doc comment for the "no_order_link"
+ * vs "orphan" distinction this depends on). A commission with no Order
+ * link at all (legacy/manual row) is explicitly NOT gated - it was never
+ * subject to Order Cancellation to begin with.
+ */
+async function assertCommissionOrderNotCancelled(commission: SalesCommission): Promise<string | null> {
+  const lookup = await repo.resolveOrderStatusForCommission(commission.purchase_id);
+  if (lookup.kind === "orphan") {
+    return "Không thể xác định đơn hàng liên kết với commission này - từ chối để đảm bảo an toàn";
+  }
+  if (lookup.kind === "resolved" && lookup.orderStatus === "Cancelled") {
+    return "Không thể xử lý commission của đơn hàng đã hủy";
+  }
+  return null;
 }
 
 /** Feature 5: Pending -> Approved -> Paid, no skipping. Throws-free: caller
@@ -150,6 +175,9 @@ export async function approveCommission(
   if (COMMISSION_NEXT_STATUS[commission.status] !== "Approved") {
     return { data: null, error: `Cannot approve from status "${commission.status}"` };
   }
+  const gateError = await assertCommissionOrderNotCancelled(commission);
+  if (gateError) return { data: null, error: gateError };
+
   return repo.updateCommissionStatusFields(commission.id, { status: "Approved" });
 }
 
@@ -161,6 +189,9 @@ export async function markCommissionPaid(
   if (COMMISSION_NEXT_STATUS[commission.status] !== "Paid") {
     return { data: null, error: `Cannot mark paid from status "${commission.status}"` };
   }
+  const gateError = await assertCommissionOrderNotCancelled(commission);
+  if (gateError) return { data: null, error: gateError };
+
   return repo.updateCommissionStatusFields(commission.id, {
     status: "Paid",
     paid_at: new Date().toISOString(),

@@ -248,10 +248,21 @@ export async function confirmCompensation(
 
   const { data: order, error: orderError } = await client
     .from("orders")
-    .select("payment_status")
+    .select("payment_status, order_status")
     .eq("id", compensation.order_id)
     .single();
   if (orderError) throw orderError;
+  // Compensation/Commission Void (Product Owner Authorization, 2026-08-20,
+  // §5 LOCKED) — no new financial action may be taken on a Cancelled
+  // Order's Compensation. In the normal flow this can't actually be
+  // reached (cancel_order_with_disposition already Voided any Draft/
+  // Pending/Confirmed Compensation atomically with the Order transition),
+  // but this gate is the defense-in-depth backstop the Product Owner
+  // explicitly required at the service-layer boundary, not just relying
+  // on the RPC having already run.
+  if (order.order_status === "Cancelled") {
+    throw new CompensationRuleViolationError("Không thể xác nhận compensation của đơn hàng đã hủy");
+  }
   if (order.payment_status !== "Paid") {
     throw new CompensationRuleViolationError("Chỉ có thể xác nhận khi đơn hàng đã thanh toán đủ (Payment Status = Paid)");
   }
@@ -337,6 +348,19 @@ export async function handOffCompensation(
   if (!compensation) throw new CompensationRuleViolationError("Không tìm thấy compensation");
   if (compensation.status !== "Confirmed") {
     throw new CompensationRuleViolationError(`Không thể chuyển giao từ trạng thái "${compensation.status}"`);
+  }
+
+  // Compensation/Commission Void (Product Owner Authorization, 2026-08-20,
+  // §5 LOCKED) — same defense-in-depth gate as confirmCompensation above;
+  // this function had no `orders` lookup at all before this change.
+  const { data: order, error: orderError } = await client
+    .from("orders")
+    .select("order_status")
+    .eq("id", compensation.order_id)
+    .single();
+  if (orderError) throw orderError;
+  if (order.order_status === "Cancelled") {
+    throw new CompensationRuleViolationError("Không thể chuyển giao compensation của đơn hàng đã hủy");
   }
 
   const { data, error } = await client

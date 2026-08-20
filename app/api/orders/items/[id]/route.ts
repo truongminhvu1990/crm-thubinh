@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getOrderDetail } from "@/lib/orders/order.service";
 import { orderService } from "../../_service";
 import { handleOrderServiceError } from "../../_errors";
+import { createClient } from "@/lib/supabase/server";
 
 /** No order ID in this route's own path — per Product Owner decision,
  * order_id is required in the request body. actor = created_by, resolved
@@ -44,7 +45,11 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
-    await orderService.removeProductFromOrder(orderId, id, detail.order.created_by);
+    // D5 completion (Product Owner Authorization, 2026-08-19): see
+    // app/api/orders/[id]/items/route.ts's identical comment (this route
+    // has the same no-Permission-gate-but-session-gated shape).
+    const auditClient = await createClient();
+    await orderService.removeProductFromOrder(orderId, id, detail.order.created_by, auditClient);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     return handleOrderServiceError(error, request.headers.get("x-vercel-id") ?? crypto.randomUUID());

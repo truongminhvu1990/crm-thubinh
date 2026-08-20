@@ -1,4 +1,4 @@
-import { OrderItem, OrderPayment, OrderStatus, PaymentStatus } from "@/types/order";
+import { CancelOrderInput, OrderItem, OrderPayment, OrderStatus, PaymentStatus } from "@/types/order";
 
 // Shared business layer — pure rules and derived calculations only. No I/O,
 // no Supabase, no UI. Every rule traces to ORDERS_SPEC.md as cited inline.
@@ -63,11 +63,17 @@ export function derivePaymentStatus(totalAmount: number, paymentsSum: number): P
 // Lost, and there is no reverse action either).
 // ---------------------------------------------------------------------------
 
+// D12 Order Cancellation (Product Owner Authorization, 2026-08-19, Decision
+// C/LOCKED): Completed -> Cancelled is the ONLY new edge. Draft/Reserved
+// keep using Mark Lost as their own abandonment mechanism, unchanged -
+// Cancel does not apply to open orders. Cancelled itself is terminal (no
+// outgoing edges), same as Completed/Lost.
 const ALLOWED_ORDER_STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   Draft: ["Reserved", "Completed", "Lost"],
   Reserved: ["Draft", "Completed", "Lost"],
-  Completed: [],
+  Completed: ["Cancelled"],
   Lost: [],
+  Cancelled: [],
 };
 
 export function isValidOrderStatusTransition(from: OrderStatus, to: OrderStatus): boolean {
@@ -131,6 +137,49 @@ export function validateOrderCompletion(status: OrderStatus, itemCount: number):
 /** ORDERS_SPEC.md §4: Lost is only reachable from an open (Draft/Reserved) order. */
 export function validateMarkOrderLostTransition(status: OrderStatus): string | null {
   return canMarkOrderLost(status) ? null : "Chỉ có thể đánh dấu Lost khi đơn đang ở trạng thái Nháp hoặc Đã giữ hàng";
+}
+
+/** D12 Order Cancellation (Product Owner Authorization, 2026-08-19, Decision
+ * C/LOCKED): only a Completed order can be cancelled. */
+export function canCancelOrder(status: OrderStatus): boolean {
+  return isValidOrderStatusTransition(status, "Cancelled");
+}
+
+export function validateCancelOrderTransition(status: OrderStatus): string | null {
+  return canCancelOrder(status) ? null : "Chỉ có thể hủy đơn hàng đang ở trạng thái Hoàn thành";
+}
+
+/** Decision A (LOCKED): every order_item must have exactly one disposition -
+ * no default, no single Order-wide value. Rejects missing items, unknown/
+ * duplicate order_item_ids, and any order_item_id that isn't actually part
+ * of this order (defense in depth - cancel_order_with_disposition's own
+ * `order_id` check in the RPC is the real guarantee, this is the earlier,
+ * clearer-message check). */
+export function validateCancelOrderInput(
+  input: Pick<CancelOrderInput, "dispositions">,
+  orderItems: Pick<OrderItem, "id">[]
+): string | null {
+  const orderItemIds = new Set(orderItems.map((item) => item.id));
+  const seen = new Set<string>();
+
+  for (const d of input.dispositions) {
+    if (!orderItemIds.has(d.order_item_id)) {
+      return "Danh sách disposition chứa sản phẩm không thuộc đơn hàng này";
+    }
+    if (seen.has(d.order_item_id)) {
+      return "Mỗi sản phẩm chỉ được chọn disposition một lần";
+    }
+    if (d.disposition !== "Remaining" && d.disposition !== "Returned") {
+      return "Disposition không hợp lệ";
+    }
+    seen.add(d.order_item_id);
+  }
+
+  if (seen.size !== orderItemIds.size) {
+    return "Vui lòng chọn disposition (Còn lại / Trả NCC) cho tất cả sản phẩm trong đơn";
+  }
+
+  return null;
 }
 
 /** ORDERS_DATABASE.md §7: order deletion is "a data-integrity backstop, not

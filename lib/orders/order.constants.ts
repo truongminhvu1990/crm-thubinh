@@ -6,6 +6,7 @@ export const ORDER_STATUS: Option[] = [
   { value: "Reserved", label: "Đã giữ hàng" },
   { value: "Completed", label: "Hoàn thành" },
   { value: "Lost", label: "Đã mất" },
+  { value: "Cancelled", label: "Đã hủy" },
 ];
 
 export const PAYMENT_STATUS: Option[] = [
@@ -21,6 +22,7 @@ export const ORDER_STATUS_BADGE_VARIANT: Record<string, BadgeVariant> = {
   Reserved: "warning",
   Completed: "success",
   Lost: "destructive",
+  Cancelled: "destructive",
 };
 
 export const PAYMENT_STATUS_BADGE_VARIANT: Record<string, BadgeVariant> = {

@@ -10,6 +10,7 @@ import {
   canEditOrderItems,
   canCompleteOrder,
   canMarkOrderLost,
+  canCancelOrder,
   canAddPayment,
   validateOrderHasItems,
 } from "@/lib/orders/order.rules";
@@ -32,6 +33,7 @@ import AddPaymentModal from "@/components/order/AddPaymentModal";
 import OrderEventTimeline from "@/components/order/OrderEventTimeline";
 import MarkOrderLostModal from "@/components/order/MarkOrderLostModal";
 import ReassignSalesOwnerModal from "@/components/order/ReassignSalesOwnerModal";
+import CancelOrderModal from "@/components/order/CancelOrderModal";
 
 const currency = new Intl.NumberFormat("vi-VN", {
   style: "currency",
@@ -62,6 +64,7 @@ export default function OrderDetailPage() {
   const [isLostModalOpen, setIsLostModalOpen] = useState(false);
   const [isReassignModalOpen, setIsReassignModalOpen] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
 
   // Simple Profit Calculation Package, Part 2: Profit = Selling Price - Cost
   // Price, computed in memory only (never stored, no new column). "Selling
@@ -72,6 +75,13 @@ export default function OrderDetailPage() {
   // snapshots cost. Owner/Manager only (Part 6/4's same rule, reused here).
   const [orderProfit, setOrderProfit] = useState<number | null>(null);
   const canViewProfit = useIsOwnerOrManager();
+
+  // D12 Order Cancellation (Product Owner Authorization, 2026-08-19,
+  // Decision B, LOCKED) — Owner/Manager only, Sales cannot cancel. Client-
+  // side visibility only, same "server re-checks regardless" convention as
+  // isOwner/isDeletable below (authorizeOrderCancellation is the real
+  // boundary, app/api/orders/[id]/cancel/route.ts).
+  const canCancel = useIsOwnerOrManager();
 
   // Admin/Owner Full Order Control (Product Owner Decision, 2026-08-14) —
   // Owner bypasses the Draft/Unpaid-only Delete gate entirely (see
@@ -280,6 +290,7 @@ export default function OrderDetailPage() {
   const isCompletable = canCompleteOrder(order.order_status);
   const isLosable = canMarkOrderLost(order.order_status);
   const completeBlockedReason = isCompletable ? validateOrderHasItems(items.length) : null;
+  const isCancellable = canCancelOrder(order.order_status) && canCancel;
 
   return (
     <div className="pb-8">
@@ -314,6 +325,11 @@ export default function OrderDetailPage() {
                 <p className="text-xs text-destructive mt-1">{completeBlockedReason}</p>
               )}
             </div>
+          )}
+          {isCancellable && (
+            <Button data-testid="order-cancel-trigger-button" variant="danger" size="sm" onClick={() => setIsCancelModalOpen(true)}>
+              Hủy đơn
+            </Button>
           )}
           {isDeletable && (
             <Button data-testid="order-delete-trigger-button" variant="danger" size="sm" onClick={() => setIsDeleteConfirmOpen(true)}>
@@ -467,6 +483,17 @@ export default function OrderDetailPage() {
         onClose={() => setIsReassignModalOpen(false)}
         onSaved={() => {
           setIsReassignModalOpen(false);
+          loadOrder();
+        }}
+      />
+
+      <CancelOrderModal
+        open={isCancelModalOpen}
+        orderId={id}
+        items={items}
+        onClose={() => setIsCancelModalOpen(false)}
+        onSaved={() => {
+          setIsCancelModalOpen(false);
           loadOrder();
         }}
       />

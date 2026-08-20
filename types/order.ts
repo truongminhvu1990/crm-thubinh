@@ -1,4 +1,7 @@
-export type OrderStatus = "Draft" | "Reserved" | "Completed" | "Lost";
+export type OrderStatus = "Draft" | "Reserved" | "Completed" | "Lost" | "Cancelled";
+/** D12 Order Cancellation (Product Owner Authorization, 2026-08-19, Decision A/LOCKED) —
+ * chosen per Product/order_item, not once for the whole Order. */
+export type ProductDisposition = "Remaining" | "Returned";
 export type PaymentStatus = "Unpaid" | "Partially Paid" | "Paid";
 /** Product Owner Decision 12a/Business Rule (LOCKED) — the only two Methods
  * a user may pick for an Order's own Compensation. Not the same concept as
@@ -158,6 +161,15 @@ export interface AddPaymentInput {
 export interface MarkOrderLostInput {
   order_id: string;
   lost_reason: string;
+}
+
+/** D12 Order Cancellation. `dispositions` must cover every one of the
+ * order's own order_items exactly once (order.service.ts validates this
+ * before the write) - Product Owner Decision A (LOCKED): no default, no
+ * single Order-wide disposition. */
+export interface CancelOrderInput {
+  order_id: string;
+  dispositions: { order_item_id: string; disposition: ProductDisposition }[];
 }
 
 export interface ReassignSalesOwnerInput {

@@ -229,6 +229,7 @@ test("handOffCompensation: Confirmed -> Handed Off", async () => {
   const { handOffCompensation } = await import("./compensation.service");
   const { client } = makeClient({
     compensations: [{ data: { id: "comp-1", status: "Confirmed" } }, { data: { id: "comp-1", status: "Handed Off" } }],
+    orders: [{ data: { order_status: "Completed" } }],
   });
 
   const result = await handOffCompensation("comp-1", client);
@@ -238,6 +239,34 @@ test("handOffCompensation: Confirmed -> Handed Off", async () => {
 test("handOffCompensation: rejects when not Confirmed (e.g. still Pending, or already Handed Off)", async () => {
   const { handOffCompensation, CompensationRuleViolationError } = await import("./compensation.service");
   const { client } = makeClient({ compensations: [{ data: { id: "comp-1", status: "Pending" } }] });
+
+  await assert.rejects(() => handOffCompensation("comp-1", client), CompensationRuleViolationError);
+});
+
+// Compensation/Commission Void (Product Owner Authorization, 2026-08-20) —
+// Case 3 & Case 4: financial actions must reject on a Cancelled Order,
+// enforced at the service-layer boundary (defense-in-depth — in the normal
+// flow, cancel_order_with_disposition's own RPC has already Voided any
+// Draft/Pending/Confirmed Compensation atomically, so these two paths
+// exist for the case where that RPC hasn't run yet against this exact row
+// for any reason, never as the primary mechanism).
+
+test("Case 3: confirmCompensation rejects when the Order is Cancelled", async () => {
+  const { confirmCompensation, CompensationRuleViolationError } = await import("./compensation.service");
+  const { client } = makeClient({
+    compensations: [{ data: { id: "comp-1", status: "Pending", order_id: "order-1" } }],
+    orders: [{ data: { payment_status: "Paid", order_status: "Cancelled" } }],
+  });
+
+  await assert.rejects(() => confirmCompensation("comp-1", "staff-1", client), CompensationRuleViolationError);
+});
+
+test("Case 4: handOffCompensation rejects when the Order is Cancelled", async () => {
+  const { handOffCompensation, CompensationRuleViolationError } = await import("./compensation.service");
+  const { client } = makeClient({
+    compensations: [{ data: { id: "comp-1", status: "Confirmed", order_id: "order-1" } }],
+    orders: [{ data: { order_status: "Cancelled" } }],
+  });
 
   await assert.rejects(() => handOffCompensation("comp-1", client), CompensationRuleViolationError);
 });
