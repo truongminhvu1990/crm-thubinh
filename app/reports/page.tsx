@@ -183,6 +183,10 @@ export default function ReportsPage() {
     () => (batchStatic?.remainingCountByBatch || []).map((r) => ({ key: r.batchId, searchLabel: r.batchCode, cells: [r.batchCode, r.count] })),
     [batchStatic]
   );
+  const reservedCountRows: ReportsTableRow[] = useMemo(
+    () => (batchStatic?.reservedCountByBatch || []).map((r) => ({ key: r.batchId, searchLabel: r.batchCode, cells: [r.batchCode, r.count] })),
+    [batchStatic]
+  );
   const overdueRows: ReportsTableRow[] = useMemo(
     () =>
       (batchStatic?.overdueBatches || []).map((r) => ({
@@ -445,6 +449,14 @@ export default function ReportsPage() {
               headers={["Lô hàng", "Còn lại"]}
               rows={remainingCountRows}
               emptyLabel="Không có sản phẩm tồn theo lô"
+              searchPlaceholder="Tìm theo lô hàng..."
+            />
+            <ReportsTable
+              icon={<Hourglass className="w-5 h-5 text-primary" />}
+              title="Đang giữ đơn theo lô hàng"
+              headers={["Lô hàng", "Đang giữ đơn"]}
+              rows={reservedCountRows}
+              emptyLabel="Không có sản phẩm đang giữ đơn theo lô"
               searchPlaceholder="Tìm theo lô hàng..."
             />
             <ReportsTable

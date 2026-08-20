@@ -104,6 +104,11 @@ export interface BatchStaticReportData {
   productCountByBatch: BatchCountRow[];
   soldCountByBatch: BatchCountRow[];
   remainingCountByBatch: BatchCountRow[];
+  /** Lot Product-Level Status, D9 (LOCKED): a sub-count of remainingCountByBatch
+   * (Reserved products are already included there) - not a sibling total,
+   * exists only to break Reserved out for display without a second source
+   * of truth. */
+  reservedCountByBatch: BatchCountRow[];
   overdueBatches: OverdueBatchRow[];
 }
 
@@ -387,6 +392,7 @@ export async function getBatchStaticReportData(client: SupabaseClient = supabase
     productCountByBatch: [],
     soldCountByBatch: [],
     remainingCountByBatch: [],
+    reservedCountByBatch: [],
     overdueBatches: [],
   };
   if (batchesRes.error || !batchesRes.data) {
@@ -401,15 +407,20 @@ export async function getBatchStaticReportData(client: SupabaseClient = supabase
   const productCountMap = new Map<string, number>();
   const soldCountMap = new Map<string, number>();
   const remainingCountMap = new Map<string, number>();
+  const reservedCountMap = new Map<string, number>();
   for (const product of products) {
     if (!product.batch_id) continue;
     productCountMap.set(product.batch_id, (productCountMap.get(product.batch_id) || 0) + 1);
     // Sold vs. Remaining basis (REPORTS_SPEC.md §2): status === "Sold" -> Sold;
-    // anything except "Sold"/"Returned" -> Remaining.
+    // anything except "Sold"/"Returned" -> Remaining. Reserved (D6, LOCKED)
+    // is a sub-count of Remaining, not tallied separately here.
     if (product.status === "Sold") {
       soldCountMap.set(product.batch_id, (soldCountMap.get(product.batch_id) || 0) + 1);
     } else if (product.status !== "Returned") {
       remainingCountMap.set(product.batch_id, (remainingCountMap.get(product.batch_id) || 0) + 1);
+      if (product.status === "Reserved") {
+        reservedCountMap.set(product.batch_id, (reservedCountMap.get(product.batch_id) || 0) + 1);
+      }
     }
   }
 
@@ -445,6 +456,7 @@ export async function getBatchStaticReportData(client: SupabaseClient = supabase
     productCountByBatch: toCountRows(productCountMap),
     soldCountByBatch: toCountRows(soldCountMap),
     remainingCountByBatch: toCountRows(remainingCountMap),
+    reservedCountByBatch: toCountRows(reservedCountMap),
     overdueBatches,
   };
 }
