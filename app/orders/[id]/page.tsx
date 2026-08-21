@@ -16,7 +16,7 @@ import {
 import { getProducts, getProductById } from "@/lib/product.service";
 import { Product } from "@/types/product";
 import { ORDER_STATUS, PAYMENT_STATUS } from "@/lib/orders/order.constants";
-import { formatDate } from "@/lib/utils";
+import { BusinessTime } from "@/lib/businessTime";
 import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
 import { useIsOwner } from "@/lib/hooks/useIsOwner";
 import Button from "@/components/ui/Button";
@@ -343,7 +343,7 @@ export default function OrderDetailPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input
                 data-testid="order-date-input"
-                label="Ngày đặt hàng"
+                label="Ngày bán"
                 type="date"
                 value={orderDateDraft}
                 onChange={(e) => setOrderDateDraft(e.target.value)}
@@ -421,9 +421,9 @@ export default function OrderDetailPage() {
 
         {(order.created_at || order.updated_at) && (
           <p className="text-xs text-muted-foreground text-center">
-            {order.created_at && `Tạo lúc ${formatDate(order.created_at)}`}
+            {order.created_at && `Tạo lúc ${BusinessTime.formatDateTime(order.created_at)}`}
             {order.created_at && order.updated_at && " · "}
-            {order.updated_at && `Cập nhật lần cuối ${formatDate(order.updated_at)}`}
+            {order.updated_at && `Cập nhật lần cuối ${BusinessTime.formatDateTime(order.updated_at)}`}
           </p>
         )}
       </div>

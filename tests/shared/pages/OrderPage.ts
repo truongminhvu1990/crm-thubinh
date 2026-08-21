@@ -29,9 +29,14 @@ export class OrderPage extends BasePage {
 
   // --- Create page (/orders/new) ---
   readonly customerSearchInput = this.page.getByPlaceholder("Tìm theo tên hoặc số điện thoại...");
-  /** The only <select> on this page (Người phụ trách). */
-  readonly salesOwnerSelect = this.page.locator("select");
+  /** Người phụ trách - scoped by testid (not a bare `locator("select")`)
+   * since a Partner select can also be present on this page now. */
+  readonly salesOwnerSelect = this.page.getByTestId("order-sales-owner-select");
   readonly productSearchInput = this.page.getByPlaceholder("Tìm sản phẩm...");
+  /** Order Sale Date (Backdated Order support) - "Ngày bán *" on the
+   * creation form, distinct from the Detail page's own date[type=date]
+   * field (orderDateInput below, a different route). */
+  readonly orderDateCreateInput = this.page.getByTestId("order-create-date-input");
   readonly saveOrderButton = this.page.getByRole("button", { name: "Lưu đơn hàng" });
   readonly cancelCreateButton = this.page.getByRole("button", { name: "Hủy" });
   /** app/orders/new/page.tsx's `{cart.length > 0 && (...)}` summary block -
@@ -142,6 +147,10 @@ export class OrderPage extends BasePage {
 
   async setCartLineQuantity(productName: string, quantity: number) {
     await this.fieldByLabel(this.cartLine(productName), "Số lượng").fill(String(quantity));
+  }
+
+  async setOrderDateOnCreate(date: string) {
+    await this.orderDateCreateInput.fill(date);
   }
 
   async saveOrder() {

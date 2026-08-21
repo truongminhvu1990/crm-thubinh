@@ -68,10 +68,58 @@ test.describe("Orders - Order Creation", () => {
       expect(dbOrder!.sales_owner).toBe(salesOwner);
       expect(dbOrder!.order_status).toBe("Draft");
       expect(dbOrder!.payment_status).toBe("Unpaid");
-      // Business Time Migration, Wave 1 - order_date is server-computed
-      // (Vietnam business date), never client-supplied at creation; just
-      // confirm it's a real, non-empty date string, not its exact value.
+      // Order Sale Date (Backdated Order support) - the form defaults the
+      // "Ngày bán" field to today, and this test never overrides it, so
+      // order_date should equal today's Vietnam business date.
       expect(dbOrder!.order_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    } finally {
+      if (orderId) await deleteOrderRow(orderId);
+      await deleteProductRow(product.id!);
+      await deleteCustomerRow(customer.id!);
+    }
+  });
+
+  test("Create order with a backdated sale date keeps order_date and created_at independent", async ({ page }) => {
+    const customer = await createTestCustomer();
+    const product = await createTestProduct();
+    let orderId: string | undefined;
+    const backdatedSaleDate = "2026-08-15";
+
+    try {
+      await loginAsOwner(page);
+      const orders = new OrderPage(page);
+      await orders.gotoNew();
+      await orders.expectNewOrderFormOpened();
+
+      await orders.searchCustomer(customer.phone);
+      await orders.selectCustomerByName(customer.full_name);
+      await orders.selectFirstAvailableSalesOwner();
+      await orders.setOrderDateOnCreate(backdatedSaleDate);
+
+      await orders.searchProduct(product.product_code);
+      await orders.addProductToCart(product.product_name);
+
+      await orders.saveOrder();
+      await expect(page).toHaveURL(/\/orders\/[0-9a-f-]+$/);
+      await waitForLoading(page);
+
+      const orderNumber = (await page.getByRole("heading", { name: /^OD-/ }).textContent())!.trim();
+      const dbOrder = await getOrderByNumber(orderNumber);
+      expect(dbOrder).not.toBeNull();
+      orderId = dbOrder!.id;
+
+      // order_date is the entered backdated sale date...
+      expect(dbOrder!.order_date).toBe(backdatedSaleDate);
+      // ...while created_at (the real record-creation instant) stays "now",
+      // never overwritten to match the backdated sale date.
+      expect(dbOrder!.created_at).toBeTruthy();
+      expect(new Date(dbOrder!.created_at!).toISOString().slice(0, 10)).not.toBe(backdatedSaleDate);
+
+      // Order Detail must label the two dates distinctly, per Stage 21J -
+      // "Ngày bán" (sale date, in the header) vs "Tạo lúc ..." (created_at,
+      // the footer caption) - never the same label for both.
+      await expect(page.getByText("Ngày bán")).toBeVisible();
+      await expect(page.getByText(/^Tạo lúc /)).toBeVisible();
     } finally {
       if (orderId) await deleteOrderRow(orderId);
       await deleteProductRow(product.id!);

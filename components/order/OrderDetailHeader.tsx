@@ -68,7 +68,7 @@ export default function OrderDetailHeader({ order, isEditable = false, onReassig
           <span className="text-muted-foreground font-normal">{order.created_by}</span>
         </InfoItem>
 
-        <InfoItem icon={<CalendarDays className="w-4 h-4" />} label="Ngày tạo">
+        <InfoItem icon={<CalendarDays className="w-4 h-4" />} label="Ngày bán">
           {formatDate(order.order_date)}
         </InfoItem>
       </div>

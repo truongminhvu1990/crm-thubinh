@@ -117,6 +117,12 @@ export interface CreateOrderInput {
   customer_id: string;
   sales_owner: string;
   created_by: string;
+  /** Order Sale Date (Backdated Order support). The actual date the sale
+   * happened — independent of created_at (system record-creation time,
+   * always "now"). Optional: when omitted, order.repository.ts's
+   * createOrder() defaults it to today's Vietnam business date, same as
+   * before this field existed. */
+  order_date?: string;
 }
 
 export interface AddOrderItemInput {

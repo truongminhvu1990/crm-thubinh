@@ -319,18 +319,22 @@ function pickOrderWritableFields(changes: Partial<Order>): Partial<Order> {
   return filtered as Partial<Order>;
 }
 
-/** Business Time Migration, Wave 1: `order_date` is set explicitly here
- * (Vietnam business date, via BusinessTime) rather than left to the
+/** Business Time Migration, Wave 1: `order_date` defaults here (Vietnam
+ * business date, via BusinessTime) rather than left to the
  * `orders.order_date` column's own DB default — the column default still
  * exists (also migrated to Vietnam time, see
  * 20260805_business_time_orders_write_path.sql, defense-in-depth for any
- * non-app insert path) but this is now the one place that actually
- * determines the value for every order the app creates. `CreateOrderInput`
- * itself is unchanged — this is an internal repository detail, not a new
- * request field. */
+ * non-app insert path) but this is the one place that actually determines
+ * the value for every order the app creates.
+ *
+ * Order Sale Date (Backdated Order support): `CreateOrderInput.order_date`
+ * is now a real, optional request field — when the caller supplies it (a
+ * user entering a backdated sale), it wins over today's date. `created_at`
+ * is never touched by this — it stays the DB's own `now()` default,
+ * recording the real system-creation instant regardless of `order_date`. */
 export async function createOrder(input: CreateOrderInput): Promise<Order> {
   const order_number = await generateOrderNumber();
-  const order_date = BusinessTime.todayString();
+  const order_date = input.order_date || BusinessTime.todayString();
 
   const { data, error } = await supabase
     .from("orders")
