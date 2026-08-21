@@ -38,6 +38,21 @@ const FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "remaining", label: "Còn lại" },
 ];
 
+/** Return-to-Supplier eligibility (BR-003, LOCKED, 2026-08-21 - was
+ * `status === "Active"`; guard semantics unchanged, matches
+ * returnProductToSupplier()'s own `.in("status", ["Available", "Paused"])`
+ * guard exactly). Exported for testing, same reasoning as matchesFilter()
+ * above - no component-rendering test infrastructure in this repo. */
+export function canReturnToSupplier(status: string | undefined): boolean {
+  return status === "Available" || status === "Paused";
+}
+
+/** BR-003 (LOCKED, 2026-08-21): "returned"/"remaining" now key on
+ * returned_at, not the retired status === "Returned" literal - identical
+ * invariant to computeBatchCounts() (productBatch.service.ts) and
+ * getBatchStaticReportData() (reports.service.ts). An Archived product
+ * with returned_at NULL is never matched by "returned" and still counts
+ * as "remaining" - status = Archived alone never means Returned. */
 export function matchesFilter(product: Product, filter: StatusFilter): boolean {
   switch (filter) {
     case "all":
@@ -47,9 +62,9 @@ export function matchesFilter(product: Product, filter: StatusFilter): boolean {
     case "sold":
       return product.status === "Sold";
     case "returned":
-      return product.status === "Returned";
+      return !!product.returned_at;
     case "remaining":
-      return product.status !== "Sold" && product.status !== "Returned";
+      return product.status !== "Sold" && !product.returned_at;
   }
 }
 
@@ -133,7 +148,7 @@ export default function BatchProductsTable({ products, onReturnToSupplier, isLoa
             </thead>
             <tbody>
               {filteredProducts.map((product) => {
-                const canReturn = product.status === "Active" || product.status === "Paused";
+                const canReturn = canReturnToSupplier(product.status);
                 return (
                   <tr key={product.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                     <td className="px-5 py-3.5">

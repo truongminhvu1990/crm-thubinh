@@ -366,6 +366,10 @@ interface BatchRow {
 interface ProductBatchLinkRow {
   batch_id: string | null;
   status: string | null;
+  /** BR-003 (LOCKED, 2026-08-21) - the sole source of truth for whether a
+   * product was returned to supplier; the retired "Returned" status value
+   * is never checked (see the Remaining/Returned split below). */
+  returned_at: string | null;
 }
 
 interface BatchPurchaseRow {
@@ -384,7 +388,7 @@ interface BatchPurchaseRow {
 export async function getBatchStaticReportData(client: SupabaseClient = supabase): Promise<BatchStaticReportData> {
   const [batchesRes, productsRes] = await Promise.all([
     client.from("product_batches").select("id, batch_code, status, return_due_date"),
-    client.from("products").select("batch_id, status").not("batch_id", "is", null),
+    client.from("products").select("batch_id, status, returned_at").not("batch_id", "is", null),
   ]);
 
   const empty: BatchStaticReportData = {
@@ -412,11 +416,19 @@ export async function getBatchStaticReportData(client: SupabaseClient = supabase
     if (!product.batch_id) continue;
     productCountMap.set(product.batch_id, (productCountMap.get(product.batch_id) || 0) + 1);
     // Sold vs. Remaining basis (REPORTS_SPEC.md §2): status === "Sold" -> Sold;
-    // anything except "Sold"/"Returned" -> Remaining. Reserved (D6, LOCKED)
-    // is a sub-count of Remaining, not tallied separately here.
+    // anything else, EXCEPT a product returned to supplier, -> Remaining.
+    // Reserved (D6, LOCKED) is a sub-count of Remaining, not tallied
+    // separately here. BR-003 (LOCKED, 2026-08-21): "Returned" is retired
+    // as a status value - a returned-to-supplier product now reads
+    // status = "Archived", same as computeBatchCounts() (productBatch.
+    // service.ts), so "returned" is read from returned_at IS NOT NULL,
+    // never inferred from status alone. An Archived product with
+    // returned_at NULL (archived for any other reason) is NOT excluded
+    // here - it still counts as Remaining, matching computeBatchCounts()'s
+    // own invariant exactly.
     if (product.status === "Sold") {
       soldCountMap.set(product.batch_id, (soldCountMap.get(product.batch_id) || 0) + 1);
-    } else if (product.status !== "Returned") {
+    } else if (!product.returned_at) {
       remainingCountMap.set(product.batch_id, (remainingCountMap.get(product.batch_id) || 0) + 1);
       if (product.status === "Reserved") {
         reservedCountMap.set(product.batch_id, (reservedCountMap.get(product.batch_id) || 0) + 1);
