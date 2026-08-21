@@ -115,10 +115,12 @@ async function markProductSold(productId: string) {
   });
 }
 
+/** BR-003 (LOCKED, 2026-08-21) - reverts to "Available" (was "Active").
+ * Guard/audit/permissions behavior otherwise unchanged. */
 async function revertProduct(productId: string) {
   const { data: previous } = await supabase.from("products").select("status").eq("id", productId).maybeSingle();
 
-  const { error } = await supabase.from("products").update({ status: "Active" }).eq("id", productId);
+  const { error } = await supabase.from("products").update({ status: "Available" }).eq("id", productId);
   if (error) {
     console.error("Error reverting product after purchase change:", error);
     return;
@@ -129,7 +131,7 @@ async function revertProduct(productId: string) {
     tableName: "products",
     recordId: productId,
     before: previous?.status ?? null,
-    after: "Active",
+    after: "Available",
     actor: staff?.email ?? null,
   });
 }

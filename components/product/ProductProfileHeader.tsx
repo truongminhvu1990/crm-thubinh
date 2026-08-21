@@ -15,10 +15,11 @@ interface Props {
 }
 
 const STATUS_VARIANT: Record<string, "success" | "muted" | "destructive" | "default"> = {
-  Active: "success",
+  Available: "success",
   Paused: "muted",
   Sold: "default",
   Discontinued: "destructive",
+  Archived: "muted",
 };
 
 function sizeLabelFor(category?: string): string {
@@ -50,7 +51,7 @@ export default function ProductProfileHeader({ product, onEdit, coverImageUrl }:
               <h1 className="text-2xl font-bold text-foreground">{product.product_name}</h1>
               {product.status && (
                 <Badge variant={STATUS_VARIANT[product.status] || "muted"} className="text-sm px-2.5 py-0.5">
-                  {product.status === "Active" && <Gem className="w-3.5 h-3.5" />}
+                  {product.status === "Available" && <Gem className="w-3.5 h-3.5" />}
                   {labelFor(PRODUCT_STATUS, product.status) || product.status}
                 </Badge>
               )}

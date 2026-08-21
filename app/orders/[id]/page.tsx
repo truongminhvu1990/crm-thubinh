@@ -172,7 +172,8 @@ export default function OrderDetailPage() {
       setProductResults([]);
       return;
     }
-    setProductResults(await getProducts(value, undefined, "Active"));
+    // BR-003 (LOCKED, 2026-08-21) - was "Active".
+    setProductResults(await getProducts(value, undefined, "Available"));
   }
 
   async function handleAddItem(product: Product) {
