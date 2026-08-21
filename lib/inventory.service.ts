@@ -113,11 +113,12 @@ export type Availability = "available" | "reserved" | "unavailable";
  * product - that overrides whatever products.status currently says, since
  * Orders never writes back to Product (see docs/ORDERS_EXECUTION_READINESS.md
  * Blocker B) and this is exactly the gap Availability exists to surface.
- * Otherwise falls back to products.status: Active = available, anything
- * else (Paused/Sold/Discontinued/Returned) = unavailable. */
+ * Otherwise falls back to products.status: Available = available (BR-003,
+ * LOCKED, 2026-08-21 - was "Active"), anything else (Paused/Sold/
+ * Discontinued/Archived) = unavailable. */
 export function deriveAvailability(product: Product, links: ProductOrderLink[]): Availability {
   if (links.some((l) => OPEN_ORDER_STATUSES.includes(l.order_status))) return "reserved";
-  return product.status === "Active" ? "available" : "unavailable";
+  return product.status === "Available" ? "available" : "unavailable";
 }
 
 export interface VerificationFlag {
@@ -140,7 +141,7 @@ export function verifyProduct(product: Product, links: ProductOrderLink[]): Veri
       reason: `Có đơn hàng đã hoàn tất nhưng trạng thái sản phẩm chưa phải "Đã bán".`,
     });
   }
-  if (hasOpenOrder && product.status !== "Active" && product.status !== "Paused") {
+  if (hasOpenOrder && product.status !== "Available" && product.status !== "Paused") {
     flags.push({
       reason: `Đang có đơn hàng mở nhưng trạng thái sản phẩm là "${
         labelFor(PRODUCT_STATUS, product.status) || product.status || UNSPECIFIED

@@ -96,9 +96,13 @@ export async function createTestCustomer(overrides: Partial<Customer> = {}): Pro
  * calculations against.
  */
 export async function createTestProduct(overrides: Partial<Product> = {}): Promise<Product> {
+  // Explicit status (BR-003, LOCKED, 2026-08-21) - never rely on the
+  // products.status column default, which is a live-schema detail this
+  // test fixture must not depend on for correctness.
   const payload: Partial<Product> = {
     product_code: qaProductCode(),
     product_name: qaProductName(),
+    status: "Available",
     cost_price: 600_000,
     sale_price: 1_000_000,
     ...overrides,

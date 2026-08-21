@@ -48,7 +48,7 @@ export default function CustomerPurchaseHistory({ customer }: Props) {
     setIsLoading(true);
     const [purchaseData, productData] = await Promise.all([
       getPurchasesByCustomer(customer.id),
-      getProducts(undefined, undefined, "Active"),
+      getProducts(undefined, undefined, "Available"),
     ]);
     setPurchases(purchaseData);
     setProducts(productData);

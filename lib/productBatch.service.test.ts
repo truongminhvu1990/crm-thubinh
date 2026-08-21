@@ -21,7 +21,7 @@ import { mock } from "node:test";
  * Case 7: Reserved must be counted inside Remaining, exposed as its own
  * `reserved` sub-count (not a sibling total) for the "Đang giữ đơn" filter.
  */
-let nextProductsResult: { data: { status: string }[] | null; error: unknown } = { data: [], error: null };
+let nextProductsResult: { data: { status: string; returned_at?: string | null }[] | null; error: unknown } = { data: [], error: null };
 
 mock.module("@/lib/supabase", {
   namedExports: {
@@ -49,12 +49,12 @@ test("Case 1 + Case 7: getBatchStats - 3 Sold, 4 Returned, 2 Remaining, 1 Reserv
       { status: "Sold" },
       { status: "Sold" },
       { status: "Sold" },
-      { status: "Returned" },
-      { status: "Returned" },
-      { status: "Returned" },
-      { status: "Returned" },
-      { status: "Active" },
-      { status: "Active" },
+      { status: "Archived", returned_at: "2026-08-15T00:00:00Z" },
+      { status: "Archived", returned_at: "2026-08-16T00:00:00Z" },
+      { status: "Archived", returned_at: "2026-08-17T00:00:00Z" },
+      { status: "Archived", returned_at: "2026-08-18T00:00:00Z" },
+      { status: "Available" },
+      { status: "Available" },
       { status: "Reserved" },
     ],
     error: null,

@@ -782,7 +782,12 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
                 tableName: "products",
                 recordId: productId,
                 before: "Sold",
-                after: d.disposition === "Returned" ? "Returned" : "Active",
+                // BR-003 (LOCKED, 2026-08-21): "Returned" is retired as a
+                // status value - a Returned disposition now lands on
+                // "Archived" (same as cancel_order_with_disposition's own
+                // write, 2026082101), never inferred from this audit log
+                // entry alone (returned_at remains the source of truth).
+                after: d.disposition === "Returned" ? "Archived" : "Available",
                 actor,
               },
               auditClient

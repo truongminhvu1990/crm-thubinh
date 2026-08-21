@@ -153,16 +153,28 @@ export interface BatchStats extends BatchCounts {
 /**
  * Lot List Overview KPI (Product Owner Authorization, 2026-08-20, Section 2,
  * LOCKED): the ONE place Total/Sold/Returned/Remaining/Reserved are
- * computed from a batch's products.status rows - reused by both
+ * computed from a batch's products rows - reused by both
  * getBatchStats (single Lot, Lot Detail) and getBatchListStats (every Lot
  * at once, Lot List) so the two screens can never disagree about the
  * formula. Pure function, no I/O - each product row is one physical item,
  * never a stock quantity (see product.service.ts).
+ *
+ * BR-003 (LOCKED, 2026-08-21): "Returned" is retired as a status value -
+ * a returned product's status now reads "Archived", the same value any
+ * other archival reason would use. The Returned KPI bucket is therefore
+ * derived from returned_at IS NOT NULL, never from the status string -
+ * an Archived product with no returned_at is NOT counted as Returned.
+ * Safe against double-counting with `sold` by construction: no write path
+ * ever sets returned_at while status is still "Sold" (returnProductToSupplier
+ * only fires from Available/Paused; the D12 RPC's Returned disposition
+ * moves status off "Sold" to "Archived" in the same statement that sets
+ * returned_at) - so `sold` and this returned-derived bucket stay disjoint,
+ * and `remaining = total - sold - returned` still holds.
  */
-export function computeBatchCounts(rows: Pick<Product, "status">[]): BatchCounts {
+export function computeBatchCounts(rows: Pick<Product, "status" | "returned_at">[]): BatchCounts {
   const total = rows.length;
   const sold = rows.filter((p) => p.status === "Sold").length;
-  const returned = rows.filter((p) => p.status === "Returned").length;
+  const returned = rows.filter((p) => !!p.returned_at).length;
   const remaining = total - sold - returned;
   const reserved = rows.filter((p) => p.status === "Reserved").length;
   return { total, sold, returned, remaining, reserved };
@@ -210,7 +222,7 @@ function isRevenueRecognized(row: BatchRevenuePurchaseRow): boolean {
 export async function getBatchStats(batchId: string): Promise<BatchStats> {
   const { data: products, error: productsError } = await supabase
     .from("products")
-    .select("status")
+    .select("status, returned_at")
     .eq("batch_id", batchId);
 
   if (productsError || !products) {
@@ -218,7 +230,7 @@ export async function getBatchStats(batchId: string): Promise<BatchStats> {
     return { total: 0, sold: 0, returned: 0, remaining: 0, reserved: 0, revenue: 0 };
   }
 
-  const rows = products as Pick<Product, "status">[];
+  const rows = products as Pick<Product, "status" | "returned_at">[];
   const counts = computeBatchCounts(rows);
 
   const { data: purchases, error: purchasesError } = await supabase
@@ -249,7 +261,7 @@ export async function getBatchStats(batchId: string): Promise<BatchStats> {
 export async function getBatchListStats(): Promise<Map<string, BatchCounts>> {
   const { data: products, error } = await supabase
     .from("products")
-    .select("batch_id, status")
+    .select("batch_id, status, returned_at")
     .not("batch_id", "is", null);
 
   if (error) {
@@ -257,13 +269,13 @@ export async function getBatchListStats(): Promise<Map<string, BatchCounts>> {
     return new Map();
   }
 
-  const rowsByBatchId = new Map<string, Pick<Product, "status">[]>();
-  for (const row of (products || []) as { batch_id: string; status: string | null }[]) {
+  const rowsByBatchId = new Map<string, Pick<Product, "status" | "returned_at">[]>();
+  for (const row of (products || []) as { batch_id: string; status: string | null; returned_at: string | null }[]) {
     const existing = rowsByBatchId.get(row.batch_id);
     if (existing) {
-      existing.push({ status: row.status ?? undefined });
+      existing.push({ status: row.status ?? undefined, returned_at: row.returned_at ?? undefined });
     } else {
-      rowsByBatchId.set(row.batch_id, [{ status: row.status ?? undefined }]);
+      rowsByBatchId.set(row.batch_id, [{ status: row.status ?? undefined, returned_at: row.returned_at ?? undefined }]);
     }
   }
 

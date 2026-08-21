@@ -51,7 +51,7 @@ test.beforeEach(() => {
   loggedCalls.length = 0;
 });
 
-test("reserveProduct: with audit context, logs Active->Reserved via the given client", async () => {
+test("reserveProduct: with audit context, logs Available->Reserved via the given client (BR-003)", async () => {
   const { reserveProduct } = await import("./order.repository");
   await reserveProduct("product-1", { actor: "owner@test.local", client: fakeAuthedClient as never });
 
@@ -59,7 +59,7 @@ test("reserveProduct: with audit context, logs Active->Reserved via the given cl
   assert.deepEqual(loggedCalls[0].input, {
     tableName: "products",
     recordId: "product-1",
-    before: "Active",
+    before: "Available",
     after: "Reserved",
     actor: "owner@test.local",
   });
@@ -96,7 +96,7 @@ test("markProductSold: 0 rows matched (already not Reserved) - no audit entry fo
   assert.equal(loggedCalls.length, 0);
 });
 
-test("releaseProduct: with audit context, logs Reserved->Active", async () => {
+test("releaseProduct: with audit context, logs Reserved->Available (BR-003)", async () => {
   const { releaseProduct } = await import("./order.repository");
   await releaseProduct("product-1", { actor: "owner@test.local", client: fakeAuthedClient as never });
 
@@ -105,7 +105,7 @@ test("releaseProduct: with audit context, logs Reserved->Active", async () => {
     tableName: "products",
     recordId: "product-1",
     before: "Reserved",
-    after: "Active",
+    after: "Available",
     actor: "owner@test.local",
   });
 });

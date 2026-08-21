@@ -127,7 +127,7 @@ export async function getMatchingProducts(
   }
 
   function buildQuery(select: string) {
-    let q = supabase.from("products").select(select).eq("status", "Active");
+    let q = supabase.from("products").select(select).eq("status", "Available");
 
     const categoryOr = new Set(types);
     if (favoriteCategory) categoryOr.add(favoriteCategory);
@@ -414,16 +414,19 @@ export async function deleteProduct(id: string) {
     supabase.from("customer_purchases").select("id").eq("product_id", id).limit(1),
     supabase.from("order_items").select("id").eq("product_id", id).limit(1),
     supabase.from("compensations").select("id").eq("product_id", id).limit(1),
-    supabase.from("products").select("batch_id, status").eq("id", id).maybeSingle(),
+    supabase.from("products").select("batch_id, status, returned_at").eq("id", id).maybeSingle(),
   ]);
 
   const hasPurchaseHistory = (purchaseCheck.data?.length ?? 0) > 0;
   const hasOrderRelationship = (orderCheck.data?.length ?? 0) > 0;
   const hasCompensationHistory = (compensationCheck.data?.length ?? 0) > 0;
+  // BR-003: supplier-return history is read via returned_at, never a
+  // status literal - "Returned" is retired, status now reads "Archived"
+  // for a returned product, same as any other archival reason.
   const hasLotHistory =
     !!productCheck.data?.batch_id ||
     productCheck.data?.status === "Sold" ||
-    productCheck.data?.status === "Returned";
+    !!productCheck.data?.returned_at;
 
   if (hasPurchaseHistory || hasOrderRelationship || hasCompensationHistory || hasLotHistory) {
     const reasons: string[] = [];
@@ -445,20 +448,26 @@ export async function deleteProduct(id: string) {
 }
 
 /**
- * Lot Product-Level Status, D3/D6 (Product Owner Authorization, 2026-08-19).
- * Dedicated, narrow, WHERE-guarded function - same pattern already used by
- * lib/orders/order.repository.ts's reserveProduct/releaseProduct/
- * markProductSold - rather than exposing `returned_at` as a freely-writable
- * field through the generic updateProduct()/WRITABLE_FIELDS path. Sets
- * status and returned_at together, in one UPDATE, so the two can never
- * drift apart.
+ * Lot Product-Level Status, D3/D6 (Product Owner Authorization, 2026-08-19),
+ * status target updated by BR-003 (LOCKED, 2026-08-21). Dedicated, narrow,
+ * WHERE-guarded function - same pattern already used by lib/orders/order.
+ * repository.ts's reserveProduct/releaseProduct/markProductSold - rather
+ * than exposing `returned_at` as a freely-writable field through the
+ * generic updateProduct()/WRITABLE_FIELDS path. Sets status and
+ * returned_at together, in one UPDATE, so the two can never drift apart.
  *
- * Guarded to Active/Paused only, matching BatchProductsTable.tsx's existing
- * `canReturn` UI condition. Reserved -> Returned is deliberately NOT
- * allowed here (Decision 6 / Implementation Plan mục 8-9: a Reserved
+ * BR-003: "Returned" is retired as a status value - a returned product
+ * now lands on "Archived", the same value any other archival reason would
+ * use. returned_at remains the sole source of truth for the supplier-
+ * return fact; nothing may infer it from status = "Archived" alone (see
+ * computeBatchCounts()).
+ *
+ * Guarded to Available/Paused only, matching BatchProductsTable.tsx's
+ * existing `canReturn` UI condition. Reserved -> Archived is deliberately
+ * NOT allowed here (Decision 6 / Implementation Plan mục 8-9: a Reserved
  * product is held by an open Order, and how that Order should be handled
  * when its product is returned to the supplier is an unresolved Product
- * Owner decision, out of D1-D10 scope) - Sold/Discontinued/Returned are
+ * Owner decision, out of D1-D10 scope) - Sold/Discontinued/Archived are
  * excluded for the same "not a valid source status" reason the UI already
  * enforces.
  */
@@ -477,9 +486,9 @@ export async function returnProductToSupplier(productId: string, actor?: string 
 
   const { data, error } = await supabase
     .from("products")
-    .update({ status: "Returned", returned_at: returnedAt })
+    .update({ status: "Archived", returned_at: returnedAt })
     .eq("id", productId)
-    .in("status", ["Active", "Paused"])
+    .in("status", ["Available", "Paused"])
     .select()
     .single();
 
@@ -495,7 +504,7 @@ export async function returnProductToSupplier(productId: string, actor?: string 
     tableName: "products",
     recordId: productId,
     before: previous.status ?? null,
-    after: "Returned",
+    after: "Archived",
     actor,
   });
 

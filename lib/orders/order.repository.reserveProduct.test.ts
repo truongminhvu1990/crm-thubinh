@@ -45,18 +45,18 @@ test.beforeEach(() => {
   matchingRows = [{ id: "product-1" }];
 });
 
-test("Case 4: an Active product can be reserved (guard matches)", async () => {
+test("Case 4: an Available product can be reserved (guard matches, BR-003)", async () => {
   matchingRows = [{ id: "product-1" }];
 
   const { reserveProduct } = await import("./order.repository");
   await assert.doesNotReject(() => reserveProduct("product-1"));
 
   assert.equal(updateCalls.length, 1);
-  assert.equal(updateCalls[0].guardStatus, "Active", "must guard on WHERE status = 'Active'");
+  assert.equal(updateCalls[0].guardStatus, "Available", "must guard on WHERE status = 'Available'");
 });
 
-test("Case 4: a Returned product cannot be reserved (0 rows matched -> rejected, never reaches Sold)", async () => {
-  matchingRows = []; // status='Returned' never satisfies the WHERE status='Active' guard
+test("Case 4: an Archived (formerly Returned) product cannot be reserved (0 rows matched -> rejected, never reaches Sold)", async () => {
+  matchingRows = []; // status='Archived' never satisfies the WHERE status='Available' guard
 
   const { reserveProduct } = await import("./order.repository");
   await assert.rejects(() => reserveProduct("product-1"));

@@ -17,7 +17,7 @@ interface FakeState {
   customerPurchases: unknown[];
   orderItems: unknown[];
   compensations: unknown[];
-  product: { batch_id: string | null; status: string | null } | null;
+  product: { batch_id: string | null; status: string | null; returned_at?: string | null } | null;
 }
 
 const deleteCalls: string[] = [];
@@ -25,7 +25,7 @@ let state: FakeState = {
   customerPurchases: [],
   orderItems: [],
   compensations: [],
-  product: { batch_id: null, status: "Active" },
+  product: { batch_id: null, status: "Available" },
 };
 
 mock.module("@/lib/supabase", {
@@ -64,7 +64,7 @@ const NO_HISTORY: FakeState = {
   customerPurchases: [],
   orderItems: [],
   compensations: [],
-  product: { batch_id: null, status: "Active" },
+  product: { batch_id: null, status: "Available" },
 };
 
 test.beforeEach(() => {
@@ -100,7 +100,7 @@ test("Case 5c: Product with compensation history is blocked", async () => {
 });
 
 test("Case 5d: Product currently in a Lot (batch_id set) is blocked", async () => {
-  state = { ...NO_HISTORY, product: { batch_id: "batch-1", status: "Active" } };
+  state = { ...NO_HISTORY, product: { batch_id: "batch-1", status: "Available" } };
   const { deleteProduct } = await import("./product.service");
 
   const result = await deleteProduct("product-1");
@@ -108,8 +108,8 @@ test("Case 5d: Product currently in a Lot (batch_id set) is blocked", async () =
   assert.equal(deleteCalls.length, 0);
 });
 
-test("Case 5e: Product Returned (never sold, batch_id null) is still blocked - Lot history", async () => {
-  state = { ...NO_HISTORY, product: { batch_id: null, status: "Returned" } };
+test("Case 5e: Product returned to supplier (never sold, batch_id null) is still blocked - Lot history (BR-003: read via returned_at, not status)", async () => {
+  state = { ...NO_HISTORY, product: { batch_id: null, status: "Archived", returned_at: "2026-08-15T00:00:00.000Z" } };
   const { deleteProduct } = await import("./product.service");
 
   const result = await deleteProduct("product-1");

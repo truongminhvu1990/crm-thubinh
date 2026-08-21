@@ -25,10 +25,11 @@ const currency = new Intl.NumberFormat("vi-VN", {
 });
 
 const STATUS_VARIANT: Record<string, "success" | "muted" | "destructive" | "default"> = {
-  Active: "success",
+  Available: "success",
   Paused: "muted",
   Sold: "default",
   Discontinued: "destructive",
+  Archived: "muted",
 };
 
 /**

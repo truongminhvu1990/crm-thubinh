@@ -74,10 +74,11 @@ export default function CreateOrderPage() {
       setProductResults([]);
       return;
     }
-    // Active is the only currently-trustworthy "sellable" signal (Inventory
-    // Foundation Review: available/reserved/sold aren't wired to a real
-    // write path yet) — filtering on it, not on those counters.
-    setProductResults(await getProducts(value, undefined, "Active"));
+    // Available (BR-003, LOCKED, 2026-08-21 - was "Active") is the only
+    // currently-trustworthy "sellable" signal (Inventory Foundation Review:
+    // the legacy available/reserved/sold counters aren't wired to a real
+    // write path) — filtering on it, not on those counters.
+    setProductResults(await getProducts(value, undefined, "Available"));
   }
 
   function addToCart(product: Product) {

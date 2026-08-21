@@ -55,7 +55,7 @@ const SAMPLE_ROW: Record<string, string | number> = {
   product_code: "VD001",
   product_name: "Vòng tay ngọc bích",
   category: "Vòng tay",
-  status: "Active",
+  status: "Available",
   color: "Xanh lá",
   size: 15,
   weight: 20,

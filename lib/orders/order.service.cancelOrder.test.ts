@@ -131,7 +131,7 @@ test("Test 1: Completed order, one Product -> Remaining", async () => {
   assert.deepEqual(captured?.dispositions, [{ order_item_id: "item-1", disposition: "Remaining" }]);
 });
 
-test("Test 2 + Test 12: Completed order, one Product -> Returned (audit 'after' = Returned)", async () => {
+test("Test 2 + Test 12: Completed order, one Product -> Returned (audit 'after' = Archived, BR-003)", async () => {
   const { createOrderService } = await import("./order.service");
   const repository = makeRepository();
 
@@ -147,12 +147,12 @@ test("Test 2 + Test 12: Completed order, one Product -> Returned (audit 'after' 
     tableName: "products",
     recordId: "product-1",
     before: "Sold",
-    after: "Returned",
+    after: "Archived",
     actor: "actor",
   });
 });
 
-test("Test 13: Remaining disposition logs after = Active (never Returned) - returned_at is the RPC's job, not this layer's", async () => {
+test("Test 13: Remaining disposition logs after = Available (never Archived/Returned) - returned_at is the RPC's job, not this layer's (BR-003)", async () => {
   const { createOrderService } = await import("./order.service");
   const repository = makeRepository();
 
@@ -163,7 +163,7 @@ test("Test 13: Remaining disposition logs after = Active (never Returned) - retu
   );
 
   const productLog = loggedCalls.find((c) => (c.input as { tableName: string }).tableName === "products");
-  assert.equal((productLog!.input as { after: string }).after, "Active");
+  assert.equal((productLog!.input as { after: string }).after, "Available");
 });
 
 test("Test 4: multi-product Order, mixed disposition - each Product logged with its own choice", async () => {
@@ -191,7 +191,7 @@ test("Test 4: multi-product Order, mixed disposition - each Product logged with 
   const productLogs = loggedCalls.filter((c) => (c.input as { tableName: string }).tableName === "products");
   assert.equal(productLogs.length, 3);
   const byProduct = Object.fromEntries(productLogs.map((c) => [(c.input as { recordId: string }).recordId, (c.input as { after: string }).after]));
-  assert.deepEqual(byProduct, { "product-A": "Active", "product-B": "Returned", "product-C": "Active" });
+  assert.deepEqual(byProduct, { "product-A": "Available", "product-B": "Archived", "product-C": "Available" });
 });
 
 test("Test 4: multi-product Order missing a disposition for one item is rejected before any write", async () => {

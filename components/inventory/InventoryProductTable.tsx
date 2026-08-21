@@ -33,10 +33,11 @@ const currency = new Intl.NumberFormat("vi-VN", {
 });
 
 const STATUS_VARIANT: Record<string, "success" | "muted" | "destructive" | "default"> = {
-  Active: "success",
+  Available: "success",
   Paused: "muted",
   Sold: "default",
   Discontinued: "destructive",
+  Archived: "muted",
 };
 
 /** Read-only - no Edit/Delete anywhere (Spec: Explicitly Out of Scope).
@@ -133,7 +134,7 @@ export default function InventoryProductTable({
               <td className="px-5 py-3.5 text-sm">
                 {product.status ? (
                   <Badge variant={STATUS_VARIANT[product.status] || "muted"}>
-                    {product.status === "Active" && <Gem className="w-3 h-3" />}
+                    {product.status === "Available" && <Gem className="w-3 h-3" />}
                     {labelFor(PRODUCT_STATUS, product.status) || product.status}
                   </Badge>
                 ) : (

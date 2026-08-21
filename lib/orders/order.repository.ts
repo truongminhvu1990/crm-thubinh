@@ -903,7 +903,8 @@ function logMissingAuditContext(fn: string, productId: string): void {
   );
 }
 
-/** Available → Reserved. Guarded on `status = 'Active'`, which is what makes
+/** Available → Reserved. Guarded on `status = 'Available'` (BR-003, LOCKED,
+ * 2026-08-21 - was `'Active'`), which is what makes
  * this the actual concurrency check ORDERS_SPEC.md §9/§17 requires: if
  * another order already holds this product (or it isn't sellable for any
  * other reason), the guard matches 0 rows and this throws instead of
@@ -913,7 +914,7 @@ export async function reserveProduct(productId: string, audit?: OrderAuditContex
     .from("products")
     .update({ status: "Reserved" })
     .eq("id", productId)
-    .eq("status", "Active")
+    .eq("status", "Available")
     .select("id");
 
   if (error) {
@@ -921,14 +922,14 @@ export async function reserveProduct(productId: string, audit?: OrderAuditContex
   }
   if (!data || data.length === 0) {
     throw new OrderRepositoryError("reserveProduct", {
-      message: "Product is not Active (already reserved by another order, or not sellable)",
+      message: "Product is not Available (already reserved by another order, or not sellable)",
       code: "PRODUCT_NOT_AVAILABLE",
     });
   }
 
   if (audit) {
     await logStatusChange(
-      { tableName: "products", recordId: productId, before: "Active", after: "Reserved", actor: audit.actor },
+      { tableName: "products", recordId: productId, before: "Available", after: "Reserved", actor: audit.actor },
       audit.client
     );
   } else {
@@ -936,7 +937,7 @@ export async function reserveProduct(productId: string, audit?: OrderAuditContex
   }
 }
 
-/** Reserved → Active. Fires on "order marked Lost" (ORDERS_SPEC.md §7) and
+/** Reserved → Available (BR-003, LOCKED, 2026-08-21 - was `'Active'`). Fires on "order marked Lost" (ORDERS_SPEC.md §7) and
  * is also the necessary counterpart of reserveProduct for removing a line
  * item or deleting a Draft order before completion — without this, a
  * product taken out of an order would stay Reserved forever with no order
@@ -946,7 +947,7 @@ export async function reserveProduct(productId: string, audit?: OrderAuditContex
 export async function releaseProduct(productId: string, audit?: OrderAuditContext): Promise<void> {
   const { data, error } = await supabase
     .from("products")
-    .update({ status: "Active" })
+    .update({ status: "Available" })
     .eq("id", productId)
     .eq("status", "Reserved")
     .select("id");
@@ -962,7 +963,7 @@ export async function releaseProduct(productId: string, audit?: OrderAuditContex
 
   if (audit) {
     await logStatusChange(
-      { tableName: "products", recordId: productId, before: "Reserved", after: "Active", actor: audit.actor },
+      { tableName: "products", recordId: productId, before: "Reserved", after: "Available", actor: audit.actor },
       audit.client
     );
   } else {
