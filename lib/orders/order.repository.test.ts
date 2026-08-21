@@ -51,10 +51,14 @@ function createFakeSupabase(existingRowCount: number, selectCalls: FakeSelectCal
   };
 }
 
-test("generateOrderNumber (via createOrder): sequence and query shape", async (t) => {
-  const selectCalls: FakeSelectCall[] = [];
-  mock.module("@/lib/supabase", { namedExports: createFakeSupabase(3, selectCalls) });
+// Mocked once at module scope (not inside a test body) so every test() in
+// this file can import order.repository against the same fake — node:test's
+// mock.module() rejects mocking the same specifier twice within one process,
+// and this file's tests all run in that one process.
+const selectCalls: FakeSelectCall[] = [];
+mock.module("@/lib/supabase", { namedExports: createFakeSupabase(3, selectCalls) });
 
+test("generateOrderNumber (via createOrder): sequence and query shape", async (t) => {
   const { createOrder } = await import("./order.repository");
 
   const order = await createOrder({
@@ -85,4 +89,25 @@ test("generateOrderNumber (via createOrder): sequence and query shape", async (t
     assert.equal(selectCalls[0].options?.head, undefined);
     assert.equal(selectCalls[0].options?.count, undefined);
   });
+});
+
+/**
+ * Order Sale Date (Backdated Order support) — createOrder() must honor a
+ * caller-supplied order_date (a user entering a backdated sale) instead of
+ * always defaulting to today's Vietnam business date. Omitting order_date
+ * entirely (existing call sites, e.g. the test above) must keep defaulting
+ * to today — that behavior is unchanged and already covered above.
+ */
+test("createOrder: honors a caller-supplied order_date over today's business date", async () => {
+  const { createOrder } = await import("./order.repository");
+
+  const backdatedSaleDate = "2026-08-15";
+  const order = await createOrder({
+    customer_id: "customer-1",
+    sales_owner: "Jane",
+    created_by: "Jane",
+    order_date: backdatedSaleDate,
+  });
+
+  assert.equal(order.order_date, backdatedSaleDate);
 });

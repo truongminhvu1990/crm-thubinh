@@ -9,6 +9,7 @@ import { Customer } from "@/types/customer";
 import { Product } from "@/types/product";
 import { calculateDiscountTotal, calculateSubtotal, calculateTotalAmount } from "@/lib/orders/order.rules";
 import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
+import { BusinessTime } from "@/lib/businessTime";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
@@ -44,6 +45,11 @@ export default function CreateOrderPage() {
   const [customerResults, setCustomerResults] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [salesOwner, setSalesOwner] = useState("");
+  /** Order Sale Date (Backdated Order support) — defaults to today (Vietnam
+   * business date, same source order.repository.ts's own default uses), but
+   * unlike created_at this is editable: the user can pick an earlier date
+   * for a sale that actually happened before today. */
+  const [orderDate, setOrderDate] = useState(BusinessTime.todayString());
 
   const [productSearch, setProductSearch] = useState("");
   const [productResults, setProductResults] = useState<Product[]>([]);
@@ -122,6 +128,10 @@ export default function CreateOrderPage() {
       setError("Vui lòng chọn người phụ trách");
       return;
     }
+    if (!orderDate) {
+      setError("Vui lòng chọn ngày bán");
+      return;
+    }
     if (cart.length === 0) {
       setError("Vui lòng thêm ít nhất một sản phẩm");
       return;
@@ -136,6 +146,7 @@ export default function CreateOrderPage() {
           customer_id: selectedCustomer.id,
           sales_owner: salesOwner,
           created_by: salesOwner,
+          order_date: orderDate,
         }),
       });
       if (!orderRes.ok) {
@@ -209,7 +220,7 @@ export default function CreateOrderPage() {
             )}
           </div>
 
-          <div className="mt-4">
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Select
               data-testid="order-sales-owner-select"
               label="Người phụ trách *"
@@ -217,6 +228,13 @@ export default function CreateOrderPage() {
               options={salesOwnerOptions}
               value={salesOwner}
               onChange={(e) => setSalesOwner(e.target.value)}
+            />
+            <Input
+              data-testid="order-create-date-input"
+              label="Ngày bán *"
+              type="date"
+              value={orderDate}
+              onChange={(e) => setOrderDate(e.target.value)}
             />
           </div>
         </Card>
