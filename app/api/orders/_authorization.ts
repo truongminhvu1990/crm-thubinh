@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { Staff } from "@/types/staff";
 import { Order } from "@/types/order";
 import { Role } from "@/types/permissionCenter";
-import { getCurrentStaffFromRequest } from "@/lib/permission/serverAuth";
+import { getCurrentStaffFromRequest, createRequestClient } from "@/lib/permission/serverAuth";
 import { resolveRoleForStaff } from "@/lib/permission/permissionCenter.service";
 import { getStaffByTeam } from "@/lib/permission/permissionCenter.repository";
+import { SupabaseClient } from "@supabase/supabase-js";
 
 /** Authorization Engine V2 (Package 4A) — enforces Authentication, Permission,
  * and Data Scope for the 5 named Orders write endpoints (Complete, Record
@@ -56,7 +57,12 @@ function normalizeName(name: string): string {
   return name.trim().toLowerCase();
 }
 
-async function isOrderInWriteScope(order: Order, staff: Staff, scope: OrderWriteScope): Promise<boolean> {
+async function isOrderInWriteScope(
+  order: Order,
+  staff: Staff,
+  scope: OrderWriteScope,
+  client: SupabaseClient
+): Promise<boolean> {
   if (scope === "all") return true;
 
   if (scope === "own") {
@@ -64,7 +70,7 @@ async function isOrderInWriteScope(order: Order, staff: Staff, scope: OrderWrite
   }
 
   // scope === "team"
-  const teammates = staff.team_id ? await getStaffByTeam(staff.team_id) : [];
+  const teammates = staff.team_id ? await getStaffByTeam(staff.team_id, client) : [];
   const names = teammates.length > 0 ? teammates.map((s) => s.full_name) : [staff.full_name];
   return names.some((name) => normalizeName(name) === normalizeName(order.sales_owner));
 }
@@ -90,15 +96,17 @@ export async function authorizeOrderWrite(
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
 
+  const client = createRequestClient(request);
+
   // 2. Permission — does this role have any Orders write access at all?
-  const role = await resolveRoleForStaff(staff);
+  const role = await resolveRoleForStaff(staff, client);
   const scope = role ? ORDERS_WRITE_SCOPE_BY_ROLE_KEY[role.role_key] : undefined;
   if (!scope || !role) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
 
   // 3. Data Scope — does this specific order fall within the role's scope?
-  const inScope = await isOrderInWriteScope(order, staff, scope);
+  const inScope = await isOrderInWriteScope(order, staff, scope, client);
   if (!inScope) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
@@ -133,7 +141,7 @@ export async function authorizeOrderCancellation(
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
 
-  const role = await resolveRoleForStaff(staff);
+  const role = await resolveRoleForStaff(staff, createRequestClient(request));
   if (role?.role_key !== "Owner" && role?.role_key !== "Manager") {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Staff } from "@/types/staff";
-import { getCurrentStaffFromRequest } from "@/lib/permission/serverAuth";
+import { getCurrentStaffFromRequest, createRequestClient } from "@/lib/permission/serverAuth";
 import { resolveRoleForStaff } from "@/lib/permission/permissionCenter.service";
 
 /** Expense Management (Product Owner Decision, 2026-07-28): Owner = Full
@@ -19,7 +19,7 @@ export async function authorizeExpenseWrite(request: NextRequest): Promise<{ sta
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
 
-  const role = await resolveRoleForStaff(staff);
+  const role = await resolveRoleForStaff(staff, createRequestClient(request));
   if (!role || !EXPENSE_WRITE_ROLE_KEYS.has(role.role_key)) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }

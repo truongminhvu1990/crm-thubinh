@@ -1,3 +1,4 @@
+import { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "../supabase";
 import { Staff } from "@/types/staff";
 import { logActivity } from "../activityLog.service";
@@ -22,21 +23,34 @@ import { getCachedPermissions, setCachedPermissions, invalidatePermissionCache }
 
 /** DB §10 step 2: prefer staff.role_id (a real FK) when set; otherwise
  * fall back to matching legacy staff.role text against roles.role_key
- * (Decision 10). Only active roles resolve. */
-export async function resolveRoleForStaff(staff: Pick<Staff, "role" | "role_id">): Promise<Role | null> {
+ * (Decision 10). Only active roles resolve.
+ *
+ * Authorization Resolution Client Propagation (Production Incident
+ * Investigation, 2026-08-23) - `client` defaults to the browser Supabase
+ * client (unauthenticated when this runs server-side) purely for backward
+ * compatibility with any not-yet-updated caller. Server-side callers
+ * (serverAuth.ts, dataScope.ts's apply*Scope helpers) now pass the
+ * request's real authenticated client - required because Production RLS on
+ * `roles`/`permissions`/`role_permissions`/`role_data_scopes`/`staff`
+ * grants no access to the anon role, so the default client silently
+ * resolves every staff member to "no role" otherwise. */
+export async function resolveRoleForStaff(
+  staff: Pick<Staff, "role" | "role_id">,
+  client?: SupabaseClient
+): Promise<Role | null> {
   if (staff.role_id) {
-    const role = await repo.getRoleById(staff.role_id);
+    const role = await repo.getRoleById(staff.role_id, client);
     return role && role.is_active ? role : null;
   }
-  const roles = await repo.getRoles();
+  const roles = await repo.getRoles(client);
   const matched = roles.find((r) => r.role_key === staff.role && r.is_active);
   return matched || null;
 }
 
 /** DB §10 step 3-4: the full set of permission_key values a role currently
  * holds (active permissions only). */
-export async function getGrantedPermissionKeys(roleId: string): Promise<Set<string>> {
-  const [rolePermissions, permissions] = await Promise.all([repo.getRolePermissions(), repo.getPermissions()]);
+export async function getGrantedPermissionKeys(roleId: string, client?: SupabaseClient): Promise<Set<string>> {
+  const [rolePermissions, permissions] = await Promise.all([repo.getRolePermissions(client), repo.getPermissions(client)]);
   const activePermissionIds = new Set(permissions.filter((p) => p.is_active).map((p) => p.id));
   const permissionById = new Map(permissions.map((p) => [p.id, p]));
 
@@ -55,16 +69,23 @@ export async function getGrantedPermissionKeys(roleId: string): Promise<Set<stri
  * Permission Cache (Decision 21) - session-scoped (keyed by staff.id),
  * 60s TTL, invalidated on any Role/Permission write (see write operations
  * below) - this is the hot path every protected endpoint calls on every
- * request, so it's the one worth caching. */
-export async function resolveStaffPermissions(staff: Pick<Staff, "id" | "role" | "role_id">): Promise<{
+ * request, so it's the one worth caching. Cache key is staff.id only -
+ * which client resolved a cached entry doesn't matter, since the
+ * underlying data is the same regardless. */
+export async function resolveStaffPermissions(
+  staff: Pick<Staff, "id" | "role" | "role_id">,
+  client?: SupabaseClient
+): Promise<{
   role: Role | null;
   permissionKeys: Set<string>;
 }> {
   const cached = getCachedPermissions(staff.id);
   if (cached) return cached;
 
-  const role = await resolveRoleForStaff(staff);
-  const result = role ? { role, permissionKeys: await getGrantedPermissionKeys(role.id) } : { role: null, permissionKeys: new Set<string>() };
+  const role = await resolveRoleForStaff(staff, client);
+  const result = role
+    ? { role, permissionKeys: await getGrantedPermissionKeys(role.id, client) }
+    : { role: null, permissionKeys: new Set<string>() };
 
   setCachedPermissions(staff.id, result.role, result.permissionKeys);
   return result;
@@ -72,9 +93,10 @@ export async function resolveStaffPermissions(staff: Pick<Staff, "id" | "role" |
 
 export async function staffHasPermission(
   staff: Pick<Staff, "id" | "role" | "role_id">,
-  permissionKey: string
+  permissionKey: string,
+  client?: SupabaseClient
 ): Promise<boolean> {
-  const { permissionKeys } = await resolveStaffPermissions(staff);
+  const { permissionKeys } = await resolveStaffPermissions(staff, client);
   return permissionKeys.has(permissionKey);
 }
 
@@ -82,8 +104,12 @@ export async function staffHasPermission(
  * one role + one resource. No row ⇒ no defined scope (null), matching
  * DB §13's "no row ⇒ no defined scope" statement - callers decide the
  * default-deny/default-allow behavior for that case themselves. */
-export async function getResolvedDataScope(roleId: string, resource: DataScopeResource): Promise<DataScope | null> {
-  const scopes = await repo.getRoleDataScopes();
+export async function getResolvedDataScope(
+  roleId: string,
+  resource: DataScopeResource,
+  client?: SupabaseClient
+): Promise<DataScope | null> {
+  const scopes = await repo.getRoleDataScopes(client);
   const match = scopes.find((s) => s.role_id === roleId && s.resource === resource);
   return match?.scope ?? null;
 }
@@ -91,9 +117,9 @@ export async function getResolvedDataScope(roleId: string, resource: DataScopeRe
 /** Field Visibility Model (DB §14): which of the 5 sensitive fields a
  * role's currently-granted permissions unlock - role's granted permissions
  * ∩ permission_sensitive_fields.permission_key → resulting field_key set. */
-export async function getVisibleSensitiveFields(roleId: string): Promise<Set<SensitiveFieldKey>> {
+export async function getVisibleSensitiveFields(roleId: string, client?: SupabaseClient): Promise<Set<SensitiveFieldKey>> {
   const [permissionKeys, pairings] = await Promise.all([
-    getGrantedPermissionKeys(roleId),
+    getGrantedPermissionKeys(roleId, client),
     repo.getSensitiveFieldPairings(),
   ]);
   const fields = new Set<SensitiveFieldKey>();

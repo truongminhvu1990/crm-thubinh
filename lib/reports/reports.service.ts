@@ -258,7 +258,7 @@ export async function getPurchaseReportData(
 
   const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
   if (resolvedStaff) {
-    query = (await applyDataScopeWithFallback(query, resolvedStaff, "revenue", "salesperson_id", "salesperson")).query;
+    query = (await applyDataScopeWithFallback(query, resolvedStaff, "revenue", "salesperson_id", "salesperson", client)).query;
   }
 
   const { data, error } = await query;

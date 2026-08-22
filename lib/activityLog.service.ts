@@ -1,5 +1,7 @@
+import { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import { ActivityLog } from "@/types/activityLog";
+import { Staff } from "@/types/staff";
 import { getCurrentStaff } from "@/lib/permission";
 import { applyActivityLogScope } from "@/lib/permission/dataScope";
 
@@ -69,14 +71,19 @@ export async function getActivityLogsByEntity(entity: string, entityId: string, 
  * compatible in practice for this function's one existing caller (the Ops
  * Console's Audit Overview, gated Owner-only) - Owner's scope is "all," so
  * this is a no-op for that caller today. */
-export async function getActivityLogsByEntityType(entity: string, limit = 200): Promise<ActivityLog[]> {
-  let query = supabase
+export async function getActivityLogsByEntityType(
+  entity: string,
+  limit = 200,
+  client: SupabaseClient = supabase,
+  staff?: Staff | null
+): Promise<ActivityLog[]> {
+  let query = client
     .from("activity_logs")
     .select("*, staff:staff(full_name, staff_code)")
     .eq("entity", entity);
 
-  const staff = await getCurrentStaff();
-  if (staff) query = (await applyActivityLogScope(query, staff, "staff_id")).query;
+  const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
+  if (resolvedStaff) query = (await applyActivityLogScope(query, resolvedStaff, "staff_id", client)).query;
 
   const { data, error } = await query.order("created_at", { ascending: false }).limit(limit);
 

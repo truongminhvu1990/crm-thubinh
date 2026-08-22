@@ -167,7 +167,7 @@ export async function findAllOrders(staff?: ScopingStaff, client: SupabaseClient
     .from("orders")
     .select(`${WITH_CUSTOMER}, order_items(count)`);
 
-  if (staff) query = (await applyDataScopeByName(query, staff, "orders", "sales_owner")).query;
+  if (staff) query = (await applyDataScopeByName(query, staff, "orders", "sales_owner", client)).query;
 
   const { data, error } = await query
     .order("order_date", { ascending: false })
@@ -186,7 +186,7 @@ export async function findAllOrders(staff?: ScopingStaff, client: SupabaseClient
 export async function findOrderById(id: string, staff?: ScopingStaff, client: SupabaseClient = supabase): Promise<Order | null> {
   let query = client.from("orders").select(WITH_CUSTOMER).eq("id", id);
 
-  if (staff) query = (await applyDataScopeByName(query, staff, "orders", "sales_owner")).query;
+  if (staff) query = (await applyDataScopeByName(query, staff, "orders", "sales_owner", client)).query;
 
   const { data, error } = await query.single();
 

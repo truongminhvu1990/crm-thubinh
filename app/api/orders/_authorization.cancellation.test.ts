@@ -16,6 +16,11 @@ let roleResult: { role_key: string } | null = { role_key: "Owner" };
 mock.module("@/lib/permission/serverAuth", {
   namedExports: {
     getCurrentStaffFromRequest: async () => staffResult,
+    // Authorization Resolution Client Propagation (2026-08-23) - the real
+    // createRequestClient builds a cookie-authenticated Supabase client;
+    // resolveRoleForStaff is itself mocked below and ignores its client
+    // argument entirely, so a dummy value is sufficient here.
+    createRequestClient: () => ({}),
   },
 });
 mock.module("@/lib/permission/permissionCenter.service", {

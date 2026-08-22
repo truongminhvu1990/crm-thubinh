@@ -211,8 +211,14 @@ function resolveMonthRange(month: string): { start: string; end: string } {
 // exactly the trap lib/permission/dataScope.ts's applyDataScope() comment
 // documents (and wraps around) for the same reason. Callers must unwrap
 // `.query`.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function applyFilters(query: any, filters: MonthlySoldProductsFilters, staff?: Staff | null): Promise<{ query: any }> {
+async function applyFilters(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  query: any,
+  filters: MonthlySoldProductsFilters,
+  staff?: Staff | null,
+  client?: SupabaseClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<{ query: any }> {
   const monthRange = filters.month ? resolveMonthRange(filters.month) : null;
   const dateFrom = monthRange?.start ?? filters.dateFrom;
   const dateTo = monthRange?.end ?? filters.dateTo;
@@ -233,7 +239,7 @@ async function applyFilters(query: any, filters: MonthlySoldProductsFilters, sta
   // unscoped surface.
   const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
   if (resolvedStaff) {
-    query = (await applyDataScopeWithFallback(query, resolvedStaff, "revenue", "salesperson_id", "salesperson")).query;
+    query = (await applyDataScopeWithFallback(query, resolvedStaff, "revenue", "salesperson_id", "salesperson", client)).query;
   }
 
   return { query };
@@ -248,7 +254,7 @@ export async function getMonthlySoldProductsPage(
   staff?: Staff | null
 ): Promise<MonthlySoldProductsPage> {
   let query = client.from("sales_ledger").select(PAGE_COLUMNS, { count: "exact" });
-  query = (await applyFilters(query, filters, staff)).query;
+  query = (await applyFilters(query, filters, staff, client)).query;
   query = query.order("sale_date", { ascending: false });
 
   const from = (filters.page - 1) * MONTHLY_SOLD_PRODUCTS_PAGE_SIZE;
@@ -304,7 +310,7 @@ export async function getMonthlySoldProductsAggregateRows(
   staff?: Staff | null
 ): Promise<{ source: AggregateSourceRow[]; derivedByPurchaseId: Map<string, DerivedFields> }> {
   let query = client.from("sales_ledger").select("purchase_id, product_id, customer_id, sale_amount, is_revenue_recognized");
-  query = (await applyFilters(query, filters, staff)).query;
+  query = (await applyFilters(query, filters, staff, client)).query;
 
   const { data, error } = await query;
   if (error) {

@@ -30,7 +30,7 @@ export async function getCommissionBySalesperson(
     query = query.gte("created_at", range.start).lt("created_at", range.end);
   }
   if (staff) {
-    query = (await applyDataScopeWithFallback(query, staff, "commissions", "salesperson_id", "salesperson")).query;
+    query = (await applyDataScopeWithFallback(query, staff, "commissions", "salesperson_id", "salesperson", client)).query;
   }
 
   const { data, error } = await query;
@@ -53,7 +53,7 @@ export async function getCommissionAging(
 ): Promise<CommissionAgingRow[]> {
   let query = client.from("sales_commissions").select(SELECT_COLUMNS).eq("status", "Pending");
   if (staff) {
-    query = (await applyDataScopeWithFallback(query, staff, "commissions", "salesperson_id", "salesperson")).query;
+    query = (await applyDataScopeWithFallback(query, staff, "commissions", "salesperson_id", "salesperson", client)).query;
   }
 
   const { data, error } = await query;

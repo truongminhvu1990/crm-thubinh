@@ -18,13 +18,13 @@ export async function GET(request: NextRequest) {
   if (!staff) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const role = await resolveRoleForStaff(staff);
+  const client = await createClient();
+  const role = await resolveRoleForStaff(staff, client);
   if (role?.role_key !== "Owner") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const range = parseDateRangeParams(request.nextUrl.searchParams);
-  const client = await createClient();
   const reconciliation = await getReportsReconciliation(range, client);
   return NextResponse.json(reconciliation);
 }

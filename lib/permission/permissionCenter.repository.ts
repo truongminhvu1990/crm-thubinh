@@ -1,3 +1,4 @@
+import { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "../supabase";
 import { Staff } from "@/types/staff";
 import {
@@ -15,8 +16,17 @@ import {
 // roles
 // ============================================================
 
-export async function getRoles(): Promise<Role[]> {
-  const { data, error } = await supabase.from("roles").select("*").order("name", { ascending: true });
+/** Authorization Resolution Client Propagation (Production Incident
+ * Investigation, 2026-08-23 - see docs incident report) - `client` defaults
+ * to the browser Supabase client so every existing caller (Permission
+ * Center's own admin screens, and any not-yet-updated server caller) keeps
+ * its exact current behavior unchanged. Server-side authorization
+ * resolution (serverAuth.ts's requirePermission/requirePermissionCenterAccess,
+ * dataScope.ts's apply*Scope helpers) now passes the request's real
+ * authenticated client instead, since Production RLS on `roles` grants no
+ * access to the anon role. */
+export async function getRoles(client: SupabaseClient = supabase): Promise<Role[]> {
+  const { data, error } = await client.from("roles").select("*").order("name", { ascending: true });
   if (error) {
     console.error("Error fetching roles:", error);
     return [];
@@ -24,8 +34,8 @@ export async function getRoles(): Promise<Role[]> {
   return data as Role[];
 }
 
-export async function getRoleById(id: string): Promise<Role | null> {
-  const { data, error } = await supabase.from("roles").select("*").eq("id", id).maybeSingle();
+export async function getRoleById(id: string, client: SupabaseClient = supabase): Promise<Role | null> {
+  const { data, error } = await client.from("roles").select("*").eq("id", id).maybeSingle();
   if (error) {
     console.error("Error fetching role:", error);
     return null;
@@ -49,8 +59,8 @@ export async function updateRoleRow(id: string, fields: Partial<Pick<Role, "name
 // permissions
 // ============================================================
 
-export async function getPermissions(): Promise<PermissionRecord[]> {
-  const { data, error } = await supabase.from("permissions").select("*").order("resource", { ascending: true });
+export async function getPermissions(client: SupabaseClient = supabase): Promise<PermissionRecord[]> {
+  const { data, error } = await client.from("permissions").select("*").order("resource", { ascending: true });
   if (error) {
     console.error("Error fetching permissions:", error);
     return [];
@@ -62,8 +72,8 @@ export async function getPermissions(): Promise<PermissionRecord[]> {
 // role_permissions
 // ============================================================
 
-export async function getRolePermissions(): Promise<RolePermission[]> {
-  const { data, error } = await supabase.from("role_permissions").select("*");
+export async function getRolePermissions(client: SupabaseClient = supabase): Promise<RolePermission[]> {
+  const { data, error } = await client.from("role_permissions").select("*");
   if (error) {
     console.error("Error fetching role_permissions:", error);
     return [];
@@ -126,8 +136,8 @@ export async function clonePermissions(sourceRoleId: string, targetRoleId: strin
 // role_data_scopes
 // ============================================================
 
-export async function getRoleDataScopes(): Promise<RoleDataScope[]> {
-  const { data, error } = await supabase.from("role_data_scopes").select("*");
+export async function getRoleDataScopes(client: SupabaseClient = supabase): Promise<RoleDataScope[]> {
+  const { data, error } = await client.from("role_data_scopes").select("*");
   if (error) {
     console.error("Error fetching role_data_scopes:", error);
     return [];
@@ -192,8 +202,8 @@ export async function getStaffTeams(): Promise<TeamSummary[]> {
     .sort((a, b) => a.team_id.localeCompare(b.team_id));
 }
 
-export async function getStaffByTeam(teamId: string): Promise<Staff[]> {
-  const { data, error } = await supabase.from("staff").select("*").eq("team_id", teamId);
+export async function getStaffByTeam(teamId: string, client: SupabaseClient = supabase): Promise<Staff[]> {
+  const { data, error } = await client.from("staff").select("*").eq("team_id", teamId);
   if (error) {
     console.error("Error fetching staff by team:", error);
     return [];
@@ -206,8 +216,8 @@ export async function getStaffByTeam(teamId: string): Promise<Staff[]> {
  * Decision 44 "unresolved ownership" check (dataScope.ts), which needs the
  * full set of current staff names to test whether a text ownership field
  * matches *any* of them, not just a specific team. */
-export async function getAllStaff(): Promise<Staff[]> {
-  const { data, error } = await supabase.from("staff").select("*");
+export async function getAllStaff(client: SupabaseClient = supabase): Promise<Staff[]> {
+  const { data, error } = await client.from("staff").select("*");
   if (error) {
     console.error("Error fetching all staff:", error);
     return [];

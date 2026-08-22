@@ -385,7 +385,7 @@ export async function getCustomerStats(client: SupabaseClient = supabase, staff?
   let query = client.from("customers").select("*");
 
   const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
-  if (resolvedStaff) query = (await applyDataScope(query, resolvedStaff, "customers")).query;
+  if (resolvedStaff) query = (await applyDataScope(query, resolvedStaff, "customers", undefined, client)).query;
 
   const { data, error } = await query;
 

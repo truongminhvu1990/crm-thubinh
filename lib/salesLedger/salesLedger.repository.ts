@@ -48,7 +48,8 @@ async function applyFilters(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   query: any,
   filters: SalesLedgerFilters,
-  staff?: Staff | null
+  staff?: Staff | null,
+  client?: SupabaseClient
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<{ query: any }> {
   if (filters.dateFrom) query = query.gte("sale_date", filters.dateFrom);
@@ -115,7 +116,7 @@ async function applyFilters(
   // uuid-with-text-fallback resolution, not a separate one.
   const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
   if (resolvedStaff) {
-    query = (await applyDataScopeWithFallback(query, resolvedStaff, "revenue", "salesperson_id", "salesperson")).query;
+    query = (await applyDataScopeWithFallback(query, resolvedStaff, "revenue", "salesperson_id", "salesperson", client)).query;
   }
 
   return { query };
@@ -132,7 +133,7 @@ export async function getSalesLedgerPage(
   staff?: Staff | null
 ): Promise<SalesLedgerPage> {
   let query = client.from("sales_ledger").select("*", { count: "exact" });
-  query = (await applyFilters(query, filters, staff)).query;
+  query = (await applyFilters(query, filters, staff, client)).query;
   query = query.order(filters.sortField, { ascending: filters.sortDirection === "asc" });
 
   const from = (filters.page - 1) * SALES_LEDGER_PAGE_SIZE;
@@ -159,7 +160,7 @@ export async function getSalesLedgerAggregateRows(
   staff?: Staff | null
 ): Promise<{ sale_amount: number; commission_amount: number | null; is_revenue_recognized: boolean }[]> {
   let query = client.from("sales_ledger").select("sale_amount, commission_amount, is_revenue_recognized");
-  query = (await applyFilters(query, filters, staff)).query;
+  query = (await applyFilters(query, filters, staff, client)).query;
 
   const { data, error } = await query;
 
@@ -183,7 +184,7 @@ export async function getSalesLedgerRowByPurchaseId(
 
   const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
   if (resolvedStaff) {
-    query = (await applyDataScopeWithFallback(query, resolvedStaff, "revenue", "salesperson_id", "salesperson")).query;
+    query = (await applyDataScopeWithFallback(query, resolvedStaff, "revenue", "salesperson_id", "salesperson", client)).query;
   }
 
   const { data, error } = await query.maybeSingle();

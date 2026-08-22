@@ -28,10 +28,10 @@ import * as repo from "./monthlySoldProducts.repository";
  * Context); an explicit `Staff | null` means "use this value, already
  * resolved" - what app/api/reports/monthly-sold-products/route.ts passes,
  * using the Server Authentication Context. */
-async function canViewCostAndProfit(staff?: Staff | null): Promise<boolean> {
+async function canViewCostAndProfit(staff?: Staff | null, client?: SupabaseClient): Promise<boolean> {
   const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
   if (!resolvedStaff) return false;
-  const role = await resolveRoleForStaff(resolvedStaff);
+  const role = await resolveRoleForStaff(resolvedStaff, client);
   return role?.role_key === "Owner" || role?.role_key === "Manager";
 }
 
@@ -41,7 +41,7 @@ export async function getMonthlySoldProductsPage(
   staff?: Staff | null
 ): Promise<{ rows: MonthlySoldProductRow[]; totalCount: number }> {
   const { rows, totalCount } = await repo.getMonthlySoldProductsPage(filters, client, staff);
-  const permitted = await canViewCostAndProfit(staff);
+  const permitted = await canViewCostAndProfit(staff, client);
   const guardedRows = permitted ? rows : rows.map((r) => ({ ...r, gross_profit: null }));
   return { rows: guardedRows, totalCount };
 }
@@ -123,7 +123,7 @@ export async function getMonthlySoldProductsSummary(
     client
   );
 
-  const permitted = await canViewCostAndProfit(staff);
+  const permitted = await canViewCostAndProfit(staff, client);
 
   // Finance Project #1, Phase D — same recognized-revenue gate as
   // productCost above (never deduct commission for a sale whose revenue

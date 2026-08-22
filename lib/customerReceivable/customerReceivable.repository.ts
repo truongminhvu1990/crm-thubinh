@@ -86,7 +86,7 @@ export async function findCustomerReceivableOrders(
 
   const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
   if (resolvedStaff) {
-    query = (await applyDataScopeByName(query, resolvedStaff, "revenue", "sales_owner")).query;
+    query = (await applyDataScopeByName(query, resolvedStaff, "revenue", "sales_owner", client)).query;
   }
 
   const { data: orderRows, error: orderError } = await query.order("order_date", { ascending: false });

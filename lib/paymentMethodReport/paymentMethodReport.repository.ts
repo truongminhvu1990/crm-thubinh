@@ -63,7 +63,8 @@ async function applyFilters(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   query: any,
   filters: PaymentMethodReportFilters,
-  staff?: Staff | null
+  staff?: Staff | null,
+  client?: SupabaseClient
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<{ query: any }> {
   const monthRange = filters.month ? resolveMonthRange(filters.month) : null;
@@ -79,7 +80,7 @@ async function applyFilters(
 
   const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
   if (resolvedStaff) {
-    query = (await applyDataScopeByName(query, resolvedStaff, "revenue", "orders.sales_owner")).query;
+    query = (await applyDataScopeByName(query, resolvedStaff, "revenue", "orders.sales_owner", client)).query;
   }
 
   return { query };
@@ -98,7 +99,7 @@ export async function findPaymentsForReport(
   staff?: Staff | null
 ): Promise<PaymentReportSourceRow[]> {
   let query = client.from("payments").select("order_id, amount, payment_method, orders!inner(sales_owner)");
-  query = (await applyFilters(query, filters, staff)).query;
+  query = (await applyFilters(query, filters, staff, client)).query;
 
   const { data, error } = await query;
 

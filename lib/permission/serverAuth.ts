@@ -1,7 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { SupabaseClient } from "@supabase/supabase-js";
 import { Staff } from "@/types/staff";
 import { staffHasPermission } from "./permissionCenter.service";
+
+/** The same request-cookie-based client shape lib/supabase/proxy.ts and
+ * getCurrentStaffFromRequest below already use, extracted so
+ * requirePermission/requirePermissionCenterAccess can build one too and
+ * pass it into staffHasPermission's role/permission resolution -
+ * Authorization Resolution Client Propagation (Production Incident
+ * Investigation, 2026-08-23). Without this, staffHasPermission fell back to
+ * the module-level anon browser client, which Production RLS on
+ * `roles`/`permissions`/`role_permissions` grants no access to - every
+ * staff member resolved to "no role," failing every requirePermission()
+ * check regardless of actual grants. */
+export function createRequestClient(request: NextRequest): SupabaseClient {
+  return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll() {
+        // Route Handlers don't need to refresh the session cookie -
+        // proxy.ts already does that for every request before this runs.
+      },
+    },
+  });
+}
 
 /** Server-side counterpart to lib/permission.ts's getCurrentStaff() - reads
  * the request's Supabase session cookies directly (same client shape as
@@ -25,21 +50,7 @@ import { staffHasPermission } from "./permissionCenter.service";
  * is reliably linked (Package 6, future Auth-creation work), the email
  * fallback can be retired in a later, separate change. */
 export async function getCurrentStaffFromRequest(request: NextRequest): Promise<Staff | null> {
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll() {
-          // Route Handlers don't need to refresh the session cookie -
-          // proxy.ts already does that for every request before this runs.
-        },
-      },
-    }
-  );
+  const supabase = createRequestClient(request);
 
   const {
     data: { user },
@@ -84,7 +95,7 @@ export async function requirePermissionCenterAccess(
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
 
-  const allowed = await staffHasPermission(staff, "settings.manage");
+  const allowed = await staffHasPermission(staff, "settings.manage", createRequestClient(request));
   if (!allowed) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
@@ -106,7 +117,7 @@ export async function requirePermission(
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
 
-  const allowed = await staffHasPermission(staff, permissionKey);
+  const allowed = await staffHasPermission(staff, permissionKey, createRequestClient(request));
   if (!allowed) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
