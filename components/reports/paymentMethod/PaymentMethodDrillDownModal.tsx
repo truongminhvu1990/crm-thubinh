@@ -44,21 +44,23 @@ export default function PaymentMethodDrillDownModal({ paymentMethod, filters, on
 
   useEffect(() => {
     let cancelled = false;
-    setIsLoading(true);
-    fetch(`/api/reports/payment-method/drill-down?${buildQuery(filters, paymentMethod)}`)
-      .then((res) => (res.ok ? res.json() : { rows: [] }))
-      .then((data: { rows: PaymentMethodDrillDownRow[] }) => {
-        if (!cancelled) {
-          setRows(data.rows);
-          setIsLoading(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRows([]);
-          setIsLoading(false);
-        }
-      });
+    queueMicrotask(() => {
+      setIsLoading(true);
+      fetch(`/api/reports/payment-method/drill-down?${buildQuery(filters, paymentMethod)}`)
+        .then((res) => (res.ok ? res.json() : { rows: [] }))
+        .then((data: { rows: PaymentMethodDrillDownRow[] }) => {
+          if (!cancelled) {
+            setRows(data.rows);
+            setIsLoading(false);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setRows([]);
+            setIsLoading(false);
+          }
+        });
+    });
     return () => {
       cancelled = true;
     };
