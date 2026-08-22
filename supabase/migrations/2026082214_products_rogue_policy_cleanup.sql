@@ -1,0 +1,81 @@
+-- Products — rogue RLS policy cleanup (Finance Project #1 Production
+-- Preflight, 2026-08-22).
+--
+-- Root cause: a direct, read-only inspection of Production
+-- (ktvrgnhpdarsachxlguy) via `supabase db query --linked` against
+-- pg_policies found FOUR policies on `products`, not the two-policy
+-- "Allow full access to anon" / "Allow full access to authenticated"
+-- pattern every migration in this project (including 2026082203/2204)
+-- assumes as the pre-existing baseline:
+--
+--   policyname                       | roles           | cmd
+--   ----------------------------------+-----------------+-----
+--   "Allow full access"              | {public}        | ALL   <- rogue
+--   "Allow full access to anon"      | {anon}          | ALL
+--   "Allow full access to authenticated" | {authenticated} | ALL
+--   "all_products"                   | {authenticated} | ALL   <- rogue
+--
+-- Both rogue policies were confirmed live with `USING (true) WITH CHECK
+-- (true)`. Neither is created, referenced, or dropped by any migration in
+-- this repository — they predate every migration this project's git
+-- history tracks, and were never cleaned up when the "Allow full access to
+-- anon/authenticated" two-policy convention was introduced later.
+--
+-- Why this matters: `TO public` in a Postgres RLS policy applies to every
+-- connecting role, anon included — not merely "the PUBLIC pseudo-role" in
+-- the privilege-grant sense. 2026082203_products_batches_rls_hardening.sql
+-- and 2026082204_products_update_anon_closure.sql each only
+-- `DROP POLICY IF EXISTS` the two *named* "Allow full access to anon" /
+-- "Allow full access to authenticated" policies. Neither touches
+-- "Allow full access" or "all_products". Applied to Production exactly as
+-- written, 2203/2204 would leave `products` fully anon-writable through
+-- the surviving `TO public` policy — the entire point of that hardening
+-- (closing the anon-key REST bypass, INV-012) would be silently defeated
+-- on Production while appearing to have succeeded (pg_policies would show
+-- the intended authenticated-only policies too, just alongside the
+-- still-live permissive one).
+--
+-- Scope: `products` only. `product_batches` was verified in the same
+-- read-only inspection to already match the expected two-policy shape
+-- (anon + authenticated "Allow full access") with no extra rows — no
+-- cleanup needed there. No other table's policies are touched. No RPC, no
+-- grant, no column, no constraint is touched.
+--
+-- Ordering: this migration must run strictly AFTER
+-- 2026082204_products_update_anon_closure.sql, so the sequence leaves a
+-- single, well-defined policy state at every step: 2203 narrows
+-- SELECT/INSERT/DELETE and leaves an interim anon+authenticated UPDATE;
+-- 2204 closes that interim UPDATE to authenticated-only; this migration
+-- then removes the two leftover permissive policies neither 2203 nor 2204
+-- was ever responsible for. Dropping the rogue policies before 2203/2204
+-- would not be incorrect on its own, but running it last keeps the
+-- verification story linear and matches how the drift was actually found
+-- (during preflight for 2203/2204, not before it).
+--
+-- End-state verified against the 2026082203/2204 target model: after this
+-- migration, `products` must carry exactly:
+--   "products_authenticated_select"   FOR SELECT TO authenticated
+--   "products_authenticated_insert"   FOR INSERT TO authenticated
+--   "products_authenticated_delete"   FOR DELETE TO authenticated
+--   "products_authenticated_update"   FOR UPDATE TO authenticated
+-- (the last of these created by 2204, replacing 2203's own two interim
+-- UPDATE policies) — no anon-scoped policy, no `TO public` policy, no
+-- redundant "all_products" duplicate remains.
+
+BEGIN;
+
+DROP POLICY IF EXISTS "Allow full access" ON products;
+DROP POLICY IF EXISTS "all_products" ON products;
+
+COMMIT;
+
+-- ============================================================
+-- Verification (read-only, run after applying):
+-- ============================================================
+-- SELECT policyname, cmd, roles::text FROM pg_policies
+--   WHERE tablename = 'products' ORDER BY policyname;
+-- Expect exactly 4 rows, ALL "TO {authenticated}", named:
+--   products_authenticated_select, products_authenticated_insert,
+--   products_authenticated_delete, products_authenticated_update
+-- No "Allow full access" (public), no "Allow full access to anon", no
+-- "all_products" — none of those four policy names should appear.

@@ -5,7 +5,7 @@ import path from "node:path";
 
 /**
  * Settlement Paid (Finance Project #1, Phase A) — static verification of
- * 2026082101_settlement_paid_module.sql.
+ * 2026082103_settlement_paid_module.sql.
  *
  * Same limitation as moneyDebtLedgerMigration.security.test.ts: no live
  * Postgres/Supabase connection is available inside the automated test
@@ -18,7 +18,7 @@ import path from "node:path";
  * the migration's own "Manual ... check" comments run live on Dev.
  */
 
-const MIGRATION_PATH = path.join(__dirname, "..", "..", "supabase", "migrations", "2026082101_settlement_paid_module.sql");
+const MIGRATION_PATH = path.join(__dirname, "..", "..", "supabase", "migrations", "2026082103_settlement_paid_module.sql");
 const sql = fs.readFileSync(MIGRATION_PATH, "utf8");
 
 function extractBlock(source: string, startMarker: string, endMarker: string): string {
