@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode } from "react";
+import { ComponentPropsWithoutRef, ReactNode } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
@@ -24,11 +24,24 @@ const badgeVariants = cva(
   }
 );
 
-interface Props extends VariantProps<typeof badgeVariants> {
+/** Forwards native <span> props (data-testid, id, onClick, aria-* and
+ * friends) via `...rest` - previously silently dropped anything except
+ * children/variant/className, which let a caller-supplied data-testid
+ * (e.g. components/order/OrderPaymentsList.tsx's Overpaid badge)
+ * type-check cleanly (TypeScript special-cases data- and aria- attributes
+ * as valid on any JSX element regardless of its declared prop type) while
+ * never actually reaching the DOM at runtime. `children` stays required
+ * (Omit + re-declare), matching the prior contract exactly - every other
+ * native span prop becomes optional, same as it already is on a plain
+ * span element. */
+interface Props extends VariantProps<typeof badgeVariants>, Omit<ComponentPropsWithoutRef<"span">, "children"> {
   children: ReactNode;
-  className?: string;
 }
 
-export default function Badge({ children, variant, className }: Props) {
-  return <span className={cn(badgeVariants({ variant }), className)}>{children}</span>;
+export default function Badge({ children, variant, className, ...rest }: Props) {
+  return (
+    <span className={cn(badgeVariants({ variant }), className)} {...rest}>
+      {children}
+    </span>
+  );
 }

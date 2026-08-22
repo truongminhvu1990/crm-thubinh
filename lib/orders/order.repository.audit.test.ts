@@ -11,32 +11,55 @@ import { mock } from "node:test";
  * with the given client + correct before/after; without one, NO insert is
  * attempted (never actor=null) and the status transition still completes.
  *
+ * INV-012 (Orders/RLS reservation-blocker fix, 2026-08-22) — reserveProduct/
+ * releaseProduct now call the reserve_product()/release_product() RPCs
+ * through whichever client is in play (audit.client when present, the
+ * anon-defaulting `supabase` singleton otherwise — exactly the same
+ * audit.client reuse this file was already covering, just now also used
+ * for the write itself, not only the subsequent audit-log entry).
+ * markProductSold is deliberately unchanged in shape — still a direct
+ * `.update()`, only the client it runs through differs — so its mock
+ * stays exactly as it always was.
+ *
  * mock.module() called once at file scope, mutable state per test — same
  * documented reasoning as order.repository.completeOrder.test.ts.
  */
 let matchingRows: { id: string }[] = [{ id: "product-1" }];
+let rpcShouldFindRow = true;
 
-mock.module("@/lib/supabase", {
-  namedExports: {
-    supabase: {
-      from(table: string) {
-        if (table !== "products") throw new Error(`Unexpected table in test: ${table}`);
-        return {
-          update: () => ({
+function makeRpcCapableClient(marker: string) {
+  return {
+    marker,
+    from(table: string) {
+      if (table !== "products") throw new Error(`Unexpected table in test: ${table}`);
+      return {
+        update: () => ({
+          eq: () => ({
             eq: () => ({
-              eq: () => ({
-                select: () => Promise.resolve({ data: matchingRows, error: null }),
-              }),
+              select: () => Promise.resolve({ data: matchingRows, error: null }),
             }),
           }),
-        };
-      },
+        }),
+      };
     },
-  },
+    rpc(fnName: string) {
+      if (fnName !== "reserve_product" && fnName !== "release_product") {
+        throw new Error(`Unexpected RPC in test: ${fnName}`);
+      }
+      if (!rpcShouldFindRow) {
+        return Promise.resolve({ data: null, error: { code: "P0002", message: "not found" } });
+      }
+      return Promise.resolve({ data: { id: "product-1" }, error: null });
+    },
+  };
+}
+
+mock.module("@/lib/supabase", {
+  namedExports: { supabase: makeRpcCapableClient("default-anon-singleton") },
 });
 
 const loggedCalls: { input: unknown; client: unknown }[] = [];
-const fakeAuthedClient = { marker: "fake-authenticated-client" };
+const fakeAuthedClient = makeRpcCapableClient("fake-authenticated-client");
 
 mock.module("@/lib/auditLog.service", {
   namedExports: {
@@ -48,6 +71,7 @@ mock.module("@/lib/auditLog.service", {
 
 test.beforeEach(() => {
   matchingRows = [{ id: "product-1" }];
+  rpcShouldFindRow = true;
   loggedCalls.length = 0;
 });
 
@@ -67,7 +91,6 @@ test("reserveProduct: with audit context, logs Available->Reserved via the given
 });
 
 test("reserveProduct: without audit context, no insert is attempted (never actor=null) - action still completes", async () => {
-  matchingRows = [{ id: "product-1" }];
   const { reserveProduct } = await import("./order.repository");
 
   await assert.doesNotReject(() => reserveProduct("product-1"));

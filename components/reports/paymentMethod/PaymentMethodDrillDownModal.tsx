@@ -9,6 +9,7 @@ import {
 } from "@/lib/paymentMethodReport/paymentMethodReportExport";
 import { downloadBlob } from "@/lib/reports/reportsBIExport";
 import { formatDate } from "@/lib/utils";
+import { calculateOverpaidAmount } from "@/lib/orders/order.rules";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
 
@@ -132,7 +133,20 @@ export default function PaymentMethodDrillDownModal({ paymentMethod, filters, on
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">{currency.format(r.saleAmount)}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">{currency.format(r.amountPaid)}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">{currency.format(r.remainingBalance)}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">
+                    {/* Finance Project #1, Phase C (Product Owner Approval,
+                        2026-08-21) — a negative remainingBalance is an
+                        overpayment, shown distinctly rather than as a plain
+                        negative currency figure. Warning-only, presentational
+                        only — remainingBalance itself is untouched. */}
+                    {r.remainingBalance < 0 ? (
+                      <span className="text-amber-600 font-medium" data-testid="payment-method-drilldown-overpaid">
+                        Dư {currency.format(calculateOverpaidAmount(r.remainingBalance))}
+                      </span>
+                    ) : (
+                      currency.format(r.remainingBalance)
+                    )}
+                  </td>
                   <td className="px-3 py-2 whitespace-nowrap">{formatDate(r.orderDate)}</td>
                   <td className="px-3 py-2 whitespace-nowrap">{r.paymentMethods || "—"}</td>
                 </tr>

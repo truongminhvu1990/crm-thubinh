@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrderDetail, getOrderEvents } from "@/lib/orders/order.service";
 import { handleOrderServiceError } from "../../_errors";
+import { createClient } from "@/lib/supabase/server";
 
 /** GET /orders/:id/history — the Order Event Timeline (ORDERS_UI.md §9.2)
  * for one order. Existence-checked first so a nonexistent order returns 404
@@ -10,7 +11,11 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const { id } = await params;
 
   try {
-    const detail = await getOrderDetail(id);
+    // RLS compatibility (2026082211): orders/order_items reads are
+    // authenticated-only now — order_events itself is unaffected and keeps
+    // using its own anon-defaulting default below.
+    const client = await createClient();
+    const detail = await getOrderDetail(id, undefined, client);
     if (!detail) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }

@@ -155,8 +155,15 @@ export type OrderWithItemCount = Order & { order_items: { count: number }[] };
  * `staff.full_name` case-insensitively and trimmed, DATA_SCOPE_ROLLOUT_
  * DATABASE.md §2 rule 3 / Decision 43). Applied during query construction,
  * before the request is sent - never a post-fetch filter. */
-export async function findAllOrders(staff?: ScopingStaff): Promise<OrderWithItemCount[]> {
-  let query = supabase
+/** RLS compatibility (2026082211): `client` is optional — authenticated API
+ * routes pass their real request-scoped server client so this read runs
+ * under the caller's own authenticated session, not the anon-defaulting
+ * singleton (orders' anon-inclusive RLS policy was removed by
+ * supabase/migrations/2026082211_orders_compensations_sales_commissions_rls_lockdown.sql,
+ * leaving authenticated-only). Default preserved for any remaining caller
+ * that doesn't pass one. */
+export async function findAllOrders(staff?: ScopingStaff, client: SupabaseClient = supabase): Promise<OrderWithItemCount[]> {
+  let query = client
     .from("orders")
     .select(`${WITH_CUSTOMER}, order_items(count)`);
 
@@ -174,8 +181,10 @@ export async function findAllOrders(staff?: ScopingStaff): Promise<OrderWithItem
   return data as unknown as OrderWithItemCount[];
 }
 
-export async function findOrderById(id: string, staff?: ScopingStaff): Promise<Order | null> {
-  let query = supabase.from("orders").select(WITH_CUSTOMER).eq("id", id);
+/** RLS compatibility (2026082211) — same `client` reasoning as
+ * findAllOrders above. */
+export async function findOrderById(id: string, staff?: ScopingStaff, client: SupabaseClient = supabase): Promise<Order | null> {
+  let query = client.from("orders").select(WITH_CUSTOMER).eq("id", id);
 
   if (staff) query = (await applyDataScopeByName(query, staff, "orders", "sales_owner")).query;
 
@@ -192,8 +201,10 @@ export async function findOrderById(id: string, staff?: ScopingStaff): Promise<O
   return data as unknown as Order;
 }
 
-export async function findOrderItemsByOrderId(orderId: string): Promise<OrderItem[]> {
-  const { data, error } = await supabase
+/** RLS compatibility (2026082211) — order_items carries the same
+ * anon-closure as orders (same migration). */
+export async function findOrderItemsByOrderId(orderId: string, client: SupabaseClient = supabase): Promise<OrderItem[]> {
+  const { data, error } = await client
     .from("order_items")
     .select(WITH_PRODUCT)
     .eq("order_id", orderId);
@@ -246,8 +257,8 @@ export async function findOrderEventsByOrderId(orderId: string): Promise<OrderEv
  * Status = Completed AND Payment Status = Paid), with `order_date` in
  * [start, end). Read-only — a filtered variant of findAllOrders for revenue
  * aggregation callers (e.g. Dashboard), not a new write path. */
-export async function findRevenueRecognizedOrders(start: string, end: string): Promise<Order[]> {
-  const { data, error } = await supabase
+export async function findRevenueRecognizedOrders(start: string, end: string, client: SupabaseClient = supabase): Promise<Order[]> {
+  const { data, error } = await client
     .from("orders")
     .select("*")
     .eq("order_status", "Completed")
@@ -287,11 +298,11 @@ export async function findRevenueRecognizedOrders(start: string, end: string): P
  * Node/Vercel runtime's clock, confirmed UTC. Sourced from
  * BusinessTime.todayString() only — no separate date computation.
  */
-async function generateOrderNumber(): Promise<string> {
+async function generateOrderNumber(client: SupabaseClient = supabase): Promise<string> {
   const datePart = BusinessTime.todayString().replace(/-/g, "");
   const prefix = `OD-${datePart}-`;
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("orders")
     .select("id")
     .like("order_number", `${prefix}%`);
@@ -337,11 +348,11 @@ function pickOrderWritableFields(changes: Partial<Order>): Partial<Order> {
  * user entering a backdated sale), it wins over today's date. `created_at`
  * is never touched by this — it stays the DB's own `now()` default,
  * recording the real system-creation instant regardless of `order_date`. */
-export async function createOrder(input: CreateOrderInput): Promise<Order> {
-  const order_number = await generateOrderNumber();
+export async function createOrder(input: CreateOrderInput, client: SupabaseClient = supabase): Promise<Order> {
+  const order_number = await generateOrderNumber(client);
   const order_date = input.order_date || BusinessTime.todayString();
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("orders")
     .insert({ ...input, order_number, order_date })
     .select()
@@ -358,10 +369,10 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
 /** Generic field update — see ORDER_WRITABLE_FIELDS above for exactly which
  * fields this can touch. Status transitions and rollups go through their
  * own dedicated methods, not this one. */
-export async function updateOrder(id: string, changes: Partial<Order>): Promise<Order> {
+export async function updateOrder(id: string, changes: Partial<Order>, client: SupabaseClient = supabase): Promise<Order> {
   const filteredData = pickOrderWritableFields(changes);
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("orders")
     .update(filteredData)
     .eq("id", id)
@@ -406,8 +417,8 @@ export async function updateOrder(id: string, changes: Partial<Order>): Promise<
  * OrderDeleteRevenueConflictError so the caller gets a clear signal instead
  * of a raw 500.
  */
-export async function deleteOrder(id: string, adminOverride = false): Promise<void> {
-  let query = supabase.from("orders").delete().eq("id", id);
+export async function deleteOrder(id: string, adminOverride = false, client: SupabaseClient = supabase): Promise<void> {
+  let query = client.from("orders").delete().eq("id", id);
   if (!adminOverride) {
     query = query.eq("order_status", "Draft").eq("payment_status", "Unpaid");
   }
@@ -432,8 +443,11 @@ export async function deleteOrder(id: string, adminOverride = false): Promise<vo
  * independently re-enforced inside delete_order_with_reconciliation itself
  * (2026081717 migration) as a second, database-level layer.
  */
-export async function findCompensationStatusesForOrder(orderId: string): Promise<CompensationStatus[]> {
-  const { data, error } = await supabase.from("compensations").select("status").eq("order_id", orderId);
+export async function findCompensationStatusesForOrder(
+  orderId: string,
+  client: SupabaseClient = supabase
+): Promise<CompensationStatus[]> {
+  const { data, error } = await client.from("compensations").select("status").eq("order_id", orderId);
 
   if (error) {
     console.error("Error checking compensation statuses for order:", error);
@@ -453,9 +467,10 @@ export async function findCompensationStatusesForOrder(orderId: string): Promise
  * manually: order_items -> customer_purchases -> sales_commissions.
  */
 export async function hasFinancialHistoryForOrder(
-  orderId: string
+  orderId: string,
+  client: SupabaseClient = supabase
 ): Promise<{ hasCompensation: boolean; hasCommission: boolean }> {
-  const { data: compensations, error: compensationError } = await supabase
+  const { data: compensations, error: compensationError } = await client
     .from("compensations")
     .select("id")
     .eq("order_id", orderId)
@@ -465,7 +480,7 @@ export async function hasFinancialHistoryForOrder(
     throw new OrderRepositoryError("hasFinancialHistoryForOrder", compensationError);
   }
 
-  const { data: items, error: itemsError } = await supabase.from("order_items").select("id").eq("order_id", orderId);
+  const { data: items, error: itemsError } = await client.from("order_items").select("id").eq("order_id", orderId);
   if (itemsError) {
     console.error("Error fetching order items for commission check:", itemsError);
     throw new OrderRepositoryError("hasFinancialHistoryForOrder", itemsError);
@@ -474,7 +489,7 @@ export async function hasFinancialHistoryForOrder(
 
   let hasCommission = false;
   if (itemIds.length > 0) {
-    const { data: purchases, error: purchasesError } = await supabase
+    const { data: purchases, error: purchasesError } = await client
       .from("customer_purchases")
       .select("id")
       .in("order_item_id", itemIds);
@@ -485,7 +500,7 @@ export async function hasFinancialHistoryForOrder(
     const purchaseIds = (purchases || []).map((p) => p.id as string);
 
     if (purchaseIds.length > 0) {
-      const { data: commissions, error: commissionsError } = await supabase
+      const { data: commissions, error: commissionsError } = await client
         .from("sales_commissions")
         .select("id")
         .in("purchase_id", purchaseIds)
@@ -518,8 +533,11 @@ export interface VoidableFinancialRecords {
   commissions: { id: string; status: string }[];
 }
 
-export async function findVoidableFinancialRecordsForOrder(orderId: string): Promise<VoidableFinancialRecords> {
-  const { data: compensations, error: compensationError } = await supabase
+export async function findVoidableFinancialRecordsForOrder(
+  orderId: string,
+  client: SupabaseClient = supabase
+): Promise<VoidableFinancialRecords> {
+  const { data: compensations, error: compensationError } = await client
     .from("compensations")
     .select("id, status")
     .eq("order_id", orderId)
@@ -529,7 +547,7 @@ export async function findVoidableFinancialRecordsForOrder(orderId: string): Pro
     throw new OrderRepositoryError("findVoidableFinancialRecordsForOrder", compensationError);
   }
 
-  const { data: items, error: itemsError } = await supabase.from("order_items").select("id").eq("order_id", orderId);
+  const { data: items, error: itemsError } = await client.from("order_items").select("id").eq("order_id", orderId);
   if (itemsError) {
     console.error("Error fetching order items for voidable commissions:", itemsError);
     throw new OrderRepositoryError("findVoidableFinancialRecordsForOrder", itemsError);
@@ -538,7 +556,7 @@ export async function findVoidableFinancialRecordsForOrder(orderId: string): Pro
 
   let commissions: { id: string; status: string }[] = [];
   if (itemIds.length > 0) {
-    const { data: purchases, error: purchasesError } = await supabase
+    const { data: purchases, error: purchasesError } = await client
       .from("customer_purchases")
       .select("id")
       .in("order_item_id", itemIds);
@@ -549,7 +567,7 @@ export async function findVoidableFinancialRecordsForOrder(orderId: string): Pro
     const purchaseIds = (purchases || []).map((p) => p.id as string);
 
     if (purchaseIds.length > 0) {
-      const { data: commissionRows, error: commissionsError } = await supabase
+      const { data: commissionRows, error: commissionsError } = await client
         .from("sales_commissions")
         .select("id, status")
         .in("purchase_id", purchaseIds)
@@ -581,7 +599,12 @@ export async function cancelOrder(
   dispositions: { order_item_id: string; disposition: string }[],
   audit?: OrderAuditContext
 ): Promise<Order> {
-  const { data, error } = await supabase.rpc("cancel_order_with_disposition", {
+  // RLS compatibility (2026082211): reuse audit.client for the RPC call
+  // itself, not only for the audit-log entry below — same reasoning as
+  // reserveProduct/releaseProduct/markProductSold. Falls back to the anon
+  // supabase default only when no audit context is given at all.
+  const client = audit?.client ?? supabase;
+  const { data, error } = await client.rpc("cancel_order_with_disposition", {
     p_order_id: orderId,
     p_dispositions: dispositions,
   });
@@ -703,9 +726,10 @@ export async function cancelReservation(orderId: string): Promise<Order> {
 export async function completeOrder(
   orderId: string,
   purchaseRows: PurchaseSnapshotInput[],
-  commissionRows: CommissionSnapshotInput[]
+  commissionRows: CommissionSnapshotInput[],
+  client: SupabaseClient = supabase
 ): Promise<Order> {
-  const { data, error } = await supabase.rpc("complete_order_with_snapshots", {
+  const { data, error } = await client.rpc("complete_order_with_snapshots", {
     p_order_id: orderId,
     p_purchase_rows: purchaseRows,
     p_commission_rows: commissionRows,
@@ -721,8 +745,8 @@ export async function completeOrder(
 
 /** Draft or Reserved → Lost only (ORDERS_SPEC.md §4), setting lost_reason
  * in the same update. */
-export async function markOrderLost(input: MarkOrderLostInput): Promise<Order> {
-  const { data, error } = await supabase
+export async function markOrderLost(input: MarkOrderLostInput, client: SupabaseClient = supabase): Promise<Order> {
+  const { data, error } = await client
     .from("orders")
     .update({ order_status: "Lost", lost_reason: input.lost_reason })
     .eq("id", input.order_id)
@@ -740,8 +764,11 @@ export async function markOrderLost(input: MarkOrderLostInput): Promise<Order> {
 
 /** Draft or Reserved only (ORDERS_SPEC.md §6: reassignable "while the order
  * is open"), same WHERE-guard pattern as the other status-adjacent methods. */
-export async function reassignSalesOwner(input: ReassignSalesOwnerInput): Promise<Order> {
-  const { data, error } = await supabase
+export async function reassignSalesOwner(
+  input: ReassignSalesOwnerInput,
+  client: SupabaseClient = supabase
+): Promise<Order> {
+  const { data, error } = await client
     .from("orders")
     .update({ sales_owner: input.sales_owner })
     .eq("id", input.order_id)
@@ -761,8 +788,12 @@ export async function reassignSalesOwner(input: ReassignSalesOwnerInput): Promis
  * order_items/payments mutation (ORDERS_DATABASE.md §4, "Derived") — no
  * status guard, since payments can be recorded regardless of order status
  * (ORDERS_SPEC.md §5). */
-export async function updateOrderRollups(orderId: string, rollups: OrderRollups): Promise<Order> {
-  const { data, error } = await supabase
+export async function updateOrderRollups(
+  orderId: string,
+  rollups: OrderRollups,
+  client: SupabaseClient = supabase
+): Promise<Order> {
+  const { data, error } = await client
     .from("orders")
     .update(rollups)
     .eq("id", orderId)
@@ -806,10 +837,10 @@ function pickOrderItemWritableFields(changes: Partial<OrderItem>): Partial<Order
   return filtered as Partial<OrderItem>;
 }
 
-export async function addOrderItem(input: AddOrderItemInput): Promise<OrderItem> {
+export async function addOrderItem(input: AddOrderItemInput, client: SupabaseClient = supabase): Promise<OrderItem> {
   const line_total = computeLineTotal(input.snapshot_sale_price, input.discount, input.quantity);
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("order_items")
     .insert({ ...input, line_total })
     .select()
@@ -830,8 +861,8 @@ export async function addOrderItem(input: AddOrderItemInput): Promise<OrderItem>
  * values via the same computeLineTotal already used by addOrderItem (no
  * duplicated formula), then writes the full merged set in one update.
  */
-export async function updateOrderItem(input: UpdateOrderItemInput): Promise<OrderItem> {
-  const { data: current, error: fetchError } = await supabase
+export async function updateOrderItem(input: UpdateOrderItemInput, client: SupabaseClient = supabase): Promise<OrderItem> {
+  const { data: current, error: fetchError } = await client
     .from("order_items")
     .select("*")
     .eq("id", input.id)
@@ -846,7 +877,7 @@ export async function updateOrderItem(input: UpdateOrderItemInput): Promise<Orde
   const merged = { ...(current as OrderItem), ...filteredChanges };
   const line_total = computeLineTotal(merged.snapshot_sale_price, merged.discount, merged.quantity);
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("order_items")
     .update({ ...filteredChanges, line_total })
     .eq("id", input.id)
@@ -861,8 +892,8 @@ export async function updateOrderItem(input: UpdateOrderItemInput): Promise<Orde
   return data as OrderItem;
 }
 
-export async function removeOrderItem(orderId: string, id: string): Promise<void> {
-  const { error } = await supabase.from("order_items").delete().eq("id", id).eq("order_id", orderId);
+export async function removeOrderItem(orderId: string, id: string, client: SupabaseClient = supabase): Promise<void> {
+  const { error } = await client.from("order_items").delete().eq("id", id).eq("order_id", orderId);
 
   if (error) {
     console.error("Error removing order item:", error);
@@ -907,28 +938,40 @@ function logMissingAuditContext(fn: string, productId: string): void {
   );
 }
 
-/** Available → Reserved. Guarded on `status = 'Available'` (BR-003, LOCKED,
- * 2026-08-21 - was `'Active'`), which is what makes
- * this the actual concurrency check ORDERS_SPEC.md §9/§17 requires: if
- * another order already holds this product (or it isn't sellable for any
- * other reason), the guard matches 0 rows and this throws instead of
- * layering a second reservation on top. */
+/** Available → Reserved (docs/02_PRODUCT_SPEC.md §7, LOCKED four-value
+ * model). Guarded on `status = 'Available'` (BR-003, LOCKED, 2026-08-21 -
+ * was `'Active'`), which is what makes this the actual concurrency check
+ * ORDERS_SPEC.md §9/§17 requires: if another order already holds this
+ * product (or it isn't sellable for any other reason), the guard matches
+ * 0 rows and this throws instead of layering a second reservation on top.
+ *
+ * INV-012 (Orders/RLS reservation-blocker fix, 2026-08-22) — the actual
+ * status transition now runs through the reserve_product() RPC (see
+ * supabase/migrations/2026082206_reserve_product_rpc_authorization.sql)
+ * using `audit.client` when a real OrderAuditContext is present, instead
+ * of the anon-defaulting module-level `supabase` singleton: every real
+ * caller already resolves and passes a real, cookie-authenticated
+ * request-scoped client as `audit.client` (D5 completion) — this reuses
+ * that exact same client for the write itself, not just the audit-log
+ * entry that follows it, closing the anon-key REST bypass INV-012
+ * diagnosed without introducing a second, parallel client parameter or
+ * touching this function's public signature. Falls back to the anon
+ * `supabase` default only when no audit context is given at all (the
+ * documented "must never happen from a real route" edge case) — the RPC
+ * itself then correctly rejects with an authorization error rather than
+ * silently succeeding as anon. */
 export async function reserveProduct(productId: string, audit?: OrderAuditContext): Promise<void> {
-  const { data, error } = await supabase
-    .from("products")
-    .update({ status: "Reserved" })
-    .eq("id", productId)
-    .eq("status", "Available")
-    .select("id");
+  const client = audit?.client ?? supabase;
+  const { error } = await client.rpc("reserve_product", { p_product_id: productId });
 
   if (error) {
+    if (error.code === "P0002") {
+      throw new OrderRepositoryError("reserveProduct", {
+        message: "Product is not Available (already reserved by another order, or not sellable)",
+        code: "PRODUCT_NOT_AVAILABLE",
+      });
+    }
     throw new OrderRepositoryError("reserveProduct", error);
-  }
-  if (!data || data.length === 0) {
-    throw new OrderRepositoryError("reserveProduct", {
-      message: "Product is not Available (already reserved by another order, or not sellable)",
-      code: "PRODUCT_NOT_AVAILABLE",
-    });
   }
 
   if (audit) {
@@ -947,23 +990,29 @@ export async function reserveProduct(productId: string, audit?: OrderAuditContex
  * product taken out of an order would stay Reserved forever with no order
  * left holding it. Best-effort like this file's other status-adjacent
  * guarded updates (deleteOrder, reserveOrder): 0 rows affected (already not
- * Reserved) is not treated as an error. */
+ * Reserved) is not treated as an error.
+ *
+ * INV-012 — same release_product() RPC / audit.client reuse as
+ * reserveProduct above (see
+ * supabase/migrations/2026082207_release_product_rpc_authorization.sql).
+ * The RPC itself always rejects a non-Reserved product (P0002); this
+ * function's own historical non-strict contract is preserved entirely in
+ * TypeScript — a P0002 is treated as the same silent no-op it always was,
+ * never re-thrown, never logged as a transition that didn't happen. No
+ * `strict` parameter exists or is introduced. */
 export async function releaseProduct(productId: string, audit?: OrderAuditContext): Promise<void> {
-  const { data, error } = await supabase
-    .from("products")
-    .update({ status: "Available" })
-    .eq("id", productId)
-    .eq("status", "Reserved")
-    .select("id");
+  const client = audit?.client ?? supabase;
+  const { error } = await client.rpc("release_product", { p_product_id: productId });
 
   if (error) {
+    if (error.code === "P0002") {
+      // Best-effort update (0 rows affected — already not Reserved — is not
+      // an error, per this function's own existing contract above): only
+      // log a transition that actually happened.
+      return;
+    }
     throw new OrderRepositoryError("releaseProduct", error);
   }
-
-  // Best-effort update (0 rows affected — already not Reserved — is not an
-  // error, per this function's own existing contract above): only log a
-  // transition that actually happened.
-  if (!data || data.length === 0) return;
 
   if (audit) {
     await logStatusChange(
@@ -976,9 +1025,17 @@ export async function releaseProduct(productId: string, audit?: OrderAuditContex
 }
 
 /** Reserved → Sold, on order Completion (ORDERS_SPEC.md §7). Same
- * best-effort reasoning as releaseProduct. */
+ * best-effort reasoning as releaseProduct.
+ *
+ * INV-012 — deliberately NOT converted to an RPC (no sell_product()
+ * function exists or is introduced here): only the client this direct
+ * `.update()` runs through changes, reusing `audit.client` exactly like
+ * reserveProduct/releaseProduct above. Zero-rows-affected still returns
+ * silently (no strict mode, no throw) — byte-for-byte the same contract
+ * as before. */
 export async function markProductSold(productId: string, audit?: OrderAuditContext): Promise<void> {
-  const { data, error } = await supabase
+  const client = audit?.client ?? supabase;
+  const { data, error } = await client
     .from("products")
     .update({ status: "Sold" })
     .eq("id", productId)
@@ -1098,20 +1155,30 @@ export function toFullOrderRecord(
 // implementation at that time.
 // ---------------------------------------------------------------------------
 
+/** RLS compatibility (2026082211_orders_compensations_sales_commissions_rls_lockdown.sql)
+ * — every member below whose table (orders/order_items/compensations/
+ * sales_commissions/products) had its anon-inclusive RLS policy removed now
+ * accepts an optional trailing `client`/`audit` parameter, reusing whichever
+ * pattern that function already had (OrderAuditContext where D5 audit
+ * logging already threads a real client through, a plain `client` parameter
+ * everywhere else). All optional, all defaulting to the anon singleton in
+ * the concrete implementation — this interface only exists so
+ * order.service.ts's orchestration can actually pass one through. No
+ * method's business behavior, argument order, or return type changes. */
 export interface OrderReadRepository {
-  findAllOrders(): Promise<OrderWithItemCount[]>;
-  findOrderById(id: string): Promise<Order | null>;
-  findOrderItemsByOrderId(orderId: string): Promise<OrderItem[]>;
+  findAllOrders(staff?: ScopingStaff, client?: SupabaseClient): Promise<OrderWithItemCount[]>;
+  findOrderById(id: string, staff?: ScopingStaff, client?: SupabaseClient): Promise<Order | null>;
+  findOrderItemsByOrderId(orderId: string, client?: SupabaseClient): Promise<OrderItem[]>;
   findPaymentsByOrderId(orderId: string): Promise<OrderPayment[]>;
   findOrderEventsByOrderId(orderId: string): Promise<OrderEvent[]>;
-  findRevenueRecognizedOrders(start: string, end: string): Promise<Order[]>;
+  findRevenueRecognizedOrders(start: string, end: string, client?: SupabaseClient): Promise<Order[]>;
 }
 
 export interface OrderWriteRepository {
-  createOrder(input: CreateOrderInput): Promise<Order>;
+  createOrder(input: CreateOrderInput, client?: SupabaseClient): Promise<Order>;
   /** Generic field update — see ORDER_WRITABLE_FIELDS for scope. Added this
    * increment, additive only (no existing signature changed). */
-  updateOrder(id: string, changes: Partial<Order>): Promise<Order>;
+  updateOrder(id: string, changes: Partial<Order>, client?: SupabaseClient): Promise<Order>;
   /** Non-admin path only: Draft + Unpaid. The admin path
    * (deleteOrderWithReconciliation below) is a separate method, not a
    * parameter on this one, since it performs a fundamentally different,
@@ -1119,24 +1186,29 @@ export interface OrderWriteRepository {
    * Decision, 2026-08-14). `adminOverride` here only widens which
    * order_status/payment_status this simple single-table delete matches —
    * see the implementation's doc comment. */
-  deleteOrder(id: string, adminOverride?: boolean): Promise<void>;
+  deleteOrder(id: string, adminOverride?: boolean, client?: SupabaseClient): Promise<void>;
   /** Admin Order Deletion pre-check/execution — see each implementation's
    * own doc comment. Never called for the non-admin path. */
-  findCompensationStatusesForOrder(orderId: string): Promise<CompensationStatus[]>;
+  findCompensationStatusesForOrder(orderId: string, client?: SupabaseClient): Promise<CompensationStatus[]>;
   /** D12 Order Cancellation, Decision D (LOCKED) — existence-only read for
    * the UI's pre-confirm warning. See implementation's own doc comment. */
-  hasFinancialHistoryForOrder(orderId: string): Promise<{ hasCompensation: boolean; hasCommission: boolean }>;
+  hasFinancialHistoryForOrder(
+    orderId: string,
+    client?: SupabaseClient
+  ): Promise<{ hasCompensation: boolean; hasCommission: boolean }>;
   /** Compensation/Commission Void (Product Owner Authorization, 2026-08-20)
    * — pre-cancel snapshot, see implementation's own doc comment. */
-  findVoidableFinancialRecordsForOrder(orderId: string): Promise<VoidableFinancialRecords>;
+  findVoidableFinancialRecordsForOrder(orderId: string, client?: SupabaseClient): Promise<VoidableFinancialRecords>;
   deleteOrderWithReconciliation(staffId: string, orderId: string): Promise<void>;
   /** Dedicated, narrow status-transition methods — not a generic status
-   * setter (per this increment's explicit instruction). */
+   * setter (per this increment's explicit instruction). No live API caller
+   * today (confirmed by direct route trace) — left as anon-defaulting only,
+   * not extended, since there is nothing to thread a client through from. */
   reserveOrder(orderId: string): Promise<Order>;
   cancelReservation(orderId: string): Promise<Order>;
-  addOrderItem(input: AddOrderItemInput): Promise<OrderItem>;
-  updateOrderItem(input: UpdateOrderItemInput): Promise<OrderItem>;
-  removeOrderItem(orderId: string, id: string): Promise<void>;
+  addOrderItem(input: AddOrderItemInput, client?: SupabaseClient): Promise<OrderItem>;
+  updateOrderItem(input: UpdateOrderItemInput, client?: SupabaseClient): Promise<OrderItem>;
+  removeOrderItem(orderId: string, id: string, client?: SupabaseClient): Promise<void>;
   /** Product lifecycle (ORDERS_SPEC.md §7) — see the implementations above
    * for the exact guard/throw semantics of each. `audit`: see
    * OrderAuditContext's own doc comment. */
@@ -1144,13 +1216,14 @@ export interface OrderWriteRepository {
   releaseProduct(productId: string, audit?: OrderAuditContext): Promise<void>;
   markProductSold(productId: string, audit?: OrderAuditContext): Promise<void>;
   addPayment(input: AddPaymentInput): Promise<OrderPayment>;
-  markOrderLost(input: MarkOrderLostInput): Promise<Order>;
+  markOrderLost(input: MarkOrderLostInput, client?: SupabaseClient): Promise<Order>;
   completeOrder(
     orderId: string,
     purchaseRows: PurchaseSnapshotInput[],
-    commissionRows: CommissionSnapshotInput[]
+    commissionRows: CommissionSnapshotInput[],
+    client?: SupabaseClient
   ): Promise<Order>;
-  reassignSalesOwner(input: ReassignSalesOwnerInput): Promise<Order>;
+  reassignSalesOwner(input: ReassignSalesOwnerInput, client?: SupabaseClient): Promise<Order>;
   /** D12 Order Cancellation — see cancel_order_with_disposition's own doc
    * comment (supabase/migrations/2026081904_cancel_order_with_disposition.sql). */
   cancelOrder(
@@ -1161,7 +1234,7 @@ export interface OrderWriteRepository {
   appendOrderEvent(event: Omit<OrderEvent, "id" | "event_timestamp">): Promise<OrderEvent>;
   /** Persists rollup fields the service layer recomputes after every
    * order_items/payments mutation (ORDERS_DATABASE.md §4, "Derived"). */
-  updateOrderRollups(orderId: string, rollups: OrderRollups): Promise<Order>;
+  updateOrderRollups(orderId: string, rollups: OrderRollups, client?: SupabaseClient): Promise<Order>;
 }
 
 /** The full contract a future concrete repository implementation must satisfy. */

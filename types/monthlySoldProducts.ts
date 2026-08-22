@@ -105,16 +105,30 @@ export interface MonthlySoldProductsPage {
 // "Cost of Goods Sold" - the same Product Cost figure that was already being
 // computed internally for the Profit/Loss formula above, now also exposed
 // as its own line item for the Financial Summary panel's itemized layout
-// (Revenue / COGS / Operating Expenses / Net Profit-Loss / Profit Margin).
-// Same Owner/Manager-only gate as profitLoss/profitMargin ("Keep existing
-// permissions" - cogs is cost-derived exactly like those two, so it reuses
-// their existing gate rather than introducing a new one).
+// (Revenue / COGS / Partner Compensation / Staff Commission / Operating
+// Expenses / Net Profit-Loss / Profit Margin). Same Owner/Manager-only gate
+// as profitLoss/profitMargin ("Keep existing permissions" - cogs is
+// cost-derived exactly like those two, so it reuses their existing gate
+// rather than introducing a new one).
+//
+// partnerCompensation / staffCommission (Finance Project #1, Phase D,
+// Product Owner Approval 2026-08-21) - accrual-basis commission expense,
+// now subtracted in profitLoss alongside cogs/operatingExpenses (see
+// lib/monthlySoldProducts/monthlySoldProducts.service.ts's own doc comment
+// and lib/reports/commissionExpense.ts for the full accrual-vs-cash
+// reasoning). Same Owner/Manager-only gate as cogs - both are cost-derived.
+// Partner Compensation and Staff Commission stay two separate systems
+// (compensations / sales_commissions) - exposed as two distinct fields
+// here, never merged into one number before this point, so the Financial
+// Summary panel can show them as separate line items.
 export interface MonthlySoldProductsSummary {
   totalRevenue: number;
   totalCustomers: number;
   totalOrders: number;
   operatingExpenses: number;
   cogs: number | null;
+  partnerCompensation: number | null;
+  staffCommission: number | null;
   profitLoss: number | null;
   profitMargin: number | null;
 }

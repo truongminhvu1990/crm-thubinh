@@ -3,6 +3,7 @@ import { getOrderDetail } from "@/lib/orders/order.service";
 import { orderService } from "../../_service";
 import { handleOrderServiceError } from "../../_errors";
 import { authorizeOrderCancellation } from "../../_authorization";
+import { createClient } from "@/lib/supabase/server";
 
 /** D12 Order Cancellation, Decision D (LOCKED) — read-only check the
  * Cancel dialog calls before showing its confirm step, to decide whether
@@ -13,7 +14,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
 
   try {
-    const detail = await getOrderDetail(id);
+    // RLS compatibility (2026082211): resolved before the existence check
+    // too — orders/order_items reads are authenticated-only now.
+    const client = await createClient();
+    const detail = await getOrderDetail(id, undefined, client);
     if (!detail) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
@@ -21,7 +25,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const authResult = await authorizeOrderCancellation(request);
     if ("error" in authResult) return authResult.error;
 
-    const info = await orderService.getCancellationInfo(id);
+    const info = await orderService.getCancellationInfo(id, client);
     return NextResponse.json(info);
   } catch (error) {
     return handleOrderServiceError(error, request.headers.get("x-vercel-id") ?? crypto.randomUUID());

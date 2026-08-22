@@ -3,6 +3,7 @@ import { getOrderDetail } from "@/lib/orders/order.service";
 import { orderService } from "../../_service";
 import { handleOrderServiceError } from "../../_errors";
 import { authorizeOrderWrite } from "../../_authorization";
+import { createClient } from "@/lib/supabase/server";
 
 /** ORDERS_UI.md §5/§6 — Reassign Sales Owner. Authorization Engine V2
  * (Package 4A) — Authentication/Permission/Data Scope enforced via
@@ -14,7 +15,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   try {
     const body = await request.json();
-    const detail = await getOrderDetail(id);
+    // RLS compatibility (2026082211): resolved before the existence check
+    // too — orders/order_items reads are authenticated-only now.
+    const auditClient = await createClient();
+    const detail = await getOrderDetail(id, undefined, auditClient);
     if (!detail) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
@@ -24,7 +28,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const order = await orderService.reassignSalesOwner(
       { order_id: id, sales_owner: body.sales_owner },
-      authResult.staff.full_name
+      authResult.staff.full_name,
+      auditClient
     );
     return NextResponse.json(order);
   } catch (error) {

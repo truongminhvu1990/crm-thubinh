@@ -63,9 +63,13 @@ export interface OrderListItem extends Order {
  *
  * Data Scope Rollout (Sprint v4.1), Package 2 - `staff` is optional,
  * threaded straight through to `findAllOrders`, preserving this function's
- * existing contract for any caller that doesn't pass it. */
-export async function getOrderList(staff?: ScopingStaff): Promise<OrderListItem[]> {
-  const rows = await orderRepository.findAllOrders(staff);
+ * existing contract for any caller that doesn't pass it.
+ *
+ * RLS compatibility (2026082211): `client` is optional — authenticated API
+ * routes pass their real request-scoped server client so this read runs
+ * under the caller's own session, not the anon-defaulting singleton. */
+export async function getOrderList(staff?: ScopingStaff, client?: SupabaseClient): Promise<OrderListItem[]> {
+  const rows = await orderRepository.findAllOrders(staff, client);
 
   return rows.map((row) => ({
     ...row,
@@ -87,13 +91,20 @@ export interface OrderDetail {
  * fields are unaffected. `staff` (optional, Package 2) scopes the order
  * header lookup only - items/payments/events belong to whatever order was
  * already found, so scoping them again would be redundant, not additional
- * protection. */
-export async function getOrderDetail(id: string, staff?: ScopingStaff): Promise<OrderDetail | null> {
-  const order = await orderRepository.findOrderById(id, staff);
+ * protection.
+ *
+ * RLS compatibility (2026082211): `client` is optional — authenticated API
+ * routes pass their real request-scoped server client through to the order
+ * and order_items reads below (necessary since both tables' anon-inclusive
+ * RLS policy was removed, leaving authenticated-only). payments/order_events
+ * are unaffected by that migration and keep using their own anon-defaulting
+ * default — no client is threaded to them. */
+export async function getOrderDetail(id: string, staff?: ScopingStaff, client?: SupabaseClient): Promise<OrderDetail | null> {
+  const order = await orderRepository.findOrderById(id, staff, client);
   if (!order) return null;
 
   const [items, payments, events] = await Promise.all([
-    orderRepository.findOrderItemsByOrderId(id),
+    orderRepository.findOrderItemsByOrderId(id, client),
     orderRepository.findPaymentsByOrderId(id),
     orderRepository.findOrderEventsByOrderId(id),
   ]);
@@ -247,8 +258,14 @@ export async function getOrdersRevenueForRange(start: string, end: string): Prom
 // ---------------------------------------------------------------------------
 
 export interface OrderWriteService {
-  createOrder(input: CreateOrderInput, actor: string): Promise<Order>;
-  updateOrder(input: UpdateOrderInput, actor: string): Promise<Order>;
+  /** `auditClient` (RLS compatibility, 2026082211): optional so
+   * order.service.test.ts's existing fakes/call sites stay valid; a real
+   * Orders route always has one — same contract as the addProductToOrder/
+   * markOrderLost/completeOrder/cancelOrder `auditClient` params below,
+   * just extended to every write that touches orders/order_items now that
+   * their anon-inclusive RLS policy is gone. */
+  createOrder(input: CreateOrderInput, actor: string, auditClient?: SupabaseClient): Promise<Order>;
+  updateOrder(input: UpdateOrderInput, actor: string, auditClient?: SupabaseClient): Promise<Order>;
   /**
    * `adminOverride` (Product Owner Full Order Control Decision, 2026-08-14) —
    * Owner only, resolved and passed by the caller (the API route), never
@@ -256,9 +273,13 @@ export interface OrderWriteService {
    * it is the server-verified actor's staff id, passed through to
    * `delete_order_with_reconciliation`'s own `p_staff_id` argument so the
    * database can independently re-verify the Owner role itself (2026081717
-   * migration) rather than trusting this layer alone.
+   * migration) rather than trusting this layer alone. `auditClient`: RLS
+   * compatibility, same contract as above — only used for the non-admin
+   * path's own `orders`/`products` writes; the admin path already runs
+   * through `deleteOrderWithReconciliation`'s service-role client,
+   * unaffected either way.
    */
-  deleteOrder(orderId: string, actor: string, adminOverride?: boolean, staffId?: string): Promise<void>;
+  deleteOrder(orderId: string, actor: string, adminOverride?: boolean, staffId?: string, auditClient?: SupabaseClient): Promise<void>;
   reserveOrder(orderId: string, actor: string): Promise<Order>;
   cancelReservation(orderId: string, actor: string): Promise<Order>;
   /** `auditClient`: an authenticated Supabase client resolved by the route
@@ -268,19 +289,25 @@ export interface OrderWriteService {
    * order.service.test.ts's existing fakes/call sites stay valid; a real
    * Orders route always has one (every route is session-gated by proxy.ts). */
   addProductToOrder(input: AddOrderItemInput, actor: string, auditClient?: SupabaseClient): Promise<OrderItem>;
-  updateOrderItem(input: UpdateOrderItemInput, actor: string): Promise<OrderItem>;
+  updateOrderItem(input: UpdateOrderItemInput, actor: string, auditClient?: SupabaseClient): Promise<OrderItem>;
   removeProductFromOrder(
     orderId: string,
     orderItemId: string,
     actor: string,
     auditClient?: SupabaseClient
   ): Promise<void>;
-  addPayment(input: AddPaymentInput, actor: string): Promise<OrderPayment>;
+  /** `auditClient`: RLS compatibility (2026082211) — addPayment's own
+   * order_payments insert is unaffected (not one of that migration's locked
+   * tables), but the rollup recomputation it triggers below writes to
+   * `orders`, which is. Same optional-for-tests contract as every other
+   * `auditClient` param in this interface. */
+  addPayment(input: AddPaymentInput, actor: string, auditClient?: SupabaseClient): Promise<OrderPayment>;
   /** Standalone entry point for the same rollup recomputation addPayment
    * already triggers internally — exposed for reconciliation/repair use, not
    * a new calculation (reuses the existing private helper as-is). No event
-   * logged: recalculation isn't one of ORDERS_SPEC.md §8's 8 event types. */
-  recalculatePaymentStatus(orderId: string): Promise<Order>;
+   * logged: recalculation isn't one of ORDERS_SPEC.md §8's 8 event types.
+   * `auditClient`: RLS compatibility, same reason as addPayment above. */
+  recalculatePaymentStatus(orderId: string, auditClient?: SupabaseClient): Promise<Order>;
   markOrderLost(input: MarkOrderLostInput, actor: string, auditClient?: SupabaseClient): Promise<Order>;
   completeOrder(orderId: string, actor: string, auditClient?: SupabaseClient): Promise<Order>;
   /** D12 Order Cancellation (Product Owner Authorization, 2026-08-19) —
@@ -290,9 +317,10 @@ export interface OrderWriteService {
    * contract as completeOrder/markOrderLost above. */
   cancelOrder(input: CancelOrderInput, actor: string, auditClient?: SupabaseClient): Promise<Order>;
   /** D12, Decision D (LOCKED) — existence-only read the UI uses to decide
-   * whether to show the compensation/commission warning before confirm. */
-  getCancellationInfo(orderId: string): Promise<{ hasCompensation: boolean; hasCommission: boolean }>;
-  reassignSalesOwner(input: ReassignSalesOwnerInput, actor: string): Promise<Order>;
+   * whether to show the compensation/commission warning before confirm.
+   * `client`: RLS compatibility, same contract as above. */
+  getCancellationInfo(orderId: string, client?: SupabaseClient): Promise<{ hasCompensation: boolean; hasCommission: boolean }>;
+  reassignSalesOwner(input: ReassignSalesOwnerInput, actor: string, auditClient?: SupabaseClient): Promise<Order>;
 }
 
 export class OrderNotFoundError extends Error {}
@@ -319,8 +347,15 @@ export class OrderRuleViolationError extends Error {}
  */
 export class OrderDeleteCompensationConflictError extends Error {}
 
-async function requireOrder(repository: OrderRepository, orderId: string): Promise<Order> {
-  const order = await repository.findOrderById(orderId);
+/** `client`: RLS compatibility (2026082211) — optional so every existing
+ * call site (and order.service.test.ts's fakes) stays valid; every write
+ * orchestration method below passes its own `auditClient` through so this
+ * existence check runs under the caller's authenticated session, not the
+ * anon-defaulting singleton (orders SELECT is authenticated-only now — an
+ * anon read here would silently return null and misreport a real order as
+ * not found). */
+async function requireOrder(repository: OrderRepository, orderId: string, client?: SupabaseClient): Promise<Order> {
+  const order = await repository.findOrderById(orderId, undefined, client);
   if (!order) {
     throw new OrderNotFoundError(`Order ${orderId} not found`);
   }
@@ -340,10 +375,14 @@ function assertOrderEditable(order: Order): void {
 }
 
 /** Recomputes and persists subtotal/discount total/total amount/payment
- * status after any order_items or payments mutation (ORDERS_DATABASE.md §4). */
-async function recomputeAndPersistRollups(repository: OrderRepository, orderId: string): Promise<Order> {
+ * status after any order_items or payments mutation (ORDERS_DATABASE.md §4).
+ * `client`: RLS compatibility (2026082211) — threaded to the order_items
+ * read and the orders-table rollup write, both locked to authenticated-only;
+ * findPaymentsByOrderId is unaffected (order_payments isn't one of that
+ * migration's locked tables) and keeps its own anon-defaulting default. */
+async function recomputeAndPersistRollups(repository: OrderRepository, orderId: string, client?: SupabaseClient): Promise<Order> {
   const [items, payments] = await Promise.all([
-    repository.findOrderItemsByOrderId(orderId),
+    repository.findOrderItemsByOrderId(orderId, client),
     repository.findPaymentsByOrderId(orderId),
   ]);
 
@@ -352,16 +391,16 @@ async function recomputeAndPersistRollups(repository: OrderRepository, orderId: 
   const total_amount = calculateTotalAmount(subtotal, discount_total);
   const payment_status = derivePaymentStatus(total_amount, calculateAmountPaid(payments));
 
-  return repository.updateOrderRollups(orderId, { subtotal, discount_total, total_amount, payment_status });
+  return repository.updateOrderRollups(orderId, { subtotal, discount_total, total_amount, payment_status }, client);
 }
 
 /** Dependency injection through the repository interface only — no concrete
  * (Supabase or otherwise) repository is referenced here. */
 export function createOrderService(repository: OrderRepository): OrderWriteService {
   return {
-    async createOrder(input, actor) {
+    async createOrder(input, actor, auditClient) {
       throwIfErrors(validateCreateOrderInput(input));
-      const order = await repository.createOrder(input);
+      const order = await repository.createOrder(input, auditClient);
       await repository.appendOrderEvent({
         order_id: order.id!,
         event_type: "Order Created",
@@ -371,14 +410,14 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       return order;
     },
 
-    async updateOrder(input) {
-      await requireOrder(repository, input.order_id);
+    async updateOrder(input, _actor, auditClient) {
+      await requireOrder(repository, input.order_id, auditClient);
       const { order_id, ...changes } = input;
-      return repository.updateOrder(order_id, changes);
+      return repository.updateOrder(order_id, changes, auditClient);
     },
 
-    async deleteOrder(orderId, _actor, adminOverride = false, staffId) {
-      const order = await requireOrder(repository, orderId);
+    async deleteOrder(orderId, _actor, adminOverride = false, staffId, auditClient) {
+      const order = await requireOrder(repository, orderId, auditClient);
 
       if (!adminOverride) {
         const deletionError = validateOrderDeletion(order.order_status, order.payment_status);
@@ -391,8 +430,8 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
         // §7) — order_items cascade-deletes with the order, so their
         // products must be released first or they'd be stranded Reserved
         // with no order left holding them.
-        const items = await repository.findOrderItemsByOrderId(orderId);
-        await repository.deleteOrder(orderId, false);
+        const items = await repository.findOrderItemsByOrderId(orderId, auditClient);
+        await repository.deleteOrder(orderId, false, auditClient);
         await Promise.all(items.map((item) => repository.releaseProduct(item.product_id)));
         return;
       }
@@ -408,7 +447,7 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       // condition is re-checked, independently, inside
       // delete_order_with_reconciliation itself (2026081717 migration) —
       // this call is defense in depth, not the only enforcement point.
-      const compensationStatuses = await repository.findCompensationStatusesForOrder(orderId);
+      const compensationStatuses = await repository.findCompensationStatusesForOrder(orderId, auditClient);
       if (compensationStatuses.some((s) => s === "Confirmed" || s === "Handed Off")) {
         throw new OrderDeleteCompensationConflictError(
           "Đơn hàng có hoa hồng đối tác đã Xác nhận hoặc Bàn giao — không thể xóa vì sẽ làm mất lịch sử tài chính đã ghi nhận."
@@ -457,7 +496,7 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
     },
 
     async addProductToOrder(input, actor, auditClient) {
-      const order = await requireOrder(repository, input.order_id);
+      const order = await requireOrder(repository, input.order_id, auditClient);
       assertOrderEditable(order);
       throwIfErrors(validateAddOrderItemInput(input));
 
@@ -478,7 +517,7 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
 
       let item: OrderItem;
       try {
-        item = await repository.addOrderItem(input);
+        item = await repository.addOrderItem(input, auditClient);
       } catch (err) {
         // Best-effort rollback of the reservation above if the item insert
         // itself then fails, so the product isn't left stranded Reserved
@@ -487,7 +526,7 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
         throw err;
       }
 
-      await recomputeAndPersistRollups(repository, input.order_id);
+      await recomputeAndPersistRollups(repository, input.order_id, auditClient);
       await repository.appendOrderEvent({
         order_id: input.order_id,
         event_type: "Product Added",
@@ -497,11 +536,11 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       return item;
     },
 
-    async updateOrderItem(input, actor) {
-      const order = await requireOrder(repository, input.order_id);
+    async updateOrderItem(input, actor, auditClient) {
+      const order = await requireOrder(repository, input.order_id, auditClient);
       assertOrderEditable(order);
 
-      const items = await repository.findOrderItemsByOrderId(input.order_id);
+      const items = await repository.findOrderItemsByOrderId(input.order_id, auditClient);
       const current = items.find((item) => item.id === input.id);
       if (!current) {
         throw new OrderNotFoundError(`Order item ${input.id} not found`);
@@ -522,8 +561,8 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       };
       throwIfErrors(validateAddOrderItemInput(merged));
 
-      const item = await repository.updateOrderItem(input);
-      await recomputeAndPersistRollups(repository, input.order_id);
+      const item = await repository.updateOrderItem(input, auditClient);
+      await recomputeAndPersistRollups(repository, input.order_id, auditClient);
       await repository.appendOrderEvent({
         order_id: input.order_id,
         event_type: "Price Changed",
@@ -534,7 +573,7 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
     },
 
     async removeProductFromOrder(orderId, orderItemId, actor, auditClient) {
-      const order = await requireOrder(repository, orderId);
+      const order = await requireOrder(repository, orderId, auditClient);
       assertOrderEditable(order);
 
       // Necessary counterpart of addProductToOrder's reserveProduct call:
@@ -543,14 +582,14 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       // holding it (ORDERS_SPEC.md §7 only names Completed/Lost as
       // transition triggers, but removal is the same "no longer held by
       // this order" case in substance).
-      const items = await repository.findOrderItemsByOrderId(orderId);
+      const items = await repository.findOrderItemsByOrderId(orderId, auditClient);
       const removedItem = items.find((item) => item.id === orderItemId);
 
-      await repository.removeOrderItem(orderId, orderItemId);
+      await repository.removeOrderItem(orderId, orderItemId, auditClient);
       if (removedItem) {
         await repository.releaseProduct(removedItem.product_id, auditClient ? { actor, client: auditClient } : undefined);
       }
-      await recomputeAndPersistRollups(repository, orderId);
+      await recomputeAndPersistRollups(repository, orderId, auditClient);
       await repository.appendOrderEvent({
         order_id: orderId,
         event_type: "Product Removed",
@@ -559,8 +598,8 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       });
     },
 
-    async addPayment(input, actor) {
-      const order = await requireOrder(repository, input.order_id);
+    async addPayment(input, actor, auditClient) {
+      const order = await requireOrder(repository, input.order_id, auditClient);
       if (!canAddPayment(order.order_status, order.payment_status)) {
         throw new OrderRuleViolationError("Đơn hàng không thể nhận thêm thanh toán ở trạng thái hiện tại");
       }
@@ -582,7 +621,7 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       }
 
       const payment = await repository.addPayment(input);
-      await recomputeAndPersistRollups(repository, input.order_id);
+      await recomputeAndPersistRollups(repository, input.order_id, auditClient);
       await repository.appendOrderEvent({
         order_id: input.order_id,
         event_type: "Payment Added",
@@ -592,13 +631,13 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       return payment;
     },
 
-    async recalculatePaymentStatus(orderId) {
-      await requireOrder(repository, orderId);
-      return recomputeAndPersistRollups(repository, orderId);
+    async recalculatePaymentStatus(orderId, auditClient) {
+      await requireOrder(repository, orderId, auditClient);
+      return recomputeAndPersistRollups(repository, orderId, auditClient);
     },
 
     async markOrderLost(input, actor, auditClient) {
-      const order = await requireOrder(repository, input.order_id);
+      const order = await requireOrder(repository, input.order_id, auditClient);
 
       const transitionError = validateMarkOrderLostTransition(order.order_status);
       if (transitionError) {
@@ -614,8 +653,8 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
 
       // ORDERS_SPEC.md §7: "Reserved --(order marked Lost)--> Available" —
       // every reserved line's product goes back to Active.
-      const items = await repository.findOrderItemsByOrderId(input.order_id);
-      const updated = await repository.markOrderLost(input);
+      const items = await repository.findOrderItemsByOrderId(input.order_id, auditClient);
+      const updated = await repository.markOrderLost(input, auditClient);
       await Promise.all(items.map((item) => repository.releaseProduct(item.product_id, audit)));
       await repository.appendOrderEvent({
         order_id: input.order_id,
@@ -627,8 +666,8 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
     },
 
     async completeOrder(orderId, actor, auditClient) {
-      const order = await requireOrder(repository, orderId);
-      const items = await repository.findOrderItemsByOrderId(orderId);
+      const order = await requireOrder(repository, orderId, auditClient);
+      const items = await repository.findOrderItemsByOrderId(orderId, auditClient);
 
       const completionError = validateOrderCompletion(order.order_status, items.length);
       if (completionError) {
@@ -698,7 +737,7 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
 
       // ORDERS_SPEC.md §7: "Reserved --(order Completed)--> Sold" — every
       // reserved line's product becomes Sold.
-      const updated = await repository.completeOrder(orderId, purchaseRows, commissionRows);
+      const updated = await repository.completeOrder(orderId, purchaseRows, commissionRows, auditClient);
       const audit = auditClient ? { actor, client: auditClient } : undefined;
       await Promise.all(items.map((item) => repository.markProductSold(item.product_id, audit)));
       await repository.appendOrderEvent({
@@ -723,9 +762,9 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       return updated;
     },
 
-    async getCancellationInfo(orderId) {
-      await requireOrder(repository, orderId);
-      return repository.hasFinancialHistoryForOrder(orderId);
+    async getCancellationInfo(orderId, client) {
+      await requireOrder(repository, orderId, client);
+      return repository.hasFinancialHistoryForOrder(orderId, client);
     },
 
     /**
@@ -740,14 +779,14 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
      * anything, only executes (same split as completeOrder above).
      */
     async cancelOrder(input, actor, auditClient) {
-      const order = await requireOrder(repository, input.order_id);
+      const order = await requireOrder(repository, input.order_id, auditClient);
 
       const transitionError = validateCancelOrderTransition(order.order_status);
       if (transitionError) {
         throw new OrderRuleViolationError(transitionError);
       }
 
-      const items = await repository.findOrderItemsByOrderId(input.order_id);
+      const items = await repository.findOrderItemsByOrderId(input.order_id, auditClient);
 
       const inputError = validateCancelOrderInput(input, items);
       if (inputError) {
@@ -761,7 +800,7 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       // actually performs the Void, atomically with orders/products, in
       // the same transaction - this snapshot never decides or writes
       // anything, it only remembers what's about to change for logging.
-      const voidable = await repository.findVoidableFinancialRecordsForOrder(input.order_id);
+      const voidable = await repository.findVoidableFinancialRecordsForOrder(input.order_id, auditClient);
 
       const audit = auditClient ? { actor, client: auditClient } : undefined;
       const updated = await repository.cancelOrder(input.order_id, input.dispositions, audit);
@@ -834,8 +873,8 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       return updated;
     },
 
-    async reassignSalesOwner(input, actor) {
-      const order = await requireOrder(repository, input.order_id);
+    async reassignSalesOwner(input, actor, auditClient) {
+      const order = await requireOrder(repository, input.order_id, auditClient);
       if (!canReassignSalesOwner(order.order_status)) {
         throw new OrderRuleViolationError("Đơn hàng không ở trạng thái có thể đổi người phụ trách");
       }
@@ -845,7 +884,7 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
         throw new OrderValidationError({ sales_owner: ownerError });
       }
 
-      const updated = await repository.reassignSalesOwner(input);
+      const updated = await repository.reassignSalesOwner(input, auditClient);
       await repository.appendOrderEvent({
         order_id: input.order_id,
         event_type: "Sales Owner Reassigned",

@@ -1,5 +1,6 @@
 import { Page, expect } from "@playwright/test";
 import { LoginPage } from "../pages/LoginPage";
+import { waitForLoading } from "./wait";
 
 export type QaRole = "OWNER" | "MANAGER" | "SALES" | "MARKETING" | "VIEWER";
 
@@ -31,6 +32,19 @@ async function loginAs(page: Page, role: QaRole) {
   const loginPage = new LoginPage(page);
   await loginPage.login(email, password);
   await expect(page).toHaveURL(/\/dashboard/);
+  // Dashboard fires its own stats fetch on mount and only clears its
+  // loading spinner once that fetch settles (app/dashboard/page.tsx) — if
+  // a caller navigates away before it resolves, the browser aborts the
+  // in-flight request and Dashboard's own .catch() logs "Failed to load
+  // dashboard stats: TypeError: Failed to fetch" to the console, which the
+  // shared autoDiagnostics fixture (tests/shared/fixtures.ts) then fails
+  // the test on — a false failure with no relation to whatever page the
+  // test actually cares about. Waiting for the spinner to clear here (the
+  // same existing waitForLoading() every other page in this suite already
+  // uses) lets that fetch finish normally before any subsequent
+  // navigation, closing the race at its source instead of pattern-matching
+  // or filtering the resulting console error.
+  await waitForLoading(page);
   return loginPage;
 }
 

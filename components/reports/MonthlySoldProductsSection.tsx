@@ -35,6 +35,8 @@ const EMPTY_SUMMARY: Summary = {
   totalOrders: 0,
   operatingExpenses: 0,
   cogs: null,
+  partnerCompensation: null,
+  staffCommission: null,
   profitLoss: null,
   profitMargin: null,
 };
@@ -195,6 +197,8 @@ export default function MonthlySoldProductsSection() {
         filters={{ dateFrom: filters.dateFrom, dateTo: filters.dateTo, month: filters.month }}
         revenue={summary.totalRevenue}
         cogs={summary.cogs}
+        partnerCompensation={summary.partnerCompensation}
+        staffCommission={summary.staffCommission}
         profitLoss={summary.profitLoss}
         profitMargin={summary.profitMargin}
         canManage={canViewGrossProfit}

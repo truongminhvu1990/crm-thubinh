@@ -42,6 +42,27 @@ export function calculateRemainingBalance(totalAmount: number, payments: Pick<Or
   return totalAmount - calculateAmountPaid(payments);
 }
 
+/** Finance Project #1, Phase C (Product Owner Approval, 2026-08-21) —
+ * classifies an already-computed remaining balance (Total − Paid) for
+ * display. Overpayment stays WARNING-ONLY per that decision: this function
+ * only labels the existing, unclamped calculateRemainingBalance() result —
+ * it never caps a payment, never blocks one, and never triggers a refund.
+ * Outstanding > 0, Settled = 0 (exactly paid), Overpaid < 0. */
+export type FinancialSettlementState = "Outstanding" | "Settled" | "Overpaid";
+
+export function deriveFinancialSettlementState(remainingBalance: number): FinancialSettlementState {
+  if (remainingBalance > 0) return "Outstanding";
+  if (remainingBalance < 0) return "Overpaid";
+  return "Settled";
+}
+
+/** Always >= 0 — the positive amount a customer has overpaid by, or 0 when
+ * remainingBalance isn't negative. Never subtracted from or netted against
+ * anything else here; callers decide how to surface it. */
+export function calculateOverpaidAmount(remainingBalance: number): number {
+  return remainingBalance < 0 ? -remainingBalance : 0;
+}
+
 /** ORDERS_SPEC.md §3: "Line total — Snapshot Sale Price × quantity, minus discount." */
 export function computeLineTotal(snapshotSalePrice: number, discount: number, quantity: number): number {
   return snapshotSalePrice * quantity - discount;
@@ -107,15 +128,25 @@ export function canMarkOrderLost(status: OrderStatus): boolean {
 }
 
 /**
- * ORDERS_SPEC.md §5's follow-on rule: Add Payment stays valid on a Completed
- * order whose Payment Status isn't yet Paid. ORDERS_UI.md §7 Availability:
- * never on a Lost order (nothing left to collect on a dead deal), never once
- * Paid (nothing left to pay).
+ * ORDERS_SPEC.md §5's follow-on rule: Add Payment stays valid on Draft/
+ * Reserved/Completed orders whose Payment Status isn't yet Paid. ORDERS_UI.md
+ * §7 Availability: never on a Lost order (nothing left to collect on a dead
+ * deal), never once Paid (nothing left to pay) — regardless of order_status.
+ *
+ * Finance Project #1 (Product Owner Authorization, 2026-08-22) — the "never
+ * once Paid" half of this rule used to be gated behind `orderStatus ===
+ * "Completed"`, so a Draft/Reserved order that reached Paid (or Overpaid,
+ * which is stored as payment_status "Paid" too — see derivePaymentStatus,
+ * there is no separate "Overpaid" PaymentStatus value) could still take
+ * another payment. That contradicted this function's own doc comment above
+ * and ORDERS_UI.md §7's plain "never once Paid" statement. Fixed to check
+ * paymentStatus unconditionally, matching the single-source-of-truth rule
+ * both the UI (app/orders/[id]/page.tsx) and the server (order.service.ts's
+ * addPayment) already call.
  */
 export function canAddPayment(orderStatus: OrderStatus, paymentStatus: PaymentStatus): boolean {
   if (orderStatus === "Lost") return false;
-  if (orderStatus === "Completed") return paymentStatus !== "Paid";
-  return true;
+  return paymentStatus !== "Paid";
 }
 
 /**

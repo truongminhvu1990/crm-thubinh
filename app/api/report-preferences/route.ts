@@ -4,7 +4,7 @@ import { ReportKey } from "@/types/reportPreferences";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentStaffFromRequest } from "@/lib/permission/serverAuth";
 
-const VALID_REPORT_KEYS: ReportKey[] = ["sales_ledger", "monthly_sold_products"];
+const VALID_REPORT_KEYS: ReportKey[] = ["sales_ledger", "monthly_sold_products", "customer_receivable"];
 
 function isValidReportKey(value: string | null): value is ReportKey {
   return !!value && (VALID_REPORT_KEYS as string[]).includes(value);

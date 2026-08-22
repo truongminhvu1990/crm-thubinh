@@ -21,6 +21,11 @@ interface Props {
   /** Reused as-is from the main report summary - see FinancialSummaryPanel. */
   revenue: number;
   cogs: number | null;
+  /** Finance Project #1, Phase D (Product Owner Approval, 2026-08-21) -
+   * accrual-basis commission expense, reused as-is from the main report
+   * summary. Same Owner/Manager-only gate as `cogs`. */
+  partnerCompensation: number | null;
+  staffCommission: number | null;
   /** Same Owner/Manager-only gate as this report's Gross Profit column -
    * both figures are cost-derived, `null` here means the viewer can't see
    * them, not that they're zero. */
@@ -54,6 +59,8 @@ export default function ExpenseManagementSection({
   filters,
   revenue,
   cogs,
+  partnerCompensation,
+  staffCommission,
   profitLoss,
   profitMargin,
   canManage,
@@ -117,6 +124,8 @@ export default function ExpenseManagementSection({
       <FinancialSummaryPanel
         revenue={revenue}
         cogs={cogs}
+        partnerCompensation={partnerCompensation}
+        staffCommission={staffCommission}
         operatingExpenses={total}
         profitLoss={profitLoss}
         profitMargin={profitMargin}

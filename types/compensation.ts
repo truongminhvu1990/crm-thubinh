@@ -17,7 +17,7 @@
  * Settlement — status exists, no action reaches it, Settlement is
  * unbuilt). Cancelled is reachable from Draft/Pending only, when the
  * underlying Order is marked Lost. */
-export type CompensationStatus = "Draft" | "Pending" | "Confirmed" | "Cancelled" | "Handed Off";
+export type CompensationStatus = "Draft" | "Pending" | "Confirmed" | "Cancelled" | "Handed Off" | "Paid";
 export type CompensationType = "Commission" | "Bonus" | "Referral Fee" | "Incentive" | "Rebate";
 export type CompensationBasis = "Sale Price" | "Received Amount" | "Profit" | "Fixed Value";
 export type CompensationMethod = "Percentage" | "Fixed Amount" | "Manual";
@@ -52,6 +52,10 @@ export interface Compensation {
   confirmed_at?: string | null;
   confirmed_by?: string | null;
   cancelled_at?: string | null;
+  /** Finance Project #1, Phase A (Product Owner Approval, 2026-08-21) — set
+   * only by mark_settlement_paid() when the parent Settlement is marked
+   * Paid, cascading Handed Off -> Paid. */
+  paid_at?: string | null;
 
   created_at?: string;
   updated_at?: string;

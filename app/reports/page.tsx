@@ -27,6 +27,7 @@ import {
   Receipt,
   GitCompareArrows,
   Hourglass,
+  Landmark,
 } from "lucide-react";
 import StatCard from "@/components/ui/StatCard";
 import Button from "@/components/ui/Button";
@@ -562,6 +563,26 @@ export default function ReportsPage() {
                 <span className="block text-sm font-semibold text-foreground">Phương thức thanh toán</span>
                 <span className="block text-xs text-muted-foreground">
                   Đơn hàng, lượt thanh toán và tổng số tiền theo từng phương thức
+                </span>
+              </span>
+            </span>
+            <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0" />
+          </Link>
+
+          {/* Supplier Balance (Finance Project #1, Phase F re-scope,
+              Product Owner Approval 2026-08-21) - read-only, over the
+              existing Money Debt Ledger, gated by money_debt_ledger.view
+              (that data's own established permission, not reports.view). */}
+          <Link
+            href="/reports/supplier-balance"
+            className="flex items-center justify-between gap-3 bg-card border border-border rounded-xl shadow-sm p-4 hover:border-primary/40 transition-colors"
+          >
+            <span className="flex items-center gap-3">
+              <Landmark className="w-5 h-5 text-primary" />
+              <span>
+                <span className="block text-sm font-semibold text-foreground">Số dư Supplier</span>
+                <span className="block text-xs text-muted-foreground">
+                  Tổng IN, tổng OUT và số dư theo từng Supplier trên Money Debt Ledger
                 </span>
               </span>
             </span>

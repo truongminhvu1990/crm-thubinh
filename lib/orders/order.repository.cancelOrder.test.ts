@@ -8,6 +8,12 @@ import { mock } from "node:test";
  * pattern for why this must be an RPC call, not a plain UPDATE) and covers
  * Test 10's Order-level half: the Completed -> Cancelled audit_log entry.
  *
+ * INV-012 (Orders/RLS reservation-blocker fix, 2026-08-22) — cancelOrder now
+ * calls cancel_order_with_disposition through whichever client is in play
+ * (audit.client when present, the anon-defaulting `supabase` singleton
+ * otherwise — same audit.client reuse as reserveProduct/releaseProduct),
+ * so Test 10's fake authenticated client below needs its own `.rpc`.
+ *
  * mock.module() called once at file scope, mutable state per test — same
  * documented reasoning as order.repository.completeOrder.test.ts.
  */
@@ -64,7 +70,13 @@ test("cancelOrder: calls cancel_order_with_disposition with order id + dispositi
 
 test("Test 10: with an audit context, the Order's own Completed -> Cancelled transition is logged", async () => {
   nextRpcResult = { data: { id: "order-1", order_status: "Cancelled" }, error: null };
-  const fakeClient = { marker: "fake-authenticated-client" };
+  const fakeClient = {
+    marker: "fake-authenticated-client",
+    rpc(fn: string, params: Record<string, unknown>) {
+      rpcCalls.push({ fn, params });
+      return Promise.resolve(nextRpcResult);
+    },
+  };
 
   const { cancelOrder } = await import("./order.repository");
   await cancelOrder("order-1", [{ order_item_id: "item-1", disposition: "Remaining" }], {

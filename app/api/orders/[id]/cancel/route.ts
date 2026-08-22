@@ -15,7 +15,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   try {
     const body = await request.json();
-    const detail = await getOrderDetail(id);
+    // RLS compatibility (2026082211): resolved before the existence check
+    // too — orders/order_items reads are authenticated-only now.
+    const auditClient = await createClient();
+    const detail = await getOrderDetail(id, undefined, auditClient);
     if (!detail) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
@@ -23,7 +26,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const authResult = await authorizeOrderCancellation(request);
     if ("error" in authResult) return authResult.error;
 
-    const auditClient = await createClient();
     const order = await orderService.cancelOrder(
       { order_id: id, dispositions: body.dispositions ?? [] },
       authResult.staff.full_name,

@@ -380,14 +380,24 @@ export async function getFinancialAnalytics(range: DateRange | null, client: Sup
       q = applyRange(q, range, "created_at");
       return q;
     })(),
-    // Outstanding Compensation — Decision 6: SUM(Compensation Amount)
-    // WHERE status != 'Handed Off'. Read literally: this includes Draft,
+    // Outstanding Compensation — Decision 6, amended (Finance Project #1,
+    // Phase A Semantic Fix, Product Owner directive 2026-08-21): SUM
+    // (Compensation Amount) WHERE status NOT IN ('Handed Off', 'Paid').
+    // Original Decision 6 only excluded Handed Off, because no Paid status
+    // existed on Compensation until Phase A introduced it
+    // (mark_settlement_paid(), 2026082101_settlement_paid_module.sql) — a
+    // Paid Compensation is money that has actually moved, never
+    // "outstanding" under any reading of the term, so it's excluded here
+    // alongside Handed Off. Read literally, this still includes Draft,
     // Pending, Confirmed, AND Cancelled amounts — Decision 6's own text
-    // excludes only Handed Off, not Cancelled (unlike Decision 2's Total
-    // Compensation). No unstated Cancelled exclusion is added here, since
-    // Decision 6 is a complete, self-contained formula.
+    // excludes only what's no longer pending payout, not Cancelled (unlike
+    // Decision 2's Total Compensation). No unstated Cancelled exclusion is
+    // added here, since Decision 6 is a complete, self-contained formula.
+    // This is a read-model query change only — the Compensation state
+    // machine, Settlement Paid implementation, and underlying schema are
+    // all untouched.
     (() => {
-      let q = client.from("compensations").select("calculated_amount").neq("status", "Handed Off");
+      let q = client.from("compensations").select("calculated_amount").not("status", "in", '("Handed Off","Paid")');
       q = applyRange(q, range, "created_at");
       return q;
     })(),

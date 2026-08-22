@@ -11,6 +11,13 @@ interface Props {
    * (MonthlySoldProductsSummary.cogs). `null` when the viewer can't see
    * cost-derived figures (Staff) - shown as "—", never as 0. */
   cogs: number | null;
+  /** Finance Project #1, Phase D (Product Owner Approval, 2026-08-21) -
+   * accrual-basis commission expense, reused as-is from the main report
+   * summary. Same Owner/Manager-only gate as `cogs`. Two separate line
+   * items (Partner Compensation / Staff Commission stay two separate
+   * systems, never merged into one figure). */
+  partnerCompensation: number | null;
+  staffCommission: number | null;
   /** Reused as-is from ExpenseManagementSection's own already-fetched
    * expense total - never a second sum. */
   operatingExpenses: number;
@@ -48,8 +55,18 @@ function Row({
  * cards. Every value here is reused from an existing calculation
  * (Revenue/COGS from the report summary, Operating Expenses from this
  * section's own already-fetched total) - nothing is recomputed. */
-export default function FinancialSummaryPanel({ revenue, cogs, operatingExpenses, profitLoss, profitMargin }: Props) {
+export default function FinancialSummaryPanel({
+  revenue,
+  cogs,
+  partnerCompensation,
+  staffCommission,
+  operatingExpenses,
+  profitLoss,
+  profitMargin,
+}: Props) {
   const cogsKnown = cogs !== null;
+  const partnerCompensationKnown = partnerCompensation !== null;
+  const staffCommissionKnown = staffCommission !== null;
   const profitLossKnown = profitLoss !== null;
   const marginKnown = profitMargin !== null;
   const isLoss = profitLossKnown && (profitLoss as number) < 0;
@@ -60,6 +77,16 @@ export default function FinancialSummaryPanel({ revenue, cogs, operatingExpenses
       <div className="divide-y divide-border">
         <Row label="Doanh thu" value={currency.format(revenue)} muted />
         <Row label="Giá vốn hàng bán (COGS)" value={cogsKnown ? currency.format(cogs as number) : "—"} muted />
+        <Row
+          label="Hoa hồng đối tác"
+          value={partnerCompensationKnown ? currency.format(partnerCompensation as number) : "—"}
+          muted
+        />
+        <Row
+          label="Hoa hồng nhân viên"
+          value={staffCommissionKnown ? currency.format(staffCommission as number) : "—"}
+          muted
+        />
         <Row label="Chi phí vận hành" value={currency.format(operatingExpenses)} muted />
       </div>
       <div className="border-t-2 border-border mt-1">

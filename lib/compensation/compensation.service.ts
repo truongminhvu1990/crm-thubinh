@@ -22,14 +22,21 @@ import { logActivity } from "@/lib/activityLog.service";
  * the exact moment it would otherwise publish the event, and this function
  * never reaches back into Order's own tables to decide whether/when to run.
  *
- * Lifecycle (Product Owner Revision 2026-07-31, Decisions 1–3):
+ * Lifecycle (Product Owner Revision 2026-07-31, Decisions 1–3; extended by
+ * Finance Project #1, Phases A–B, 2026-08-21):
  * Draft (created here, at OrderConfirmed) -> Pending (markCompensationsEligible,
  * called from completeOrder() — Eligibility "may delay confirmation, but
  * must never change the creation trigger") -> Confirmed (confirmCompensation,
  * manual, compensation.manage, Payment Status = Paid gate) -> Handed Off
- * (status exists; unreachable — Settlement has no implementation and is
- * explicitly out of scope). Cancelled (cancelCompensationsForOrder, called
- * from markOrderLost()) is reachable from Draft/Pending only. */
+ * (handOffCompensation, called from Settlement's own hand-off step) -> Paid
+ * (mark_settlement_paid() cascade, when its Settlement is marked Paid).
+ * Cancelled (cancelCompensationsForOrder, called from markOrderLost()) is
+ * reachable from Draft/Pending/Confirmed (Phase B, Option B — Confirmed
+ * added; Handed Off/Paid are never touched by Order cancellation, see that
+ * function's own doc comment). Handed Off can also revert back to
+ * Confirmed via cancel_settlement_with_reversal() (Phase B) when its
+ * Settlement is cancelled — the only backward transition in this
+ * lifecycle. */
 
 const WITH_JOINS =
   "*, partner:partners(id, name, partner_code, partner_type, status), order:orders(id, order_number, order_date), customer:customers(id, full_name, customer_code), product:products(id, product_name, product_code)";
@@ -154,18 +161,32 @@ export async function markCompensationsEligible(orderId: string, client: Supabas
 
 /** Called from Order's own markOrderLost() — an Order that falls through
  * after being Confirmed-into-existence-as-Draft must not leave orphaned
- * Draft/Pending Compensation records behind. Confirmed/Handed Off records
- * are never touched here — once Confirmed, a Compensation is read-only
- * (task's own rule); Cancelled is only reachable from Draft/Pending,
- * mirroring how Order's own Lost is only reachable from Draft/Reserved.
- * Best-effort, same reasoning as createCompensationsForOrder. */
+ * not-yet-Paid Compensation records behind.
+ *
+ * Finance Project #1, Phase B (Product Owner Approval, 2026-08-21, Option
+ * B) — deliberate, PO-directed exception to this module's own prior
+ * "Compensation is read-only after Confirmed" rule: Draft/Pending/Confirmed
+ * are ALL voided (Cancelled) when the underlying Order is marked Lost, not
+ * just Draft/Pending. This is reachable in practice because Confirmed only
+ * requires the Order's Payment Status to be Paid (BR-001-style gate,
+ * confirmCompensation) — independent of order_status — so an Order can
+ * still be Reserved (not yet Completed) with a Confirmed Compensation
+ * already sitting on it, and Lost is only reachable from Draft/Reserved
+ * (mirrors Order's own transition rule).
+ *
+ * Handed Off / Paid are still never touched here — once handed off, a
+ * Compensation belongs to Settlement's own lifecycle (reversal on
+ * Settlement cancellation is a separate path, cancel_settlement_with_
+ * reversal(), not this one); Paid financial history must never be
+ * silently modified by Order cancellation. Best-effort, same reasoning as
+ * createCompensationsForOrder. */
 export async function cancelCompensationsForOrder(orderId: string, client: SupabaseClient = supabase): Promise<void> {
   try {
     const { data, error } = await client
       .from("compensations")
       .update({ status: "Cancelled", cancelled_at: new Date().toISOString() })
       .eq("order_id", orderId)
-      .in("status", ["Draft", "Pending"])
+      .in("status", ["Draft", "Pending", "Confirmed"])
       .select("id");
     if (error) throw error;
 

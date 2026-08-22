@@ -4,6 +4,7 @@ import { getCurrentStaffFromRequest } from "@/lib/permission/serverAuth";
 import { orderService } from "../_service";
 import { handleOrderServiceError } from "../_errors";
 import { authorizeOrderWrite } from "../_authorization";
+import { createClient } from "@/lib/supabase/server";
 
 /** Data Scope Rollout (Sprint v4.1), Package 2 - see app/api/orders/route.ts
  * for the same reasoning. An out-of-scope order id resolves to the exact
@@ -18,7 +19,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
-    const detail = await getOrderDetail(id, staff);
+    // RLS compatibility (2026082211): orders/order_items reads are
+    // authenticated-only now — an anon read here would silently return
+    // null, misreporting a real order as not found.
+    const client = await createClient();
+    const detail = await getOrderDetail(id, staff, client);
 
     if (!detail) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
@@ -37,14 +42,17 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   try {
     const body = await request.json();
-    const detail = await getOrderDetail(id);
+    // RLS compatibility (2026082211): see GET above.
+    const auditClient = await createClient();
+    const detail = await getOrderDetail(id, undefined, auditClient);
     if (!detail) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
     const order = await orderService.updateOrder(
       { order_id: id, order_date: body.order_date, note: body.note },
-      detail.order.created_by
+      detail.order.created_by,
+      auditClient
     );
     return NextResponse.json(order);
   } catch (error) {
@@ -73,7 +81,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { id } = await params;
 
   try {
-    const detail = await getOrderDetail(id);
+    // RLS compatibility (2026082211): see GET above.
+    const auditClient = await createClient();
+    const detail = await getOrderDetail(id, undefined, auditClient);
     if (!detail) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
@@ -82,7 +92,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     if ("error" in authResult) return authResult.error;
 
     const adminOverride = authResult.role.role_key === "Owner";
-    await orderService.deleteOrder(id, authResult.staff.full_name, adminOverride, authResult.staff.id);
+    await orderService.deleteOrder(id, authResult.staff.full_name, adminOverride, authResult.staff.id, auditClient);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     return handleOrderServiceError(error, request.headers.get("x-vercel-id") ?? crypto.randomUUID());

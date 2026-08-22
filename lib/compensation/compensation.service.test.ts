@@ -185,14 +185,18 @@ test("markCompensationsEligible: only advances Draft -> Pending (Eligibility ste
   assert.deepEqual(statusFilter!.args, ["status", "Draft"]);
 });
 
-test("cancelCompensationsForOrder: only Draft/Pending are cancelled — Confirmed/Handed Off are never touched by this path", async () => {
+test("cancelCompensationsForOrder: Phase B (Option B, Product Owner Approval 2026-08-21) — Draft/Pending/Confirmed are voided; Handed Off/Paid are never touched by this path", async () => {
   const { cancelCompensationsForOrder } = await import("./compensation.service");
   const { client, calls } = makeClient({ compensations: [{ data: [{ id: "comp-1" }] }] });
 
   await cancelCompensationsForOrder("order-1", client);
 
   const inFilter = calls.find((c) => c.method === "in");
-  assert.deepEqual(inFilter!.args, ["status", ["Draft", "Pending"]]);
+  assert.deepEqual(inFilter!.args, ["status", ["Draft", "Pending", "Confirmed"]]);
+  assert.ok(
+    !(inFilter!.args[1] as string[]).includes("Handed Off") && !(inFilter!.args[1] as string[]).includes("Paid"),
+    "Handed Off/Paid compensations must never be reachable by Order-cancel voiding — reversal for those is Settlement's own separate cancel_settlement_with_reversal() path"
+  );
 });
 
 test("confirmCompensation: Pending + Payment Status Paid -> Confirmed", async () => {

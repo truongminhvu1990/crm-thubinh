@@ -3,6 +3,7 @@ import { getOrderList } from "@/lib/orders/order.service";
 import { getCurrentStaffFromRequest } from "@/lib/permission/serverAuth";
 import { orderService } from "./_service";
 import { handleOrderServiceError } from "./_errors";
+import { createClient } from "@/lib/supabase/server";
 
 /** Data Scope Rollout (Sprint v4.1), Package 2 - resolves the calling staff
  * member so `getOrderList` can apply Own/Team/All (DATA_SCOPE_ROLLOUT_
@@ -20,7 +21,10 @@ export async function GET(request: NextRequest) {
     // entirely, which is only safe for callers that don't need it).
     if (!staff) return NextResponse.json([]);
 
-    const orders = await getOrderList(staff);
+    // RLS compatibility (2026082211): orders is authenticated-only now — an
+    // anon read here would silently return an empty list, not an error.
+    const client = await createClient();
+    const orders = await getOrderList(staff, client);
     return NextResponse.json(orders);
   } catch (error) {
     return handleOrderServiceError(error, request.headers.get("x-vercel-id") ?? crypto.randomUUID());
@@ -32,7 +36,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const input = await request.json();
-    const order = await orderService.createOrder(input, input.created_by);
+    // RLS compatibility (2026082211): orders INSERT is authenticated-only now.
+    const auditClient = await createClient();
+    const order = await orderService.createOrder(input, input.created_by, auditClient);
     return NextResponse.json(order, { status: 201 });
   } catch (error) {
     return handleOrderServiceError(error, request.headers.get("x-vercel-id") ?? crypto.randomUUID());

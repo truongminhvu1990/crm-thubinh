@@ -14,7 +14,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   try {
     const body = await request.json();
-    const detail = await getOrderDetail(id);
+    // D5 completion (Product Owner Authorization, 2026-08-19): see
+    // app/api/orders/[id]/complete/route.ts's identical comment. Resolved
+    // before the existence check too — orders/order_items reads are
+    // authenticated-only now (2026082211).
+    const auditClient = await createClient();
+    const detail = await getOrderDetail(id, undefined, auditClient);
     if (!detail) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
@@ -22,9 +27,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const authResult = await authorizeOrderWrite(request, detail.order);
     if ("error" in authResult) return authResult.error;
 
-    // D5 completion (Product Owner Authorization, 2026-08-19): see
-    // app/api/orders/[id]/complete/route.ts's identical comment.
-    const auditClient = await createClient();
     const order = await orderService.markOrderLost(
       { order_id: id, lost_reason: body.lost_reason },
       authResult.staff.full_name,

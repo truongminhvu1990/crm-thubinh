@@ -8,6 +8,7 @@ import { Staff } from "@/types/staff";
 import { getCurrentStaff } from "@/lib/permission";
 import { resolveRoleForStaff } from "@/lib/permission/permissionCenter.service";
 import { getOperatingExpensesTotal } from "@/lib/operatingExpenses/operatingExpenses.service";
+import { getAccrualCommissionExpense } from "@/lib/reports/commissionExpense";
 import * as repo from "./monthlySoldProducts.repository";
 
 // Business logic / composition only - MonthlySoldProductsRepository owns
@@ -57,8 +58,19 @@ export async function getMonthlySoldProductsPage(
  * denominator logic. Total Customers is a distinct count over the same
  * filtered set.
  *
- * Profit/Loss = Total Revenue - Product Cost - Operating Expenses (Product
- * Owner Decision, 2026-07-28, "Report Calculation"). Product Cost sums
+ * Profit/Loss = Total Revenue − Product Cost − Partner Compensation −
+ * Staff Commission − Operating Expenses (Finance Project #1, Phase D,
+ * Product Owner Approval 2026-08-21 — extends the original 2026-07-28
+ * "Report Calculation," which never subtracted commission). Both
+ * commission sources are accrual-basis (lib/reports/commissionExpense.ts:
+ * counted once earned/confirmed, independent of Paid/Unpaid — Paid state
+ * only affects payable/cash-flow reporting elsewhere, never this figure)
+ * and scoped to the SAME order_id/purchase_id set as this function's own
+ * recognized Revenue rows, so an expense is never deducted for a sale this
+ * report doesn't also count as Revenue. Partner Compensation and Staff
+ * Commission remain two separate systems, queried independently — no
+ * schema merge, no new ledger; this is a reporting-layer aggregation only.
+ * Product Cost sums
  * products.cost_price only for revenue-recognized rows (mirrors Total
  * Revenue's own gate - subtracting cost for a sale whose revenue wasn't
  * counted would corrupt the figure) and only where cost_price is known
@@ -112,8 +124,36 @@ export async function getMonthlySoldProductsSummary(
   );
 
   const permitted = await canViewCostAndProfit(staff);
+
+  // Finance Project #1, Phase D — same recognized-revenue gate as
+  // productCost above (never deduct commission for a sale whose revenue
+  // wasn't counted), scoped to exactly these Orders/purchases so Partner
+  // Compensation/Staff Commission can never be pulled in from an
+  // unrelated date-range match. Skipped entirely (no DB round trip) for a
+  // viewer who can't see cost-derived figures anyway.
+  let partnerCompensation: number | null = null;
+  let staffCommission: number | null = null;
+  if (permitted) {
+    const recognizedPurchaseIds: string[] = [];
+    const recognizedOrderIds = new Set<string>();
+    for (const r of source) {
+      if (!r.is_revenue_recognized) continue;
+      recognizedPurchaseIds.push(r.purchase_id);
+      const orderId = derivedByPurchaseId.get(r.purchase_id)?.order_id ?? null;
+      if (orderId) recognizedOrderIds.add(orderId);
+    }
+    const commissionExpense = await getAccrualCommissionExpense(
+      { orderIds: [...recognizedOrderIds], purchaseIds: recognizedPurchaseIds },
+      client
+    );
+    partnerCompensation = commissionExpense.partnerCompensation;
+    staffCommission = commissionExpense.staffCommission;
+  }
+
   const cogs = permitted ? productCost : null;
-  const profitLoss = permitted ? totalRevenue - productCost - operatingExpenses : null;
+  const profitLoss = permitted
+    ? totalRevenue - productCost - (partnerCompensation as number) - (staffCommission as number) - operatingExpenses
+    : null;
   const profitMargin = permitted ? (totalRevenue > 0 ? ((profitLoss as number) / totalRevenue) * 100 : 0) : null;
 
   return {
@@ -122,6 +162,8 @@ export async function getMonthlySoldProductsSummary(
     totalOrders,
     operatingExpenses,
     cogs,
+    partnerCompensation,
+    staffCommission,
     profitLoss,
     profitMargin,
   };

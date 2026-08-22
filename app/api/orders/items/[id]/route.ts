@@ -16,12 +16,15 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: "order_id is required in the request body" }, { status: 400 });
     }
 
-    const detail = await getOrderDetail(body.order_id);
+    // RLS compatibility (2026082211): orders/order_items reads/writes are
+    // authenticated-only now.
+    const auditClient = await createClient();
+    const detail = await getOrderDetail(body.order_id, undefined, auditClient);
     if (!detail) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
-    const item = await orderService.updateOrderItem({ ...body, id }, detail.order.created_by);
+    const item = await orderService.updateOrderItem({ ...body, id }, detail.order.created_by, auditClient);
     return NextResponse.json(item);
   } catch (error) {
     return handleOrderServiceError(error, request.headers.get("x-vercel-id") ?? crypto.randomUUID());
@@ -40,15 +43,17 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   }
 
   try {
-    const detail = await getOrderDetail(orderId);
+    // D5 completion (Product Owner Authorization, 2026-08-19): see
+    // app/api/orders/[id]/items/route.ts's identical comment (this route
+    // has the same no-Permission-gate-but-session-gated shape). Resolved
+    // before the existence check too — orders/order_items reads are
+    // authenticated-only now (2026082211).
+    const auditClient = await createClient();
+    const detail = await getOrderDetail(orderId, undefined, auditClient);
     if (!detail) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
-    // D5 completion (Product Owner Authorization, 2026-08-19): see
-    // app/api/orders/[id]/items/route.ts's identical comment (this route
-    // has the same no-Permission-gate-but-session-gated shape).
-    const auditClient = await createClient();
     await orderService.removeProductFromOrder(orderId, id, detail.order.created_by, auditClient);
     return new NextResponse(null, { status: 204 });
   } catch (error) {

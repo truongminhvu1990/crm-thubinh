@@ -10,11 +10,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   try {
     const body = await request.json();
-    const detail = await getOrderDetail(id);
-    if (!detail) {
-      return NextResponse.json({ error: "Order not found" }, { status: 404 });
-    }
-
     // D5 completion (Product Owner Authorization, 2026-08-19): this route
     // has no Permission/Data Scope gate (Package 4A's named 5 endpoints
     // don't include item-level writes), but proxy.ts's global session gate
@@ -23,7 +18,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // here without adding any new authorization logic, only reading the
     // session cookies that already gated this request. actor is unchanged
     // (still created_by, per the existing Product Owner rule above).
+    //
+    // RLS compatibility (2026082211): resolved before the existence check
+    // too, not just the write below — orders/order_items reads are
+    // authenticated-only now, so an anon read here would silently
+    // misreport a real order as not found.
     const auditClient = await createClient();
+    const detail = await getOrderDetail(id, undefined, auditClient);
+    if (!detail) {
+      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    }
+
     const item = await orderService.addProductToOrder({ ...body, order_id: id }, detail.order.created_by, auditClient);
     return NextResponse.json(item, { status: 201 });
   } catch (error) {

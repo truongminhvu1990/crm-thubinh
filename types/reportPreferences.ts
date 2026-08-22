@@ -1,7 +1,7 @@
 /** Per-User Report Column Preferences (Product Owner task, 2026-08-14).
  * Stable internal keys only — never a route path or Vietnamese display
  * label, so a page rename never orphans a saved preference. */
-export type ReportKey = "sales_ledger" | "monthly_sold_products";
+export type ReportKey = "sales_ledger" | "monthly_sold_products" | "customer_receivable";
 
 export interface ReportColumnPreference {
   reportKey: ReportKey;

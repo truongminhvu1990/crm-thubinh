@@ -2,8 +2,9 @@
 
 import { Wallet } from "lucide-react";
 import { OrderPayment } from "@/types/order";
-import { calculateRemainingBalance } from "@/lib/orders/order.rules";
+import { calculateRemainingBalance, calculateOverpaidAmount, deriveFinancialSettlementState } from "@/lib/orders/order.rules";
 import { formatDate } from "@/lib/utils";
+import Badge from "@/components/ui/Badge";
 
 const currency = new Intl.NumberFormat("vi-VN", {
   style: "currency",
@@ -20,13 +21,27 @@ interface Props {
  * No edit/delete action, per the locked "Payment: ADD ONLY" rule. */
 export default function OrderPaymentsList({ payments, totalAmount }: Props) {
   const remaining = calculateRemainingBalance(totalAmount, payments);
+  /** Finance Project #1, Phase C (Product Owner Approval, 2026-08-21) —
+   * Settled (remaining = 0) and Overpaid (remaining < 0) used to collapse
+   * into the same "Đã thanh toán đủ" message, silently hiding an
+   * overpayment. Now shown as three distinct states; still warning-only —
+   * no cap, no block, no auto-refund. */
+  const settlementState = deriveFinancialSettlementState(remaining);
+  const overpaidAmount = calculateOverpaidAmount(remaining);
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-sm font-medium text-foreground">
-          {remaining <= 0 ? "Đã thanh toán đủ" : `Còn lại: ${currency.format(remaining)}`}
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <p className="text-sm font-medium text-foreground" data-testid="order-payment-settlement-summary">
+          {settlementState === "Outstanding" && `Còn lại: ${currency.format(remaining)}`}
+          {settlementState === "Settled" && "Đã thanh toán đủ"}
+          {settlementState === "Overpaid" && `Khách đã trả dư: ${currency.format(overpaidAmount)}`}
         </p>
+        {settlementState === "Overpaid" && (
+          <Badge variant="warning" data-testid="order-overpaid-badge">
+            Overpaid
+          </Badge>
+        )}
       </div>
 
       {payments.length === 0 ? (

@@ -114,6 +114,52 @@ test.describe("Orders - Payments", () => {
     }
   });
 
+  test("Finance Project #1, Phase C — a payment exceeding the total is warned, never blocked, and shows an explicit Overpaid state (not silently 'fully paid')", async ({ page }) => {
+    const customer = await createTestCustomer();
+    const product = await createTestProduct({ sale_price: 1_000_000, discount: 0 });
+    let orderId: string | undefined;
+
+    try {
+      await loginAsOwner(page);
+      const orders = new OrderPage(page);
+      const order = await createDraftOrderWithItem(page, orders, customer.phone, customer.full_name, product.product_code, product.product_name);
+      orderId = order.id;
+
+      await orders.openAddPaymentModal();
+      await orders.fillPaymentAmount(1_200_000);
+      // Warning-only (Product Owner Approval, 2026-08-21) — visible, but the
+      // Save button must remain enabled and the submission must succeed.
+      await expect(page.getByText("Số tiền vượt quá số dư còn lại")).toBeVisible();
+      await orders.selectFirstAvailablePaymentMethod();
+      await orders.savePayment();
+      await expect(orders.dialog()).toBeHidden();
+      await waitForLoading(page);
+
+      // The full entered amount is persisted, never capped to the order total.
+      const payments = await getPaymentsByOrderId(orderId!);
+      expect(payments).toHaveLength(1);
+      expect(payments[0].amount).toBe(1_200_000);
+
+      const updatedOrder = await getOrderByNumber(order.order_number);
+      expect(updatedOrder!.payment_status).toBe("Paid");
+
+      // Overpaid must be shown distinctly — not collapsed into "Đã thanh
+      // toán đủ" (the exact regression this phase fixes).
+      await expect(page.getByTestId("order-overpaid-badge")).toBeVisible();
+      await expect(page.getByTestId("order-payment-settlement-summary")).toContainText("Khách đã trả dư");
+      await expect(page.getByTestId("order-payment-settlement-summary")).toContainText("200.000");
+      await expect(page.getByText("Đã thanh toán đủ")).toBeHidden();
+
+      // Still Paid — no further payment can be added, same rule as an
+      // exactly-paid order (canAddPayment), unchanged by this phase.
+      await expect(orders.addPaymentButton).toBeHidden();
+    } finally {
+      if (orderId) await deleteOrderRow(orderId);
+      await deleteProductRow(product.id!);
+      await deleteCustomerRow(customer.id!);
+    }
+  });
+
   test("Two partial payments accumulate toward the remaining balance", async ({ page }) => {
     const customer = await createTestCustomer();
     const product = await createTestProduct({ sale_price: 1_000_000, discount: 0 });
