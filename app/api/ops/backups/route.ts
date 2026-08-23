@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermissionCenterAccess } from "@/lib/permission/serverAuth";
+import { requirePermissionCenterAccess, createRequestClient } from "@/lib/permission/serverAuth";
 import { getBackupConfirmationLog, logBackupConfirmation } from "@/lib/opsConsole/opsConsole.service";
 import { handleOpsError } from "../_errors";
 
@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   if ("error" in auth) return auth.error;
 
   try {
-    const logs = await getBackupConfirmationLog();
+    const logs = await getBackupConfirmationLog(createRequestClient(request));
     return NextResponse.json(logs);
   } catch (error) {
     return handleOpsError(error);
@@ -35,13 +35,17 @@ export async function POST(request: NextRequest) {
     if (!environment || !plan_tier) {
       return NextResponse.json({ error: "environment, plan_tier là bắt buộc" }, { status: 400 });
     }
-    await logBackupConfirmation(auth.staff.id, {
-      environment,
-      planTier: plan_tier,
-      pitrEnabled: !!pitr_enabled,
-      retentionDays: retention_days,
-      notes,
-    });
+    await logBackupConfirmation(
+      auth.staff.id,
+      {
+        environment,
+        planTier: plan_tier,
+        pitrEnabled: !!pitr_enabled,
+        retentionDays: retention_days,
+        notes,
+      },
+      createRequestClient(request)
+    );
     return NextResponse.json({ ok: true });
   } catch (error) {
     return handleOpsError(error);

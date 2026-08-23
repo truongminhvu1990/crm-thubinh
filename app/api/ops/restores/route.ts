@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermissionCenterAccess } from "@/lib/permission/serverAuth";
+import { requirePermissionCenterAccess, createRequestClient } from "@/lib/permission/serverAuth";
 import { getRestoreDrillLog, logRestoreDrill } from "@/lib/opsConsole/opsConsole.service";
 import { handleOpsError } from "../_errors";
 
@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
   if ("error" in auth) return auth.error;
 
   try {
-    const logs = await getRestoreDrillLog();
+    const logs = await getRestoreDrillLog(createRequestClient(request));
     return NextResponse.json(logs);
   } catch (error) {
     return handleOpsError(error);
@@ -39,13 +39,17 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    await logRestoreDrill(auth.staff.id, {
-      environment,
-      backupReference: backup_reference,
-      restoreDuration: restore_duration,
-      result,
-      notes,
-    });
+    await logRestoreDrill(
+      auth.staff.id,
+      {
+        environment,
+        backupReference: backup_reference,
+        restoreDuration: restore_duration,
+        result,
+        notes,
+      },
+      createRequestClient(request)
+    );
     return NextResponse.json({ ok: true });
   } catch (error) {
     return handleOpsError(error);

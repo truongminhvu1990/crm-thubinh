@@ -1,3 +1,4 @@
+import { SupabaseClient } from "@supabase/supabase-js";
 import { ActivityLog } from "@/types/activityLog";
 import { getActivityLogsByEntityType } from "../activityLog.service";
 import { logActivity } from "../activityLog.service";
@@ -56,23 +57,35 @@ function extractNewValue(previousAction?: string): string {
   return match ? match[1] : previousAction;
 }
 
-async function findLatestForEntityId(entity: string, entityId: string): Promise<ActivityLog | undefined> {
-  const logs = await getActivityLogsByEntityType(entity);
+async function findLatestForEntityId(
+  entity: string,
+  entityId: string,
+  client?: SupabaseClient
+): Promise<ActivityLog | undefined> {
+  const logs = await getActivityLogsByEntityType(entity, undefined, client);
   return logs.find((l) => l.entity_id === entityId);
 }
 
-export async function getReleaseChecklistState(): Promise<Map<string, ActivityLog>> {
-  const logs = await getActivityLogsByEntityType("release_checklist");
+export async function getReleaseChecklistState(client?: SupabaseClient): Promise<Map<string, ActivityLog>> {
+  const logs = await getActivityLogsByEntityType("release_checklist", undefined, client);
   return latestPerEntityId(logs);
 }
 
-export async function toggleReleaseChecklistItem(actorStaffId: string, itemKey: string, checked: boolean) {
-  await logActivity({
-    staff_id: actorStaffId,
-    action: checked ? "checked" : "unchecked",
-    entity: "release_checklist",
-    entity_id: itemKey,
-  });
+export async function toggleReleaseChecklistItem(
+  actorStaffId: string,
+  itemKey: string,
+  checked: boolean,
+  client?: SupabaseClient
+) {
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: checked ? "checked" : "unchecked",
+      entity: "release_checklist",
+      entity_id: itemKey,
+    },
+    client
+  );
 }
 
 export interface DimensionStatus {
@@ -149,23 +162,26 @@ export function computeReadinessScore(checklistState: Map<string, ActivityLog>):
 // Go Live (§13, Decision 34 - Product Owner Approval)
 // ============================================================
 
-export async function getGoLiveState(): Promise<Map<string, ActivityLog>> {
-  const logs = await getActivityLogsByEntityType(OPS_ACTIVITY_ENTITY.GO_LIVE);
+export async function getGoLiveState(client?: SupabaseClient): Promise<Map<string, ActivityLog>> {
+  const logs = await getActivityLogsByEntityType(OPS_ACTIVITY_ENTITY.GO_LIVE, undefined, client);
   return latestPerEntityId(logs);
 }
 
-export async function setGoLiveApproval(actorStaffId: string, approved: boolean) {
-  const prior = await findLatestForEntityId(OPS_ACTIVITY_ENTITY.GO_LIVE, "production_approval");
+export async function setGoLiveApproval(actorStaffId: string, approved: boolean, client?: SupabaseClient) {
+  const prior = await findLatestForEntityId(OPS_ACTIVITY_ENTITY.GO_LIVE, "production_approval", client);
   const previousLabel = prior ? extractNewValue(prior.action) : "Pending";
   const nextLabel = approved ? "Approved" : "Pending";
   const statusWord = approved ? "approved" : "pending";
 
-  await logActivity({
-    staff_id: actorStaffId,
-    action: `${statusWord} — ${formatChange(previousLabel, nextLabel)}`,
-    entity: OPS_ACTIVITY_ENTITY.GO_LIVE,
-    entity_id: "production_approval",
-  });
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: `${statusWord} — ${formatChange(previousLabel, nextLabel)}`,
+      entity: OPS_ACTIVITY_ENTITY.GO_LIVE,
+      entity_id: "production_approval",
+    },
+    client
+  );
 }
 
 export function isGoLiveApproved(state: Map<string, ActivityLog>): boolean {
@@ -176,56 +192,69 @@ export function isGoLiveApproved(state: Map<string, ActivityLog>): boolean {
 // UAT Progress (§14.1)
 // ============================================================
 
-export async function getUatProgressState(): Promise<Map<string, ActivityLog>> {
-  const logs = await getActivityLogsByEntityType(OPS_ACTIVITY_ENTITY.UAT);
+export async function getUatProgressState(client?: SupabaseClient): Promise<Map<string, ActivityLog>> {
+  const logs = await getActivityLogsByEntityType(OPS_ACTIVITY_ENTITY.UAT, undefined, client);
   return latestPerEntityId(logs);
 }
 
-export async function markUatItemVerified(actorStaffId: string, role: string, itemKey: string, verified: boolean) {
+export async function markUatItemVerified(
+  actorStaffId: string,
+  role: string,
+  itemKey: string,
+  verified: boolean,
+  client?: SupabaseClient
+) {
   const entityId = `${role}:${itemKey}`;
-  const prior = await findLatestForEntityId(OPS_ACTIVITY_ENTITY.UAT, entityId);
+  const prior = await findLatestForEntityId(OPS_ACTIVITY_ENTITY.UAT, entityId, client);
   const previousLabel = prior ? extractNewValue(prior.action) : "Chưa xác minh";
   const nextLabel = verified ? "Đã xác minh" : "Chưa xác minh";
   const statusWord = verified ? "verified" : "unverified";
 
-  await logActivity({
-    staff_id: actorStaffId,
-    action: `${statusWord} — ${formatChange(previousLabel, nextLabel)}`,
-    entity: OPS_ACTIVITY_ENTITY.UAT,
-    entity_id: entityId,
-  });
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: `${statusWord} — ${formatChange(previousLabel, nextLabel)}`,
+      entity: OPS_ACTIVITY_ENTITY.UAT,
+      entity_id: entityId,
+    },
+    client
+  );
 }
 
 // ============================================================
 // Deployment History (§3)
 // ============================================================
 
-export async function getDeploymentLog(): Promise<ActivityLog[]> {
-  return getActivityLogsByEntityType(OPS_ACTIVITY_ENTITY.DEPLOYMENT);
+export async function getDeploymentLog(client?: SupabaseClient): Promise<ActivityLog[]> {
+  return getActivityLogsByEntityType(OPS_ACTIVITY_ENTITY.DEPLOYMENT, undefined, client);
 }
 
 export async function logDeployment(
   actorStaffId: string,
-  fields: { environment: string; version: string; notes?: string }
+  fields: { environment: string; version: string; notes?: string },
+  client?: SupabaseClient
 ) {
-  const prior = await findLatestForEntityId(OPS_ACTIVITY_ENTITY.DEPLOYMENT, fields.environment);
+  const prior = await findLatestForEntityId(OPS_ACTIVITY_ENTITY.DEPLOYMENT, fields.environment, client);
   const previous = extractNewValue(prior?.action);
   const next = `Triển khai "${fields.version}"${fields.notes ? ` — ${fields.notes}` : ""}`;
 
-  await logActivity({
-    staff_id: actorStaffId,
-    action: formatChange(previous, next),
-    entity: OPS_ACTIVITY_ENTITY.DEPLOYMENT,
-    entity_id: fields.environment,
-  });
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: formatChange(previous, next),
+      entity: OPS_ACTIVITY_ENTITY.DEPLOYMENT,
+      entity_id: fields.environment,
+    },
+    client
+  );
 }
 
 // ============================================================
 // Migration History (§6, DB §3.1 Migration Verification Checklist)
 // ============================================================
 
-export async function getMigrationVerificationLog(): Promise<ActivityLog[]> {
-  return getActivityLogsByEntityType(OPS_ACTIVITY_ENTITY.MIGRATION);
+export async function getMigrationVerificationLog(client?: SupabaseClient): Promise<ActivityLog[]> {
+  return getActivityLogsByEntityType(OPS_ACTIVITY_ENTITY.MIGRATION, undefined, client);
 }
 
 export async function logMigrationVerification(
@@ -238,9 +267,10 @@ export async function logMigrationVerification(
     constraints: boolean;
     appStartup: boolean;
     notes?: string;
-  }
+  },
+  client?: SupabaseClient
 ) {
-  const prior = await findLatestForEntityId(OPS_ACTIVITY_ENTITY.MIGRATION, fields.migrationFile);
+  const prior = await findLatestForEntityId(OPS_ACTIVITY_ENTITY.MIGRATION, fields.migrationFile, client);
   const previous = extractNewValue(prior?.action);
 
   const parts = [
@@ -251,46 +281,53 @@ export async function logMigrationVerification(
   ];
   const next = `[${fields.environment}] ${parts.join(", ")}${fields.notes ? ` — ${fields.notes}` : ""}`;
 
-  await logActivity({
-    staff_id: actorStaffId,
-    action: formatChange(previous, next),
-    entity: OPS_ACTIVITY_ENTITY.MIGRATION,
-    entity_id: fields.migrationFile,
-  });
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: formatChange(previous, next),
+      entity: OPS_ACTIVITY_ENTITY.MIGRATION,
+      entity_id: fields.migrationFile,
+    },
+    client
+  );
 }
 
 // ============================================================
 // Backup Status (§4, Decision 27 - operational metadata only)
 // ============================================================
 
-export async function getBackupConfirmationLog(): Promise<ActivityLog[]> {
-  return getActivityLogsByEntityType(OPS_ACTIVITY_ENTITY.BACKUP);
+export async function getBackupConfirmationLog(client?: SupabaseClient): Promise<ActivityLog[]> {
+  return getActivityLogsByEntityType(OPS_ACTIVITY_ENTITY.BACKUP, undefined, client);
 }
 
 export async function logBackupConfirmation(
   actorStaffId: string,
-  fields: { environment: string; planTier: string; pitrEnabled: boolean; retentionDays?: number; notes?: string }
+  fields: { environment: string; planTier: string; pitrEnabled: boolean; retentionDays?: number; notes?: string },
+  client?: SupabaseClient
 ) {
-  const prior = await findLatestForEntityId(OPS_ACTIVITY_ENTITY.BACKUP, fields.environment);
+  const prior = await findLatestForEntityId(OPS_ACTIVITY_ENTITY.BACKUP, fields.environment, client);
   const previous = extractNewValue(prior?.action);
   const next = `Plan: ${fields.planTier}, PITR: ${fields.pitrEnabled ? "bật" : "tắt"}${
     fields.retentionDays ? `, retention: ${fields.retentionDays} ngày` : ""
   }${fields.notes ? ` — ${fields.notes}` : ""}`;
 
-  await logActivity({
-    staff_id: actorStaffId,
-    action: formatChange(previous, next),
-    entity: OPS_ACTIVITY_ENTITY.BACKUP,
-    entity_id: fields.environment,
-  });
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: formatChange(previous, next),
+      entity: OPS_ACTIVITY_ENTITY.BACKUP,
+      entity_id: fields.environment,
+    },
+    client
+  );
 }
 
 // ============================================================
 // Restore History (§5, Decision 28 - 6 minimum fields)
 // ============================================================
 
-export async function getRestoreDrillLog(): Promise<ActivityLog[]> {
-  return getActivityLogsByEntityType(OPS_ACTIVITY_ENTITY.RESTORE);
+export async function getRestoreDrillLog(client?: SupabaseClient): Promise<ActivityLog[]> {
+  return getActivityLogsByEntityType(OPS_ACTIVITY_ENTITY.RESTORE, undefined, client);
 }
 
 export async function logRestoreDrill(
@@ -301,20 +338,24 @@ export async function logRestoreDrill(
     restoreDuration: string;
     result: "success" | "failure";
     notes?: string;
-  }
+  },
+  client?: SupabaseClient
 ) {
-  const prior = await findLatestForEntityId(OPS_ACTIVITY_ENTITY.RESTORE, fields.environment);
+  const prior = await findLatestForEntityId(OPS_ACTIVITY_ENTITY.RESTORE, fields.environment, client);
   const previous = extractNewValue(prior?.action);
   const next = `Backup ref: ${fields.backupReference}, thời gian: ${fields.restoreDuration}, kết quả: ${
     fields.result === "success" ? "Thành công" : "Thất bại"
   }${fields.notes ? ` — ${fields.notes}` : ""}`;
 
-  await logActivity({
-    staff_id: actorStaffId,
-    action: formatChange(previous, next),
-    entity: OPS_ACTIVITY_ENTITY.RESTORE,
-    entity_id: fields.environment,
-  });
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: formatChange(previous, next),
+      entity: OPS_ACTIVITY_ENTITY.RESTORE,
+      entity_id: fields.environment,
+    },
+    client
+  );
 }
 
 /** Reads only the "Sau: ..." (New value) half of a Restore Drill's action
@@ -335,16 +376,24 @@ export function extractRestoreResult(action: string): "success" | "failure" {
 // Decision 38's payload standardization.
 // ============================================================
 
-export async function getMobileReadinessNotesState(): Promise<Map<string, ActivityLog>> {
-  const logs = await getActivityLogsByEntityType("mobile_readiness_note");
+export async function getMobileReadinessNotesState(client?: SupabaseClient): Promise<Map<string, ActivityLog>> {
+  const logs = await getActivityLogsByEntityType("mobile_readiness_note", undefined, client);
   return latestPerEntityId(logs);
 }
 
-export async function updateMobileReadinessNote(actorStaffId: string, itemKey: string, note: string) {
-  await logActivity({
-    staff_id: actorStaffId,
-    action: note,
-    entity: "mobile_readiness_note",
-    entity_id: itemKey,
-  });
+export async function updateMobileReadinessNote(
+  actorStaffId: string,
+  itemKey: string,
+  note: string,
+  client?: SupabaseClient
+) {
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: note,
+      entity: "mobile_readiness_note",
+      entity_id: itemKey,
+    },
+    client
+  );
 }

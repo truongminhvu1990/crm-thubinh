@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermissionCenterAccess } from "@/lib/permission/serverAuth";
+import { requirePermissionCenterAccess, createRequestClient } from "@/lib/permission/serverAuth";
 import { getUatProgressState, markUatItemVerified } from "@/lib/opsConsole/opsConsole.service";
 import { handleOpsError } from "../_errors";
 
@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
   if ("error" in auth) return auth.error;
 
   try {
-    const state = await getUatProgressState();
+    const state = await getUatProgressState(createRequestClient(request));
     return NextResponse.json(Object.fromEntries(state));
   } catch (error) {
     return handleOpsError(error);
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     if (!role || !item_key || typeof verified !== "boolean") {
       return NextResponse.json({ error: "role, item_key, verified là bắt buộc" }, { status: 400 });
     }
-    await markUatItemVerified(auth.staff.id, role, item_key, verified);
+    await markUatItemVerified(auth.staff.id, role, item_key, verified, createRequestClient(request));
     return NextResponse.json({ ok: true });
   } catch (error) {
     return handleOpsError(error);

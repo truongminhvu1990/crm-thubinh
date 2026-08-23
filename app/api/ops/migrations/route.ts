@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermissionCenterAccess } from "@/lib/permission/serverAuth";
+import { requirePermissionCenterAccess, createRequestClient } from "@/lib/permission/serverAuth";
 import { getMigrationVerificationLog, logMigrationVerification } from "@/lib/opsConsole/opsConsole.service";
 import { handleOpsError } from "../_errors";
 
@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   if ("error" in auth) return auth.error;
 
   try {
-    const logs = await getMigrationVerificationLog();
+    const logs = await getMigrationVerificationLog(createRequestClient(request));
     return NextResponse.json(logs);
   } catch (error) {
     return handleOpsError(error);
@@ -36,15 +36,19 @@ export async function POST(request: NextRequest) {
     if (!environment || !migration_file) {
       return NextResponse.json({ error: "environment, migration_file là bắt buộc" }, { status: 400 });
     }
-    await logMigrationVerification(auth.staff.id, {
-      environment,
-      migrationFile: migration_file,
-      completed: !!completed,
-      recordCounts: !!record_counts,
-      constraints: !!constraints,
-      appStartup: !!app_startup,
-      notes,
-    });
+    await logMigrationVerification(
+      auth.staff.id,
+      {
+        environment,
+        migrationFile: migration_file,
+        completed: !!completed,
+        recordCounts: !!record_counts,
+        constraints: !!constraints,
+        appStartup: !!app_startup,
+        notes,
+      },
+      createRequestClient(request)
+    );
     return NextResponse.json({ ok: true });
   } catch (error) {
     return handleOpsError(error);
