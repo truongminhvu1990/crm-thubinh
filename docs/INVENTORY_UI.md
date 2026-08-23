@@ -2,11 +2,13 @@
 
 **Sprint:** 2
 **Module:** Inventory — Phase 1 (Read Only)
-**Status:** Draft — Revision 3, Product Owner Review applied — awaiting further Product Owner review.
-**Phase:** UI design only. No React, no HTML, no CSS, no components were written for this document — screen-level business description only.
-**Based on:** `docs/INVENTORY_SPEC.md` (Revision 2 — **LOCKED**). This document does not redesign, reinterpret, or add business logic or business rules. Every field, section, and label below traces back to an already-approved section of that spec, cited inline as (Spec §N). Where this document reuses an existing screen pattern (filter bar, table, stat card, empty/loading state), it points at the equivalent already-shipped Customer/Product/Batch screen in this codebase rather than inventing a new one, with one named exception (§1.6).
+**Status:** Draft — Revision 4, Product Owner Decision applied 2026-08-23 — awaiting further Product Owner review.
+**Phase:** UI design only. No React, no HTML, no CSS, no components were written for this document — screen-level business description only. (Revision 4's underlying feature has since been implemented — see its changelog entry below — but this document itself remains a UI design description, not code.)
+**Based on:** `docs/INVENTORY_SPEC.md` (Revision 2 — **LOCKED**), extended by `docs/05_INVENTORY_SPEC.md` Revision 4. This document does not redesign, reinterpret, or add business logic or business rules beyond the one explicit override recorded in Revision 4 below. Every field, section, and label below traces back to an already-approved section of that spec, cited inline as (Spec §N). Where this document reuses an existing screen pattern (filter bar, table, stat card, empty/loading state), it points at the equivalent already-shipped Customer/Product/Batch screen in this codebase rather than inventing a new one, with one named exception (§1.6).
 
-**Revision 3 changelog (this pass, Product Owner Review):**
+**Revision 4 changelog (Product Owner Decision, 2026-08-23 — "Link Customer / Order / Invoice context for reserved or deposit-held products"):** Narrowly **overrides** Revision 3's "no Orders history section / no link into any Order screen" rule (§1.6, §1.12, §2 below). A Product that is being held for a customer is not merely isolated inventory — once linked to an Order still in a pre-completion state (Draft/Reserved), the Drawer must expose that business context: Customer (linking to the existing `/customers/[id]` route), Order code (linking to the existing `/orders/[id]` route), the Order's existing Payments (this domain has no separate "Invoice" entity — the Order plus its Payments already serves as the financial document, same convention `components/moneyDebtLedger/TransactionDetailModal.tsx` already uses under the label "Order / Invoice"), and Order Status. Display/link-only — no Edit/Delete/Reserve/Sell action is added, and a Product with no currently-open Order still shows nothing from this section (empty-state suppression, not a forced blank field). Everything else Revision 3 locked (Drawer-only detail surface, no routed Product Detail, no full Order history/timeline, no write control of any kind) is unchanged.
+
+**Revision 3 changelog (Product Owner Review):**
 1. **Product Detail (§1.6)** — locked to Drawer only. Never a route, never opens the Product Module. Removed the "view full detail" link-out to `/products/[id]`.
 2. **Statistics Cards (§1.4)** — clarified "By Status" is `COUNT(*) GROUP BY products.status`; reaffirmed it never references `available`/`reserved`/`sold`.
 3. **Batch View (§1.5)** — locked to a flat Batch → Product List drill path only. Removed the Product/Sold/Remaining count columns (summary aggregates) and the "Batch Detail sub-view vs. link out" open question — clicking a batch always filters Inventory List to that batch. No dashboard, no summary panel, no charts anywhere in Batch View.
@@ -97,7 +99,7 @@ No Edit/Delete icons (unlike the existing, LOCKED `BatchTable.tsx`) — Batch Vi
 
 A right-side sliding panel (not the centered `Modal`/Radix Dialog pattern used everywhere else in this codebase — this is a new UI primitive, flagged in §3) that opens when a product row (§1.1, or a product inside Batch View) is clicked, without navigating away from the underlying list.
 
-**Contents — exactly the locked field list, no more, no fewer (Spec §6):**
+**Contents — the locked field list (Spec §6), plus Revision 4's Business Context section:**
 - **Images** — cover image + full gallery (§1.7)
 - **Batch** — batch code, read-only text
 - **Source** — `products.source`
@@ -105,8 +107,9 @@ A right-side sliding panel (not the centered `Modal`/Radix Dialog pattern used e
 - **Status** — badge, same `Badge`/status-color treatment `ProductTable.tsx` already uses
 - **Price** — see §3 (Spec leaves open whether this is `sale_price` only or also `cost_price`)
 - **Created At** — `products.created_at`, formatted the same way `formatDate()` already formats dates elsewhere
+- **Business Context** (Revision 4, Product Owner Decision 2026-08-23) — **only rendered when the Product has a currently open (Draft/Reserved) Order** referencing it; entirely absent otherwise (no empty-field clutter). When present: **Khách hàng** (the Order's customer, linking to `/customers/[id]`), **Đơn hàng** (the Order's code, linking to `/orders/[id]`), **Hóa đơn / Chứng từ** (the Order's Payments — count + link to the same Order Detail page if any exist, otherwise "Chưa có hóa đơn/chứng từ"), **Tình trạng đơn** (Order Status badge). A Product can have historical (Completed/Lost) Order links too; those are deliberately excluded — Product Spec (LOCKED) guarantees at most one open `order_item` per Product at a time, so "the current hold" is never ambiguous.
 
-**No Orders history section** anywhere in the drawer (Spec §6, explicit). No Edit button, no Delete button, no Reserve/Sell action, no link into any Order screen. **The Drawer is the only product-detail surface Inventory ever shows (locked, Revision 3): always a Drawer, never a route, and it never opens the Product Module's own Detail page** — no "view full detail" link out. The Drawer's only interactive element beyond its content is its close control (×, click-outside, Esc).
+**No full Orders history/timeline** anywhere in the drawer beyond the single current-hold context above (Spec §6 still governs everything except the one named override). No Edit button, no Delete button, no Reserve/Sell action. **The Drawer is the only product-detail surface Inventory ever shows (locked, Revision 3): always a Drawer, never a route, and it never opens the Product Module's own Detail page** — no "view full detail" link out. Beyond its close control (×, click-outside, Esc) and the two Revision 4 links (Customer, Order — both to already-existing, unmodified detail routes), the Drawer has no other interactive element.
 
 ---
 
@@ -176,7 +179,7 @@ This codebase has no role-based access control today (every existing module — 
 | Edit a product | **No** — no button, no link, no route exposed from Inventory (editing still exists, but only from the Product module itself) |
 | Delete a product or batch | **No** — no button, no link, exposed from Inventory anywhere |
 | Reserve / Sell / Release | **No** — these concepts don't exist in Phase 1 at all (Spec: Explicitly Out of Scope) |
-| View Orders / order history for a product | **No** — Orders is blocked and out of scope (Spec §1, §6) |
+| View Orders / order history for a product | **No**, except: the single current-hold Business Context (Customer/Order/Payments/Status) shown in the Drawer when the Product has an open Order (Revision 4, §1.6) — full Order history/timeline stays out of scope |
 | Adjust inventory counts | **No** — `available`/`reserved`/`sold` are never read or written (Spec §1) |
 
 This flat "everything read, nothing written" matrix is the entire Phase 1 permission model.
@@ -200,7 +203,7 @@ The Drawer is **not** a page — it is an overlay state on top of whichever of t
 - **Inventory List** and **Batch View** (§1.5) are the only two pages in the module, presented together under `/inventory` as an in-page tab/toggle ("Sản phẩm" / "Lô hàng").
 - Clicking a batch in **Batch View** switches to **Inventory List**, filtered to that batch's products (§1.5) — this is the tree's only edge between the two pages; there is no third "Batch Detail" page.
 - Clicking a product row, in either page, opens the **Product Detail Drawer** (§1.6) as an overlay — the underlying page stays exactly where it was underneath. **The Drawer always opens as a Drawer, never as a route, and never opens the Product Module's own Detail page** (§1.6).
-- **No path in this navigation flow ever reaches Order Detail, Create Order, or any Orders screen** — Orders is blocked and entirely absent from Inventory's navigation graph (Spec §1).
+- **Revision 4 exception:** when the Drawer shows Business Context (§1.6) for a currently-held Product, its Customer and Order links navigate *away* from Inventory to the existing `/customers/[id]` and `/orders/[id]` routes — the one path out of this navigation graph. No other path in this flow reaches Order Detail, Create Order, or any Orders screen, and Inventory still owns no Orders/Customer editing of its own.
 - No breadcrumb is needed — the two pages sit at the same level with an overlay drawer, not a routed drill-down hierarchy requiring back-navigation (unlike Order Detail/Customer Detail).
 
 ---

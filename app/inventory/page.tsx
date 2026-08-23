@@ -346,7 +346,11 @@ export default function InventoryPage() {
         </>
       )}
 
-      <ProductDetailDrawer product={selectedProduct} onClose={() => setSelectedProduct(null)} />
+      <ProductDetailDrawer
+        product={selectedProduct}
+        onClose={() => setSelectedProduct(null)}
+        orderLinks={orderLinks[selectedProduct?.id || ""] || []}
+      />
     </div>
   );
 }

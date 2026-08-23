@@ -107,6 +107,18 @@ export async function getProductOrderLinks(
   return map;
 }
 
+/** Business-Context Linkage (Inventory Detail -> Order/Customer/Payment,
+ * Product Owner override 2026-08-23 of docs/INVENTORY_UI.md Revision 3's
+ * "no Orders link" rule - see Revision 4). The "current" holding Order for
+ * a Product is whichever link is still open (Draft/Reserved) -
+ * docs/02_PRODUCT_SPEC.md (LOCKED) guarantees a Product belongs to at most
+ * one open order_item at a time, so this is never ambiguous: historical
+ * Completed/Lost links are deliberately excluded so an old sale/lost order
+ * can never override the live hold. */
+export function getCurrentHoldingLink(links: ProductOrderLink[]): ProductOrderLink | null {
+  return links.find((l) => OPEN_ORDER_STATUSES.includes(l.order_status)) || null;
+}
+
 export type Availability = "available" | "reserved" | "unavailable";
 
 /** "Reserved" wins whenever an open (Draft/Reserved) order references the
