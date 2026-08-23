@@ -49,11 +49,23 @@ mock.module("@/lib/commission/commission.repository", {
  * (order.service.ts) reads this via getReceivingAccountById; mocked
  * wholesale for the same reason as compensation/notification above. Tests
  * set `receivingAccountLookupResult` per-case. Deliberately does NOT
- * mock lib/moneyDebtLedger/* at all — addPayment must never import it. */
+ * mock lib/moneyDebtLedger/* at all — addPayment must never import it.
+ *
+ * `getReceivingAccountByIdCalls` (RLS client propagation regression
+ * coverage, 2026082312 follow-up) — captures the client each call actually
+ * received, same spy convention as consignmentFinancialRecordCalls below;
+ * getReceivingAccountById used to be called with no client at all, silently
+ * falling back to its own anon-defaulting default. */
 let receivingAccountLookupResult: { id: string; is_active: boolean } | null = { id: "account-1", is_active: true };
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let getReceivingAccountByIdCalls: any[][] = [];
 mock.module("@/lib/receivingAccount.service", {
   namedExports: {
-    getReceivingAccountById: async () => receivingAccountLookupResult,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    getReceivingAccountById: async (...args: any[]) => {
+      getReceivingAccountByIdCalls.push(args);
+      return receivingAccountLookupResult;
+    },
   },
 });
 
@@ -151,6 +163,8 @@ test.beforeEach(() => {
     { id: "rule-2", minimum_amount: 10000000, maximum_amount: null, commission_percent: 3, is_active: true, created_at: "", updated_at: "" },
   ];
   consignmentFinancialRecordCalls = [];
+  receivingAccountLookupResult = { id: "account-1", is_active: true };
+  getReceivingAccountByIdCalls = [];
 });
 
 test("completeOrder: sale_price = order_item.line_total, never order.total_amount", async () => {
@@ -739,4 +753,60 @@ test("addPayment: passes the caller's auditClient through to both repository.add
 
   assert.equal(addPaymentClient, fakeAuditClient);
   assert.equal(appendOrderEventClient, fakeAuditClient);
+});
+
+test("addPayment: passes the caller's auditClient into getReceivingAccountById when a receiving account is selected (receiving_accounts RLS hotfix follow-up)", async () => {
+  const { createOrderService } = await import("./order.service");
+  const fakeAuditClient = { marker: "real-authenticated-client" };
+  receivingAccountLookupResult = { id: "account-1", is_active: true };
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    addPayment: async (input) => ({ id: "payment-1", ...input }) as OrderPayment,
+    findPaymentsByOrderId: async () => [],
+    updateOrderRollups: async (orderId, rollups) => makeOrder({ id: orderId, ...rollups }),
+  });
+
+  await createOrderService(repository).addPayment(
+    {
+      order_id: "order-1",
+      amount: 1000000,
+      payment_method: "Bank Transfer",
+      payment_date: "2026-08-16",
+      receiving_account_id: "account-1",
+    } as never,
+    "actor",
+    fakeAuditClient as never
+  );
+
+  assert.equal(getReceivingAccountByIdCalls.length, 1);
+  const [id, client] = getReceivingAccountByIdCalls[0];
+  assert.equal(id, "account-1");
+  assert.equal(client, fakeAuditClient);
+});
+
+test("addPayment: with no auditClient supplied, getReceivingAccountById still gets called (preserves existing behavior/its own anon-fallback default)", async () => {
+  const { createOrderService } = await import("./order.service");
+  receivingAccountLookupResult = { id: "account-1", is_active: true };
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    addPayment: async (input) => ({ id: "payment-1", ...input }) as OrderPayment,
+    findPaymentsByOrderId: async () => [],
+    updateOrderRollups: async (orderId, rollups) => makeOrder({ id: orderId, ...rollups }),
+  });
+
+  await createOrderService(repository).addPayment(
+    {
+      order_id: "order-1",
+      amount: 1000000,
+      payment_method: "Bank Transfer",
+      payment_date: "2026-08-16",
+      receiving_account_id: "account-1",
+    } as never,
+    "actor"
+  );
+
+  assert.equal(getReceivingAccountByIdCalls.length, 1);
+  const [id, client] = getReceivingAccountByIdCalls[0];
+  assert.equal(id, "account-1");
+  assert.equal(client, undefined);
 });

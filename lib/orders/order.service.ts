@@ -626,7 +626,7 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
         throw new OrderValidationError({ receiving_account_id: receivingAccountError });
       }
       if (input.receiving_account_id) {
-        const account = await getReceivingAccountById(input.receiving_account_id);
+        const account = await getReceivingAccountById(input.receiving_account_id, auditClient);
         if (!account || !account.is_active) {
           throw new OrderRuleViolationError("Tài khoản nhận tiền không tồn tại hoặc đã ngừng hoạt động");
         }
