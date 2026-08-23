@@ -401,12 +401,15 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
     async createOrder(input, actor, auditClient) {
       throwIfErrors(validateCreateOrderInput(input));
       const order = await repository.createOrder(input, auditClient);
-      await repository.appendOrderEvent({
-        order_id: order.id!,
-        event_type: "Order Created",
-        event_detail: "Đơn hàng được tạo",
-        actor,
-      });
+      await repository.appendOrderEvent(
+        {
+          order_id: order.id!,
+          event_type: "Order Created",
+          event_detail: "Đơn hàng được tạo",
+          actor,
+        },
+        auditClient
+      );
       return order;
     },
 
@@ -527,12 +530,15 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       }
 
       await recomputeAndPersistRollups(repository, input.order_id, auditClient);
-      await repository.appendOrderEvent({
-        order_id: input.order_id,
-        event_type: "Product Added",
-        event_detail: `Đã thêm sản phẩm (mã: ${input.product_id})`,
-        actor,
-      });
+      await repository.appendOrderEvent(
+        {
+          order_id: input.order_id,
+          event_type: "Product Added",
+          event_detail: `Đã thêm sản phẩm (mã: ${input.product_id})`,
+          actor,
+        },
+        auditClient
+      );
       return item;
     },
 
@@ -563,12 +569,15 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
 
       const item = await repository.updateOrderItem(input, auditClient);
       await recomputeAndPersistRollups(repository, input.order_id, auditClient);
-      await repository.appendOrderEvent({
-        order_id: input.order_id,
-        event_type: "Price Changed",
-        event_detail: `Đã cập nhật sản phẩm trong đơn (mã dòng: ${input.id})`,
-        actor,
-      });
+      await repository.appendOrderEvent(
+        {
+          order_id: input.order_id,
+          event_type: "Price Changed",
+          event_detail: `Đã cập nhật sản phẩm trong đơn (mã dòng: ${input.id})`,
+          actor,
+        },
+        auditClient
+      );
       return item;
     },
 
@@ -590,12 +599,15 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
         await repository.releaseProduct(removedItem.product_id, auditClient ? { actor, client: auditClient } : undefined);
       }
       await recomputeAndPersistRollups(repository, orderId, auditClient);
-      await repository.appendOrderEvent({
-        order_id: orderId,
-        event_type: "Product Removed",
-        event_detail: `Đã xóa sản phẩm khỏi đơn (mã dòng: ${orderItemId})`,
-        actor,
-      });
+      await repository.appendOrderEvent(
+        {
+          order_id: orderId,
+          event_type: "Product Removed",
+          event_detail: `Đã xóa sản phẩm khỏi đơn (mã dòng: ${orderItemId})`,
+          actor,
+        },
+        auditClient
+      );
     },
 
     async addPayment(input, actor, auditClient) {
@@ -620,14 +632,17 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
         }
       }
 
-      const payment = await repository.addPayment(input);
+      const payment = await repository.addPayment(input, auditClient);
       await recomputeAndPersistRollups(repository, input.order_id, auditClient);
-      await repository.appendOrderEvent({
-        order_id: input.order_id,
-        event_type: "Payment Added",
-        event_detail: `Thanh toán ${input.amount.toLocaleString("vi-VN")}₫ qua ${input.payment_method}`,
-        actor,
-      });
+      await repository.appendOrderEvent(
+        {
+          order_id: input.order_id,
+          event_type: "Payment Added",
+          event_detail: `Thanh toán ${input.amount.toLocaleString("vi-VN")}₫ qua ${input.payment_method}`,
+          actor,
+        },
+        auditClient
+      );
       return payment;
     },
 
@@ -656,12 +671,15 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       const items = await repository.findOrderItemsByOrderId(input.order_id, auditClient);
       const updated = await repository.markOrderLost(input, auditClient);
       await Promise.all(items.map((item) => repository.releaseProduct(item.product_id, audit)));
-      await repository.appendOrderEvent({
-        order_id: input.order_id,
-        event_type: "Marked Lost",
-        event_detail: `Đánh dấu Lost — Lý do: ${input.lost_reason}`,
-        actor,
-      });
+      await repository.appendOrderEvent(
+        {
+          order_id: input.order_id,
+          event_type: "Marked Lost",
+          event_detail: `Đánh dấu Lost — Lý do: ${input.lost_reason}`,
+          actor,
+        },
+        auditClient
+      );
       return updated;
     },
 
@@ -740,12 +758,15 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       const updated = await repository.completeOrder(orderId, purchaseRows, commissionRows, auditClient);
       const audit = auditClient ? { actor, client: auditClient } : undefined;
       await Promise.all(items.map((item) => repository.markProductSold(item.product_id, audit)));
-      await repository.appendOrderEvent({
-        order_id: orderId,
-        event_type: "Status Changed",
-        event_detail: `Trạng thái thay đổi: ${order.order_status} → Completed`,
-        actor,
-      });
+      await repository.appendOrderEvent(
+        {
+          order_id: orderId,
+          event_type: "Status Changed",
+          event_detail: `Trạng thái thay đổi: ${order.order_status} → Completed`,
+          actor,
+        },
+        auditClient
+      );
 
       // Consignment (Customer Consignment specification, D1/D2/D11,
       // LOCKED) — Order Completion is the only trigger point: Sale Price
@@ -863,12 +884,15 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
         ]);
       }
 
-      await repository.appendOrderEvent({
-        order_id: input.order_id,
-        event_type: "Status Changed",
-        event_detail: `Trạng thái thay đổi: ${order.order_status} → Cancelled (${input.dispositions.length} sản phẩm)`,
-        actor,
-      });
+      await repository.appendOrderEvent(
+        {
+          order_id: input.order_id,
+          event_type: "Status Changed",
+          event_detail: `Trạng thái thay đổi: ${order.order_status} → Cancelled (${input.dispositions.length} sản phẩm)`,
+          actor,
+        },
+        auditClient
+      );
 
       return updated;
     },
@@ -885,12 +909,15 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       }
 
       const updated = await repository.reassignSalesOwner(input, auditClient);
-      await repository.appendOrderEvent({
-        order_id: input.order_id,
-        event_type: "Sales Owner Reassigned",
-        event_detail: `Đổi người phụ trách: ${order.sales_owner} → ${input.sales_owner}`,
-        actor,
-      });
+      await repository.appendOrderEvent(
+        {
+          order_id: input.order_id,
+          event_type: "Sales Owner Reassigned",
+          event_detail: `Đổi người phụ trách: ${order.sales_owner} → ${input.sales_owner}`,
+          actor,
+        },
+        auditClient
+      );
       return updated;
     },
   };

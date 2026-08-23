@@ -1068,8 +1068,12 @@ export async function markProductSold(productId: string, audit?: OrderAuditConte
 // fill a gap in it.
 // ---------------------------------------------------------------------------
 
-export async function addPayment(input: AddPaymentInput): Promise<OrderPayment> {
-  const { data, error } = await supabase
+/** `client`: RLS hotfix (2026082312) — optional, defaults to the anon-
+ * defaulting singleton for backward compatibility. The one real caller
+ * (order.service.ts's addPayment) always has and now passes its own
+ * auditClient, since payments' RLS policy is authenticated-only. */
+export async function addPayment(input: AddPaymentInput, client: SupabaseClient = supabase): Promise<OrderPayment> {
+  const { data, error } = await client
     .from("payments")
     .insert(input)
     .select()
@@ -1089,8 +1093,18 @@ export async function addPayment(input: AddPaymentInput): Promise<OrderPayment> 
 // order_events; nothing here updates or deletes a row.
 // ---------------------------------------------------------------------------
 
-export async function appendOrderEvent(event: Omit<OrderEvent, "id" | "event_timestamp">): Promise<OrderEvent> {
-  const { data, error } = await supabase
+/** `client`: RLS hotfix (2026082312) — optional, defaults to the anon-
+ * defaulting singleton only for callers that genuinely have none
+ * (order.service.test.ts's fakes, and reserveOrder/cancelReservation,
+ * which are documented above as having no live API caller today). Every
+ * other write-orchestration method in order.service.ts now threads its
+ * own auditClient through here, since order_events' RLS policy is
+ * authenticated-only. */
+export async function appendOrderEvent(
+  event: Omit<OrderEvent, "id" | "event_timestamp">,
+  client: SupabaseClient = supabase
+): Promise<OrderEvent> {
+  const { data, error } = await client
     .from("order_events")
     .insert(event)
     .select()
@@ -1215,7 +1229,7 @@ export interface OrderWriteRepository {
   reserveProduct(productId: string, audit?: OrderAuditContext): Promise<void>;
   releaseProduct(productId: string, audit?: OrderAuditContext): Promise<void>;
   markProductSold(productId: string, audit?: OrderAuditContext): Promise<void>;
-  addPayment(input: AddPaymentInput): Promise<OrderPayment>;
+  addPayment(input: AddPaymentInput, client?: SupabaseClient): Promise<OrderPayment>;
   markOrderLost(input: MarkOrderLostInput, client?: SupabaseClient): Promise<Order>;
   completeOrder(
     orderId: string,
@@ -1231,7 +1245,7 @@ export interface OrderWriteRepository {
     dispositions: { order_item_id: string; disposition: string }[],
     audit?: OrderAuditContext
   ): Promise<Order>;
-  appendOrderEvent(event: Omit<OrderEvent, "id" | "event_timestamp">): Promise<OrderEvent>;
+  appendOrderEvent(event: Omit<OrderEvent, "id" | "event_timestamp">, client?: SupabaseClient): Promise<OrderEvent>;
   /** Persists rollup fields the service layer recomputes after every
    * order_items/payments mutation (ORDERS_DATABASE.md §4, "Derived"). */
   updateOrderRollups(orderId: string, rollups: OrderRollups, client?: SupabaseClient): Promise<Order>;

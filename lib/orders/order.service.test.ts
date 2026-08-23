@@ -671,3 +671,72 @@ test("completeOrder: with no auditClient supplied, createConsignmentFinancialRec
   const [, , client] = consignmentFinancialRecordCalls[0];
   assert.equal(client, undefined);
 });
+
+test("createOrder: passes the caller's auditClient through to appendOrderEvent (order_events RLS hotfix, 2026082312)", async () => {
+  const { createOrderService } = await import("./order.service");
+  const fakeAuditClient = { marker: "real-authenticated-client" };
+  let appendOrderEventClient: unknown;
+  const repository = makeRepository({
+    createOrder: async () => makeOrder({ id: "order-1" }),
+    appendOrderEvent: async (event, client) => {
+      appendOrderEventClient = client;
+      return { id: "event-1", ...event, event_timestamp: "2026-08-23" } as OrderEvent;
+    },
+  });
+
+  await createOrderService(repository).createOrder(
+    { customer_id: "customer-1", sales_owner: "Nguyen Van A", created_by: "Nguyen Van A" },
+    "actor",
+    fakeAuditClient as never
+  );
+
+  assert.equal(appendOrderEventClient, fakeAuditClient);
+});
+
+test("createOrder: with no auditClient supplied, appendOrderEvent still gets called (preserves existing behavior/its own anon-fallback default)", async () => {
+  const { createOrderService } = await import("./order.service");
+  let appendOrderEventClient: unknown = "not-called";
+  const repository = makeRepository({
+    createOrder: async () => makeOrder({ id: "order-1" }),
+    appendOrderEvent: async (event, client) => {
+      appendOrderEventClient = client;
+      return { id: "event-1", ...event, event_timestamp: "2026-08-23" } as OrderEvent;
+    },
+  });
+
+  await createOrderService(repository).createOrder(
+    { customer_id: "customer-1", sales_owner: "Nguyen Van A", created_by: "Nguyen Van A" },
+    "actor"
+  );
+
+  assert.equal(appendOrderEventClient, undefined);
+});
+
+test("addPayment: passes the caller's auditClient through to both repository.addPayment and appendOrderEvent (payments/order_events RLS hotfix, 2026082312)", async () => {
+  const { createOrderService } = await import("./order.service");
+  const fakeAuditClient = { marker: "real-authenticated-client" };
+  let addPaymentClient: unknown;
+  let appendOrderEventClient: unknown;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    addPayment: async (input, client) => {
+      addPaymentClient = client;
+      return { id: "payment-1", ...input } as OrderPayment;
+    },
+    findPaymentsByOrderId: async () => [],
+    updateOrderRollups: async (orderId, rollups) => makeOrder({ id: orderId, ...rollups }),
+    appendOrderEvent: async (event, client) => {
+      appendOrderEventClient = client;
+      return { id: "event-1", ...event, event_timestamp: "2026-08-23" } as OrderEvent;
+    },
+  });
+
+  await createOrderService(repository).addPayment(
+    { order_id: "order-1", amount: 1000000, payment_method: "Cash", payment_date: "2026-08-16" } as never,
+    "actor",
+    fakeAuditClient as never
+  );
+
+  assert.equal(addPaymentClient, fakeAuditClient);
+  assert.equal(appendOrderEventClient, fakeAuditClient);
+});
