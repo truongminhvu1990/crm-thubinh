@@ -157,8 +157,10 @@ export async function setRoleDataScope(roleId: string, resource: string, scope: 
 // permission_sensitive_fields
 // ============================================================
 
-export async function getSensitiveFieldPairings(): Promise<PermissionSensitiveField[]> {
-  const { data, error } = await supabase.from("permission_sensitive_fields").select("*");
+export async function getSensitiveFieldPairings(
+  client: SupabaseClient = supabase
+): Promise<PermissionSensitiveField[]> {
+  const { data, error } = await client.from("permission_sensitive_fields").select("*");
   if (error) {
     console.error("Error fetching permission_sensitive_fields:", error);
     return [];
@@ -166,16 +168,24 @@ export async function getSensitiveFieldPairings(): Promise<PermissionSensitiveFi
   return data as PermissionSensitiveField[];
 }
 
-export async function pairSensitiveField(permissionKey: string, fieldKey: SensitiveFieldKey) {
-  const { error } = await supabase
+export async function pairSensitiveField(
+  permissionKey: string,
+  fieldKey: SensitiveFieldKey,
+  client: SupabaseClient = supabase
+) {
+  const { error } = await client
     .from("permission_sensitive_fields")
     .insert({ permission_key: permissionKey, field_key: fieldKey });
   if (error && (error as { code?: string }).code !== "23505") return { error };
   return { error: null };
 }
 
-export async function unpairSensitiveField(permissionKey: string, fieldKey: SensitiveFieldKey) {
-  const { error } = await supabase
+export async function unpairSensitiveField(
+  permissionKey: string,
+  fieldKey: SensitiveFieldKey,
+  client: SupabaseClient = supabase
+) {
+  const { error } = await client
     .from("permission_sensitive_fields")
     .delete()
     .eq("permission_key", permissionKey)

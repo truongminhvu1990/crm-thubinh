@@ -120,7 +120,7 @@ export async function getResolvedDataScope(
 export async function getVisibleSensitiveFields(roleId: string, client?: SupabaseClient): Promise<Set<SensitiveFieldKey>> {
   const [permissionKeys, pairings] = await Promise.all([
     getGrantedPermissionKeys(roleId, client),
-    repo.getSensitiveFieldPairings(),
+    repo.getSensitiveFieldPairings(client),
   ]);
   const fields = new Set<SensitiveFieldKey>();
   for (const pairing of pairings) {
@@ -217,11 +217,12 @@ export async function toggleSensitiveFieldPairing(
   actorStaffId: string,
   permissionKey: string,
   fieldKey: SensitiveFieldKey,
-  pair: boolean
+  pair: boolean,
+  client?: SupabaseClient
 ) {
   const { error } = pair
-    ? await repo.pairSensitiveField(permissionKey, fieldKey)
-    : await repo.unpairSensitiveField(permissionKey, fieldKey);
+    ? await repo.pairSensitiveField(permissionKey, fieldKey, client)
+    : await repo.unpairSensitiveField(permissionKey, fieldKey, client);
   if (error) throw new PermissionServiceError(error.message);
   await logActivity({
     staff_id: actorStaffId,

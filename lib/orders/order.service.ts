@@ -757,7 +757,7 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       // ordinary case). Best-effort — never blocks or fails order
       // completion (see createConsignmentFinancialRecordsForOrder's own
       // doc comment).
-      await createConsignmentFinancialRecordsForOrder(updated, items);
+      await createConsignmentFinancialRecordsForOrder(updated, items, auditClient);
 
       return updated;
     },

@@ -57,6 +57,24 @@ mock.module("@/lib/receivingAccount.service", {
   },
 });
 
+/** Consignment client propagation regression coverage (BUG-002 Phase 1B) —
+ * completeOrder()'s own call to createConsignmentFinancialRecordsForOrder
+ * used to omit the `auditClient` it already has in scope, silently falling
+ * back to that function's own anon-fallback default. Spied here (rather
+ * than exercised for real) since createConsignmentFinancialRecordsForOrder
+ * isn't part of the injectable OrderRepository seam the rest of this file
+ * uses — it's imported directly by order.service.ts. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let consignmentFinancialRecordCalls: any[][] = [];
+mock.module("@/lib/consignment/consignmentFinancialRecord.service", {
+  namedExports: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    createConsignmentFinancialRecordsForOrder: async (...args: any[]) => {
+      consignmentFinancialRecordCalls.push(args);
+    },
+  },
+});
+
 function makeOrder(overrides: Partial<Order> = {}): Order {
   return {
     id: "order-1",
@@ -132,6 +150,7 @@ test.beforeEach(() => {
     { id: "rule-1", minimum_amount: 0, maximum_amount: 9999999, commission_percent: 5, is_active: true, created_at: "", updated_at: "" },
     { id: "rule-2", minimum_amount: 10000000, maximum_amount: null, commission_percent: 3, is_active: true, created_at: "", updated_at: "" },
   ];
+  consignmentFinancialRecordCalls = [];
 });
 
 test("completeOrder: sale_price = order_item.line_total, never order.total_amount", async () => {
@@ -626,4 +645,29 @@ test("addPayment: a non-Bank-Transfer method with a receiving_account_id supplie
     OrderValidationError
   );
   assert.equal(repositoryAddPaymentCalled, false);
+});
+
+test("completeOrder: passes the caller's auditClient through to createConsignmentFinancialRecordsForOrder (BUG-002 Phase 1B fix)", async () => {
+  const { createOrderService } = await import("./order.service");
+  const repository = makeRepository();
+  const fakeAuditClient = { marker: "real-authenticated-client" };
+
+  await createOrderService(repository).completeOrder("order-1", "actor", fakeAuditClient as never);
+
+  assert.equal(consignmentFinancialRecordCalls.length, 1);
+  const [order, items, client] = consignmentFinancialRecordCalls[0];
+  assert.equal(order.id, "order-1");
+  assert.ok(Array.isArray(items));
+  assert.equal(client, fakeAuditClient);
+});
+
+test("completeOrder: with no auditClient supplied, createConsignmentFinancialRecordsForOrder still gets called (preserves existing behavior/its own anon-fallback default)", async () => {
+  const { createOrderService } = await import("./order.service");
+  const repository = makeRepository();
+
+  await createOrderService(repository).completeOrder("order-1", "actor");
+
+  assert.equal(consignmentFinancialRecordCalls.length, 1);
+  const [, , client] = consignmentFinancialRecordCalls[0];
+  assert.equal(client, undefined);
 });

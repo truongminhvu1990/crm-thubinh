@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermissionCenterAccess } from "@/lib/permission/serverAuth";
+import { requirePermissionCenterAccess, createRequestClient } from "@/lib/permission/serverAuth";
 import { toggleSensitiveFieldPairing } from "@/lib/permission/permissionCenter.service";
 import { getSensitiveFieldPairings } from "@/lib/permission/permissionCenter.repository";
 import { SensitiveFieldKey } from "@/types/permissionCenter";
@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   if ("error" in auth) return auth.error;
 
   try {
-    const pairings = await getSensitiveFieldPairings();
+    const pairings = await getSensitiveFieldPairings(createRequestClient(request));
     return NextResponse.json(pairings);
   } catch (error) {
     return handlePermissionServiceError(error);
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     if (!permission_key || !field_key || typeof pair !== "boolean") {
       return NextResponse.json({ error: "permission_key, field_key, pair là bắt buộc" }, { status: 400 });
     }
-    await toggleSensitiveFieldPairing(auth.staff.id, permission_key, field_key, pair);
+    await toggleSensitiveFieldPairing(auth.staff.id, permission_key, field_key, pair, createRequestClient(request));
     return NextResponse.json({ ok: true });
   } catch (error) {
     return handlePermissionServiceError(error);
