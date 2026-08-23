@@ -161,7 +161,7 @@ export async function createReceivingAccount(
     .single();
   if (error) throw error;
 
-  await logActivity({ staff_id: actorStaffId, action: "receiving_account_created", entity: "receiving_account", entity_id: data.id });
+  await logActivity({ staff_id: actorStaffId, action: "receiving_account_created", entity: "receiving_account", entity_id: data.id }, client);
   return data as ReceivingAccount;
 }
 
@@ -182,7 +182,7 @@ export async function updateReceivingAccount(
   const { data, error } = await client.from("receiving_accounts").update(changes).eq("id", id).select().single();
   if (error) throw error;
 
-  await logActivity({ staff_id: actorStaffId, action: "receiving_account_updated", entity: "receiving_account", entity_id: id });
+  await logActivity({ staff_id: actorStaffId, action: "receiving_account_updated", entity: "receiving_account", entity_id: id }, client);
   return data as ReceivingAccount;
 }
 
@@ -203,11 +203,14 @@ export async function setReceivingAccountActive(
     .single();
   if (error) throw error;
 
-  await logActivity({
-    staff_id: actorStaffId,
-    action: isActive ? "receiving_account_activated" : "receiving_account_deactivated",
-    entity: "receiving_account",
-    entity_id: id,
-  });
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: isActive ? "receiving_account_activated" : "receiving_account_deactivated",
+      entity: "receiving_account",
+      entity_id: id,
+    },
+    client
+  );
   return data as ReceivingAccount;
 }

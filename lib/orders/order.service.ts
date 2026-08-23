@@ -905,7 +905,7 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
             )
           ),
           ...voidable.compensations.map((c) =>
-            logActivity({ staff_id: null, action: "compensation_voided", entity: "compensation", entity_id: c.id })
+            logActivity({ staff_id: null, action: "compensation_voided", entity: "compensation", entity_id: c.id }, auditClient)
           ),
           ...voidable.commissions.map((c) =>
             logStatusChange(

@@ -224,12 +224,15 @@ export async function toggleSensitiveFieldPairing(
     ? await repo.pairSensitiveField(permissionKey, fieldKey, client)
     : await repo.unpairSensitiveField(permissionKey, fieldKey, client);
   if (error) throw new PermissionServiceError(error.message);
-  await logActivity({
-    staff_id: actorStaffId,
-    action: pair ? "sensitive_field_paired" : "sensitive_field_unpaired",
-    entity: "permission",
-    entity_id: `${permissionKey}:${fieldKey}`,
-  });
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: pair ? "sensitive_field_paired" : "sensitive_field_unpaired",
+      entity: "permission",
+      entity_id: `${permissionKey}:${fieldKey}`,
+    },
+    client
+  );
 }
 
 export async function renameTeam(actorStaffId: string, oldTeamId: string, newTeamId: string) {

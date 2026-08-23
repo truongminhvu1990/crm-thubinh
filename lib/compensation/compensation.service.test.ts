@@ -13,14 +13,19 @@ import { Order, OrderItem } from "@/types/order";
  * invalid Partner handling, the Eligibility transition, state transitions,
  * and already-processed protection.
  *
- * logActivity (@/lib/activityLog.service) always writes through the
- * module-level `supabase` singleton, never the injectable client these
- * functions accept — stubbed as a no-op here rather than exercised, same
- * convention order.service.test.ts already uses for its own dependencies.
+ * logActivity (@/lib/activityLog.service) now accepts and receives the same
+ * injectable client these functions use (BUG-002 Phase 2B-1 fix) — mocked
+ * here as a spy so this file can assert that propagation, same convention
+ * order.service.test.ts already uses for its own dependencies.
  */
 
 mock.module("@/lib/supabase", { namedExports: { supabase: {} } });
-mock.module("@/lib/activityLog.service", { namedExports: { logActivity: async () => {} } });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let logActivityCalls: any[][] = [];
+mock.module("@/lib/activityLog.service", {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  namedExports: { logActivity: async (...args: any[]) => { logActivityCalls.push(args); } },
+});
 
 interface FakeResult {
   data: unknown;
@@ -208,6 +213,21 @@ test("confirmCompensation: Pending + Payment Status Paid -> Confirmed", async ()
 
   const result = await confirmCompensation("comp-1", "staff-1", client);
   assert.equal(result.status, "Confirmed");
+});
+
+test("confirmCompensation: passes its own client through to logActivity (BUG-002 Phase 2B-1 fix)", async () => {
+  const { confirmCompensation } = await import("./compensation.service");
+  logActivityCalls = [];
+  const { client } = makeClient({
+    compensations: [{ data: { id: "comp-1", status: "Pending", order_id: "order-1" } }, { data: { id: "comp-1", status: "Confirmed" } }],
+    orders: [{ data: { payment_status: "Paid" } }],
+  });
+
+  await confirmCompensation("comp-1", "staff-1", client);
+
+  assert.equal(logActivityCalls.length, 1);
+  const [, loggedClient] = logActivityCalls[0];
+  assert.equal(loggedClient, client);
 });
 
 test("confirmCompensation: already-processed protection — rejects when not Pending (e.g. already Confirmed)", async () => {

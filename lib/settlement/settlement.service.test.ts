@@ -19,7 +19,12 @@ import { mock } from "node:test";
  */
 
 mock.module("@/lib/supabase", { namedExports: { supabase: {} } });
-mock.module("@/lib/activityLog.service", { namedExports: { logActivity: async () => {} } });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let logActivityCalls: any[][] = [];
+mock.module("@/lib/activityLog.service", {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  namedExports: { logActivity: async (...args: any[]) => { logActivityCalls.push(args); } },
+});
 
 /** Finance Project #1, Phase A — markSettlementPaid's own state-machine/
  * cascade logic lives entirely in the mark_settlement_paid() RPC (see
@@ -244,6 +249,20 @@ test("approveSettlement: Pending -> Approved", async () => {
 
   const result = await approveSettlement("sett-1", "staff-1", client);
   assert.equal(result.status, "Approved");
+});
+
+test("approveSettlement: passes its own client through to logActivity (BUG-002 Phase 2B-1 fix)", async () => {
+  const { approveSettlement } = await import("./settlement.service");
+  logActivityCalls = [];
+  const { client } = makeClient({
+    settlements: [{ data: { id: "sett-1", status: "Pending", items: [] } }, { data: { id: "sett-1", status: "Approved", items: [] } }],
+  });
+
+  await approveSettlement("sett-1", "staff-1", client);
+
+  assert.equal(logActivityCalls.length, 1);
+  const [, loggedClient] = logActivityCalls[0];
+  assert.equal(loggedClient, client);
 });
 
 test("completeSettlement: Approved -> Completed (terminal)", async () => {

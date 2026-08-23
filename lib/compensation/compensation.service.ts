@@ -127,7 +127,7 @@ export async function createCompensationsForOrder(
         .single();
       if (error) throw error;
 
-      await logActivity({ staff_id: null, action: "compensation_created", entity: "compensation", entity_id: data.id });
+      await logActivity({ staff_id: null, action: "compensation_created", entity: "compensation", entity_id: data.id }, client);
     }
   } catch (error) {
     console.error("Error creating compensation for order:", order.id, error);
@@ -152,7 +152,7 @@ export async function markCompensationsEligible(orderId: string, client: Supabas
     if (error) throw error;
 
     for (const row of data ?? []) {
-      await logActivity({ staff_id: null, action: "compensation_eligible", entity: "compensation", entity_id: row.id });
+      await logActivity({ staff_id: null, action: "compensation_eligible", entity: "compensation", entity_id: row.id }, client);
     }
   } catch (error) {
     console.error("Error marking compensation eligible for order:", orderId, error);
@@ -191,7 +191,7 @@ export async function cancelCompensationsForOrder(orderId: string, client: Supab
     if (error) throw error;
 
     for (const row of data ?? []) {
-      await logActivity({ staff_id: null, action: "compensation_cancelled", entity: "compensation", entity_id: row.id });
+      await logActivity({ staff_id: null, action: "compensation_cancelled", entity: "compensation", entity_id: row.id }, client);
     }
   } catch (error) {
     console.error("Error cancelling compensation for order:", orderId, error);
@@ -296,7 +296,7 @@ export async function confirmCompensation(
     .single();
   if (error) throw error;
 
-  await logActivity({ staff_id: actorStaffId, action: "compensation_confirmed", entity: "compensation", entity_id: id });
+  await logActivity({ staff_id: actorStaffId, action: "compensation_confirmed", entity: "compensation", entity_id: id }, client);
   return data as unknown as Compensation;
 }
 
@@ -322,12 +322,15 @@ export async function createCompensationPolicy(
   const { data, error } = await client.from("compensation_policies").insert(input).select().single();
   if (error) throw error;
 
-  await logActivity({
-    staff_id: actorStaffId,
-    action: "compensation_policy_created",
-    entity: "compensation_policy",
-    entity_id: data.id,
-  });
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: "compensation_policy_created",
+      entity: "compensation_policy",
+      entity_id: data.id,
+    },
+    client
+  );
   return data as CompensationPolicy;
 }
 
@@ -340,12 +343,15 @@ export async function updateCompensationPolicy(
   const { data, error } = await client.from("compensation_policies").update(changes).eq("id", id).select().single();
   if (error) throw error;
 
-  await logActivity({
-    staff_id: actorStaffId,
-    action: "compensation_policy_updated",
-    entity: "compensation_policy",
-    entity_id: id,
-  });
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: "compensation_policy_updated",
+      entity: "compensation_policy",
+      entity_id: id,
+    },
+    client
+  );
   return data as CompensationPolicy;
 }
 
@@ -392,6 +398,6 @@ export async function handOffCompensation(
     .single();
   if (error) throw error;
 
-  await logActivity({ staff_id: null, action: "compensation_handed_off", entity: "compensation", entity_id: id });
+  await logActivity({ staff_id: null, action: "compensation_handed_off", entity: "compensation", entity_id: id }, client);
   return data as unknown as Compensation;
 }

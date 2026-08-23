@@ -175,7 +175,7 @@ export async function createSettlement(
     .insert(compensationIds.map((compensation_id) => ({ settlement_id: settlement.id, compensation_id })));
   if (itemsError) throw itemsError;
 
-  await logActivity({ staff_id: null, action: "settlement_created", entity: "settlement", entity_id: settlement.id });
+  await logActivity({ staff_id: null, action: "settlement_created", entity: "settlement", entity_id: settlement.id }, client);
 
   const created = await getSettlementById(settlement.id, client);
   if (!created) throw new SettlementRuleViolationError("Đã tạo settlement nhưng không thể tải lại");
@@ -251,7 +251,7 @@ export async function approveSettlement(id: string, actorStaffId: string | null,
     .eq("id", id);
   if (error) throw error;
 
-  await logActivity({ staff_id: actorStaffId, action: "settlement_approved", entity: "settlement", entity_id: id });
+  await logActivity({ staff_id: actorStaffId, action: "settlement_approved", entity: "settlement", entity_id: id }, client);
   return requireSettlement(id, client);
 }
 
@@ -268,7 +268,7 @@ export async function completeSettlement(id: string, actorStaffId: string | null
     .eq("id", id);
   if (error) throw error;
 
-  await logActivity({ staff_id: actorStaffId, action: "settlement_completed", entity: "settlement", entity_id: id });
+  await logActivity({ staff_id: actorStaffId, action: "settlement_completed", entity: "settlement", entity_id: id }, client);
   return requireSettlement(id, client);
 }
 

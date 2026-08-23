@@ -266,16 +266,22 @@ test("unpairSensitiveField (repository): with an explicit client, that exact cli
   assert.deepEqual(spyClient.calls, [{ op: "delete", table: "permission_sensitive_fields" }]);
 });
 
-test("toggleSensitiveFieldPairing (service): pair=true threads the client through to pairSensitiveField's insert", async () => {
+test("toggleSensitiveFieldPairing (service): pair=true threads the client through to pairSensitiveField's insert, and to logActivity's own activity_logs insert (BUG-002 Phase 2B-1 fix)", async () => {
   const { toggleSensitiveFieldPairing } = await import("./permissionCenter.service");
   const spyClient = makeWriteSpyClient("explicit");
   await toggleSensitiveFieldPairing("actor-1", "settings.manage", "cost_price", true, spyClient as never);
-  assert.deepEqual(spyClient.calls, [{ op: "insert", table: "permission_sensitive_fields" }]);
+  assert.deepEqual(spyClient.calls, [
+    { op: "insert", table: "permission_sensitive_fields" },
+    { op: "insert", table: "activity_logs" },
+  ]);
 });
 
-test("toggleSensitiveFieldPairing (service): pair=false threads the client through to unpairSensitiveField's delete", async () => {
+test("toggleSensitiveFieldPairing (service): pair=false threads the client through to unpairSensitiveField's delete, and to logActivity's own activity_logs insert (BUG-002 Phase 2B-1 fix)", async () => {
   const { toggleSensitiveFieldPairing } = await import("./permissionCenter.service");
   const spyClient = makeWriteSpyClient("explicit");
   await toggleSensitiveFieldPairing("actor-1", "settings.manage", "cost_price", false, spyClient as never);
-  assert.deepEqual(spyClient.calls, [{ op: "delete", table: "permission_sensitive_fields" }]);
+  assert.deepEqual(spyClient.calls, [
+    { op: "delete", table: "permission_sensitive_fields" },
+    { op: "insert", table: "activity_logs" },
+  ]);
 });

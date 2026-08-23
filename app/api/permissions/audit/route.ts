@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermissionCenterAccess } from "@/lib/permission/serverAuth";
-import { supabase } from "@/lib/supabase";
+import { requirePermissionCenterAccess, createRequestClient } from "@/lib/permission/serverAuth";
 import { handlePermissionServiceError } from "../_errors";
 
 const ENTITIES = ["role", "permission", "role_permission", "role_data_scope"];
@@ -17,7 +16,7 @@ export async function GET(request: NextRequest) {
     const from = searchParams.get("from") || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const to = searchParams.get("to") || new Date().toISOString().slice(0, 10);
 
-    const query = supabase
+    const query = createRequestClient(request)
       .from("activity_logs")
       .select("*, staff:staff(full_name, staff_code)")
       .in("entity", entity ? [entity] : ENTITIES)

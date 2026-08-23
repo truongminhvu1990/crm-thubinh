@@ -160,7 +160,7 @@ export async function createPartner(
     .single();
   if (error) throw error;
 
-  await logActivity({ staff_id: actorStaffId, action: "partner_created", entity: "partner", entity_id: data.id });
+  await logActivity({ staff_id: actorStaffId, action: "partner_created", entity: "partner", entity_id: data.id }, client);
   return data as Partner;
 }
 
@@ -187,9 +187,9 @@ export async function updatePartner(
         : changes.status === "Inactive" || changes.status === "Terminated"
           ? "partner_deactivated"
           : "partner_updated";
-    await logActivity({ staff_id: actorStaffId, action, entity: "partner", entity_id: id });
+    await logActivity({ staff_id: actorStaffId, action, entity: "partner", entity_id: id }, client);
   } else {
-    await logActivity({ staff_id: actorStaffId, action: "partner_updated", entity: "partner", entity_id: id });
+    await logActivity({ staff_id: actorStaffId, action: "partner_updated", entity: "partner", entity_id: id }, client);
   }
 
   return data as Partner;
