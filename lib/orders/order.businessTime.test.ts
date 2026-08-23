@@ -25,23 +25,22 @@ import { BusinessTime } from "@/lib/businessTime";
  * for a human to sanity-check.
  */
 
-interface FakeSelectCall {
-  columns: string;
-}
-
-function createFakeSupabase(existingRowCount: number) {
+/**
+ * BUG-ORDER-LIFECYCLE-001 Phase 1: generateOrderNumber() now sources the
+ * sequence from the generate_order_sequence(p_business_date) RPC rather
+ * than a live row count (see order.repository.test.ts's own updated header
+ * comment) — this fake's `rpc()` always returns 1, since this file only
+ * asserts each boundary's order_date/order_number *date prefix*, never the
+ * sequence digits.
+ */
+function createFakeSupabase() {
   return {
     supabase: {
+      rpc(_fn: string, _args?: Record<string, unknown>) {
+        return Promise.resolve({ data: 1, error: null });
+      },
       from(_table: string) {
         return {
-          select(columns: string) {
-            return {
-              like(_column: string, _pattern: string) {
-                const rows = Array.from({ length: existingRowCount }, (_, i) => ({ id: String(i) }));
-                return Promise.resolve({ data: rows, error: null });
-              },
-            } as unknown as FakeSelectCall;
-          },
           insert(values: Record<string, unknown>) {
             return {
               select() {
@@ -59,7 +58,7 @@ function createFakeSupabase(existingRowCount: number) {
   };
 }
 
-mock.module("@/lib/supabase", { namedExports: createFakeSupabase(0) });
+mock.module("@/lib/supabase", { namedExports: createFakeSupabase() });
 
 async function createOrderAt(fixedUtcMs: number, t: import("node:test").TestContext) {
   t.mock.timers.enable({ apis: ["Date"], now: fixedUtcMs });

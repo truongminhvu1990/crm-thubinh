@@ -7,33 +7,32 @@ import { BusinessTime } from "@/lib/businessTime";
  * Regression coverage for generateOrderNumber() (private to order.repository.ts,
  * exercised here through the exported createOrder(), the only call site).
  *
- * Prior to this fix, the counting query used `.select("id", { count: "exact",
- * head: true })` — a HEAD request that Supabase/PostgREST returned HTTP 400
- * for in production. The fix replaced it with a plain GET selecting "id" and
- * deriving the count from the returned array's length. This test pins both:
- * the sequence-number arithmetic still working, and the query shape never
- * regressing back to `head`/`count`.
+ * BUG-ORDER-LIFECYCLE-001 Phase 1: generateOrderNumber() now delegates the
+ * sequence itself to the generate_order_sequence(p_business_date) RPC (a
+ * persistent Postgres counter, supabase/migrations/2026082313_order_number_
+ * sequence.sql) instead of counting today's rows — fixing both the
+ * concurrent-creation race and the number-reuse-after-deletion bug the
+ * prior row-count implementation had. This file's fake mocks that RPC
+ * directly: `rpcSequence` configures what the next call returns, and
+ * `rpcCalls` records the exact `p_business_date` argument each call
+ * received, so these tests can pin the query shape as well as the
+ * resulting order_number string.
  */
 
-interface FakeSelectCall {
-  columns: string;
-  options?: { count?: string; head?: boolean };
+interface FakeRpcCall {
+  fn: string;
+  args?: Record<string, unknown>;
 }
 
-function createFakeSupabase(existingRowCount: number, selectCalls: FakeSelectCall[]) {
+function createFakeSupabase(rpcCalls: FakeRpcCall[], nextSequence: () => number) {
   return {
     supabase: {
+      rpc(fn: string, args?: Record<string, unknown>) {
+        rpcCalls.push({ fn, args });
+        return Promise.resolve({ data: nextSequence(), error: null });
+      },
       from(_table: string) {
         return {
-          select(columns: string, options?: { count?: string; head?: boolean }) {
-            selectCalls.push({ columns, options });
-            return {
-              like(_column: string, _pattern: string) {
-                const rows = Array.from({ length: existingRowCount }, (_, i) => ({ id: String(i) }));
-                return Promise.resolve({ data: rows, error: null });
-              },
-            };
-          },
           insert(values: Record<string, unknown>) {
             return {
               select() {
@@ -55,10 +54,17 @@ function createFakeSupabase(existingRowCount: number, selectCalls: FakeSelectCal
 // this file can import order.repository against the same fake — node:test's
 // mock.module() rejects mocking the same specifier twice within one process,
 // and this file's tests all run in that one process.
-const selectCalls: FakeSelectCall[] = [];
-mock.module("@/lib/supabase", { namedExports: createFakeSupabase(3, selectCalls) });
+//
+// Sequence starts at 4 so the first call in this file's tests mirrors the
+// prior implementation's "3 existing -> 000004" fixture value, keeping the
+// assertions below easy to compare against the pre-fix test.
+const rpcCalls: FakeRpcCall[] = [];
+let mockSequence = 4;
+mock.module("@/lib/supabase", {
+  namedExports: createFakeSupabase(rpcCalls, () => mockSequence++),
+});
 
-test("generateOrderNumber (via createOrder): sequence and query shape", async (t) => {
+test("generateOrderNumber (via createOrder): first generation uses the RPC and returns the configured sequence", async (t) => {
   const { createOrder } = await import("./order.repository");
 
   const order = await createOrder({
@@ -75,7 +81,7 @@ test("generateOrderNumber (via createOrder): sequence and query shape", async (t
   const todayString = BusinessTime.todayString();
   const datePart = todayString.replace(/-/g, "");
 
-  await t.test("computes the next sequence from the row count (3 existing -> 000004)", () => {
+  await t.test("format unchanged: OD-{YYYYMMDD}-{6-digit sequence}", () => {
     assert.equal(order.order_number, `OD-${datePart}-000004`);
   });
 
@@ -83,19 +89,40 @@ test("generateOrderNumber (via createOrder): sequence and query shape", async (t
     assert.equal(order.order_date, todayString);
   });
 
-  await t.test("issues a plain GET select — no head/count on the counting query", () => {
-    assert.equal(selectCalls.length, 1);
-    assert.equal(selectCalls[0].columns, "id");
-    assert.equal(selectCalls[0].options?.head, undefined);
-    assert.equal(selectCalls[0].options?.count, undefined);
+  await t.test("calls generate_order_sequence with today's business date, not a live row count", () => {
+    assert.equal(rpcCalls.length, 1);
+    assert.equal(rpcCalls[0].fn, "generate_order_sequence");
+    assert.deepEqual(rpcCalls[0].args, { p_business_date: todayString });
   });
+});
+
+test("generateOrderNumber (via createOrder): second sequential call the same day advances to the next counter value", async () => {
+  const { createOrder } = await import("./order.repository");
+
+  const order = await createOrder({
+    customer_id: "customer-1",
+    sales_owner: "Jane",
+    created_by: "Jane",
+  });
+
+  const datePart = BusinessTime.todayString().replace(/-/g, "");
+
+  // The module-scope fake's counter is shared across tests in this file (in
+  // call order): the previous test consumed sequence 4, so this one must
+  // receive 5 — proving the counter genuinely increments per call rather
+  // than resetting or repeating, which is the exact bug this migration
+  // fixes (the old count-based generator could reproduce the same sequence
+  // twice after a deletion).
+  assert.equal(order.order_number, `OD-${datePart}-000005`);
+  assert.equal(rpcCalls.length, 2);
+  assert.equal(rpcCalls[1].fn, "generate_order_sequence");
 });
 
 /**
  * Order Sale Date (Backdated Order support) — createOrder() must honor a
  * caller-supplied order_date (a user entering a backdated sale) instead of
  * always defaulting to today's Vietnam business date. Omitting order_date
- * entirely (existing call sites, e.g. the test above) must keep defaulting
+ * entirely (existing call sites, e.g. the tests above) must keep defaulting
  * to today — that behavior is unchanged and already covered above.
  */
 test("createOrder: honors a caller-supplied order_date over today's business date", async () => {

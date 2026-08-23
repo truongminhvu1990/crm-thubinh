@@ -293,16 +293,19 @@ export async function findRevenueRecognizedOrders(start: string, end: string, cl
 // ---------------------------------------------------------------------------
 
 /**
- * TEMPORARY, non-atomic order-number generator: counts today's orders and
- * increments. ORDERS_DATABASE.md §13 / ORDERS_SUPABASE_PLAN.md §3 Category A
- * both name atomic order-number generation as needing a dedicated Postgres
- * function requiring its own explicit Product Owner SQL approval — that is
- * a separate, not-yet-approved gate, out of scope for this increment. This
- * generator has a real race condition under concurrent order creation (two
- * requests counting "0 today" at once would both produce sequence 000001) —
- * flagged here, not hidden, and must be replaced once the atomic function
- * lands. Format per ORDERS_SPEC.md §3 Revision 5: `OD-{YYYYMMDD}-{6-digit
- * sequence}`, daily-reset.
+ * Persistent, atomic order-number generator (BUG-ORDER-LIFECYCLE-001 Phase
+ * 1) — supersedes the prior TEMPORARY row-count implementation, which had
+ * two confirmed live defects: a concurrent-creation race (two requests
+ * counting "N today" at once could both produce the same sequence), and
+ * number reuse after a same-day order was deleted (the count simply drops,
+ * so the next created order silently collides with the deleted order's old
+ * number). Both are fixed by delegating the sequence itself to
+ * generate_order_sequence() (supabase/migrations/2026082313_order_number_
+ * sequence.sql), a real Postgres counter table incremented via
+ * `INSERT ... ON CONFLICT DO UPDATE`, which Postgres's own row-level
+ * locking makes race-free. Format unchanged from before, per ORDERS_SPEC.md
+ * §3 Revision 5: `OD-{YYYYMMDD}-{6-digit sequence}`, daily-reset (the
+ * counter table is keyed by business_date).
  *
  * Business Time Migration, Wave 1: "today" here MUST be the Vietnam
  * business date (Locked Product Owner decision, Business Time Foundation)
@@ -311,19 +314,18 @@ export async function findRevenueRecognizedOrders(start: string, end: string, cl
  * BusinessTime.todayString() only — no separate date computation.
  */
 async function generateOrderNumber(client: SupabaseClient = supabase): Promise<string> {
-  const datePart = BusinessTime.todayString().replace(/-/g, "");
+  const todayString = BusinessTime.todayString();
+  const datePart = todayString.replace(/-/g, "");
   const prefix = `OD-${datePart}-`;
 
-  const { data, error } = await client
-    .from("orders")
-    .select("id")
-    .like("order_number", `${prefix}%`);
+  const { data: sequence, error } = await client.rpc("generate_order_sequence", {
+    p_business_date: todayString,
+  });
 
   if (error) {
     throw new OrderRepositoryError("generateOrderNumber", error);
   }
 
-  const sequence = (data?.length ?? 0) + 1;
   return `${prefix}${String(sequence).padStart(6, "0")}`;
 }
 
