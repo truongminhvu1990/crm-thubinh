@@ -11,16 +11,15 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const { id } = await params;
 
   try {
-    // RLS compatibility (2026082211): orders/order_items reads are
-    // authenticated-only now — order_events itself is unaffected and keeps
-    // using its own anon-defaulting default below.
+    // RLS compatibility (2026082211, extended 2026082312 follow-up):
+    // orders/order_items/order_events reads are all authenticated-only now.
     const client = await createClient();
     const detail = await getOrderDetail(id, undefined, client);
     if (!detail) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
-    const events = await getOrderEvents(id);
+    const events = await getOrderEvents(id, client);
     return NextResponse.json(events);
   } catch (error) {
     return handleOrderServiceError(error, _request.headers.get("x-vercel-id") ?? crypto.randomUUID());

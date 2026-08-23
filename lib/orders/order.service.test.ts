@@ -810,3 +810,47 @@ test("addPayment: with no auditClient supplied, getReceivingAccountById still ge
   assert.equal(id, "account-1");
   assert.equal(client, undefined);
 });
+
+test("addPayment: recomputeAndPersistRollups passes the caller's auditClient into repository.findPaymentsByOrderId (BUG-002 Phase Order Payment Rollup fix)", async () => {
+  const { createOrderService } = await import("./order.service");
+  const fakeAuditClient = { marker: "real-authenticated-client" };
+  let findPaymentsByOrderIdClient: unknown;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    addPayment: async (input) => ({ id: "payment-1", ...input }) as OrderPayment,
+    findPaymentsByOrderId: async (_orderId, client) => {
+      findPaymentsByOrderIdClient = client;
+      return [];
+    },
+    updateOrderRollups: async (orderId, rollups) => makeOrder({ id: orderId, ...rollups }),
+  });
+
+  await createOrderService(repository).addPayment(
+    { order_id: "order-1", amount: 1000000, payment_method: "Cash", payment_date: "2026-08-16" } as never,
+    "actor",
+    fakeAuditClient as never
+  );
+
+  assert.equal(findPaymentsByOrderIdClient, fakeAuditClient);
+});
+
+test("addPayment: with no auditClient supplied, repository.findPaymentsByOrderId is still called (preserves existing behavior/its own anon-fallback default)", async () => {
+  const { createOrderService } = await import("./order.service");
+  let findPaymentsByOrderIdClient: unknown = "not-called";
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    addPayment: async (input) => ({ id: "payment-1", ...input }) as OrderPayment,
+    findPaymentsByOrderId: async (_orderId, client) => {
+      findPaymentsByOrderIdClient = client;
+      return [];
+    },
+    updateOrderRollups: async (orderId, rollups) => makeOrder({ id: orderId, ...rollups }),
+  });
+
+  await createOrderService(repository).addPayment(
+    { order_id: "order-1", amount: 1000000, payment_method: "Cash", payment_date: "2026-08-16" } as never,
+    "actor"
+  );
+
+  assert.equal(findPaymentsByOrderIdClient, undefined);
+});

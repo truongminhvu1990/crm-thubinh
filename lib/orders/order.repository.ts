@@ -217,9 +217,15 @@ export async function findOrderItemsByOrderId(orderId: string, client: SupabaseC
   return data as unknown as OrderItem[];
 }
 
-/** Newest payment first, matching ORDERS_UI.md §8's Payment History convention. */
-export async function findPaymentsByOrderId(orderId: string): Promise<OrderPayment[]> {
-  const { data, error } = await supabase
+/** Newest payment first, matching ORDERS_UI.md §8's Payment History convention.
+ * `client`: RLS hotfix (2026082312 follow-up) — optional, defaults to the
+ * anon-defaulting singleton for backward compatibility. payments carries an
+ * authenticated-only RLS policy (2026082312), so an anon-scoped read here
+ * silently returns zero rows regardless of real data — every caller with a
+ * real authenticated client now passes it through. */
+export async function findPaymentsByOrderId(orderId: string, client?: SupabaseClient): Promise<OrderPayment[]> {
+  const db = client ?? supabase;
+  const { data, error } = await db
     .from("payments")
     .select(
       "*, receiving_account:receiving_accounts(id, currency, account_number, label, bank:master_data(value), owner:partners!receiving_accounts_owner_partner_id_fkey(name))"
@@ -237,9 +243,15 @@ export async function findPaymentsByOrderId(orderId: string): Promise<OrderPayme
 }
 
 /** Newest first — matches ORDERS_UI.md §9.2's reverse-chronological Order
- * Event Timeline convention. */
-export async function findOrderEventsByOrderId(orderId: string): Promise<OrderEvent[]> {
-  const { data, error } = await supabase
+ * Event Timeline convention.
+ * `client`: RLS hotfix (2026082312 follow-up) — optional, defaults to the
+ * anon-defaulting singleton for backward compatibility. order_events carries
+ * an authenticated-only RLS policy (2026082312), so an anon-scoped read here
+ * silently returns zero rows regardless of real data — every caller with a
+ * real authenticated client now passes it through. */
+export async function findOrderEventsByOrderId(orderId: string, client?: SupabaseClient): Promise<OrderEvent[]> {
+  const db = client ?? supabase;
+  const { data, error } = await db
     .from("order_events")
     .select("*")
     .eq("order_id", orderId)
@@ -1183,8 +1195,8 @@ export interface OrderReadRepository {
   findAllOrders(staff?: ScopingStaff, client?: SupabaseClient): Promise<OrderWithItemCount[]>;
   findOrderById(id: string, staff?: ScopingStaff, client?: SupabaseClient): Promise<Order | null>;
   findOrderItemsByOrderId(orderId: string, client?: SupabaseClient): Promise<OrderItem[]>;
-  findPaymentsByOrderId(orderId: string): Promise<OrderPayment[]>;
-  findOrderEventsByOrderId(orderId: string): Promise<OrderEvent[]>;
+  findPaymentsByOrderId(orderId: string, client?: SupabaseClient): Promise<OrderPayment[]>;
+  findOrderEventsByOrderId(orderId: string, client?: SupabaseClient): Promise<OrderEvent[]>;
   findRevenueRecognizedOrders(start: string, end: string, client?: SupabaseClient): Promise<Order[]>;
 }
 

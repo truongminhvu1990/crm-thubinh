@@ -93,20 +93,18 @@ export interface OrderDetail {
  * already found, so scoping them again would be redundant, not additional
  * protection.
  *
- * RLS compatibility (2026082211): `client` is optional — authenticated API
- * routes pass their real request-scoped server client through to the order
- * and order_items reads below (necessary since both tables' anon-inclusive
- * RLS policy was removed, leaving authenticated-only). payments/order_events
- * are unaffected by that migration and keep using their own anon-defaulting
- * default — no client is threaded to them. */
+ * RLS compatibility (2026082211, extended 2026082312 follow-up): `client`
+ * is optional — authenticated API routes pass their real request-scoped
+ * server client through to every read below (order, order_items, payments,
+ * order_events all carry authenticated-only RLS policies now). */
 export async function getOrderDetail(id: string, staff?: ScopingStaff, client?: SupabaseClient): Promise<OrderDetail | null> {
   const order = await orderRepository.findOrderById(id, staff, client);
   if (!order) return null;
 
   const [items, payments, events] = await Promise.all([
     orderRepository.findOrderItemsByOrderId(id, client),
-    orderRepository.findPaymentsByOrderId(id),
-    orderRepository.findOrderEventsByOrderId(id),
+    orderRepository.findPaymentsByOrderId(id, client),
+    orderRepository.findOrderEventsByOrderId(id, client),
   ]);
 
   return { order, items, payments, events };
@@ -115,9 +113,10 @@ export async function getOrderDetail(id: string, staff?: ScopingStaff, client?: 
 /** Order Event Timeline read (ORDERS_UI.md §9.2) — newest first, per
  * findOrderEventsByOrderId's own ordering. Kept as its own standalone read
  * too (not just embedded in getOrderDetail) for callers that only need the
- * event log. */
-export async function getOrderEvents(orderId: string): Promise<OrderEvent[]> {
-  return orderRepository.findOrderEventsByOrderId(orderId);
+ * event log. `client`: RLS compatibility (2026082312 follow-up) — order_events
+ * carries an authenticated-only RLS policy now. */
+export async function getOrderEvents(orderId: string, client?: SupabaseClient): Promise<OrderEvent[]> {
+  return orderRepository.findOrderEventsByOrderId(orderId, client);
 }
 
 /** ORDERS_UI.md §9.1 — the simplified Created→Reserved→Payment→Completed
@@ -154,13 +153,16 @@ export interface OrderSummary {
   lost_reason?: string | null;
 }
 
-export async function getOrderSummary(orderId: string): Promise<OrderSummary | null> {
-  const order = await orderRepository.findOrderById(orderId);
+/** `client`: RLS compatibility (2026082312 follow-up) — optional, threaded
+ * through to every read below (order, order_items, payments all carry
+ * authenticated-only RLS policies now). */
+export async function getOrderSummary(orderId: string, client?: SupabaseClient): Promise<OrderSummary | null> {
+  const order = await orderRepository.findOrderById(orderId, undefined, client);
   if (!order) return null;
 
   const [items, payments] = await Promise.all([
-    orderRepository.findOrderItemsByOrderId(orderId),
-    orderRepository.findPaymentsByOrderId(orderId),
+    orderRepository.findOrderItemsByOrderId(orderId, client),
+    orderRepository.findPaymentsByOrderId(orderId, client),
   ]);
 
   return {
@@ -296,10 +298,11 @@ export interface OrderWriteService {
     actor: string,
     auditClient?: SupabaseClient
   ): Promise<void>;
-  /** `auditClient`: RLS compatibility (2026082211) — addPayment's own
-   * order_payments insert is unaffected (not one of that migration's locked
-   * tables), but the rollup recomputation it triggers below writes to
-   * `orders`, which is. Same optional-for-tests contract as every other
+  /** `auditClient`: RLS compatibility (2026082211, corrected 2026082312) —
+   * payments carries an authenticated-only RLS policy (2026082214), so
+   * addPayment's own insert and the rollup recomputation it triggers below
+   * (which reads payments back via findPaymentsByOrderId and writes to
+   * `orders`) both need it. Same optional-for-tests contract as every other
    * `auditClient` param in this interface. */
   addPayment(input: AddPaymentInput, actor: string, auditClient?: SupabaseClient): Promise<OrderPayment>;
   /** Standalone entry point for the same rollup recomputation addPayment
@@ -376,14 +379,17 @@ function assertOrderEditable(order: Order): void {
 
 /** Recomputes and persists subtotal/discount total/total amount/payment
  * status after any order_items or payments mutation (ORDERS_DATABASE.md §4).
- * `client`: RLS compatibility (2026082211) — threaded to the order_items
- * read and the orders-table rollup write, both locked to authenticated-only;
- * findPaymentsByOrderId is unaffected (order_payments isn't one of that
- * migration's locked tables) and keeps its own anon-defaulting default. */
+ * `client`: RLS compatibility (2026082211, extended 2026082312 follow-up) —
+ * threaded to the order_items read, the payments read, and the orders-table
+ * rollup write, since order_items/payments/orders all carry authenticated-
+ * only RLS policies. Before the 2026082312 follow-up, findPaymentsByOrderId
+ * silently ran anon-scoped here, which is why payment_status could stay
+ * "Unpaid" even after a real payment had been recorded — the anon read saw
+ * zero payment rows regardless of what actually existed. */
 async function recomputeAndPersistRollups(repository: OrderRepository, orderId: string, client?: SupabaseClient): Promise<Order> {
   const [items, payments] = await Promise.all([
     repository.findOrderItemsByOrderId(orderId, client),
-    repository.findPaymentsByOrderId(orderId),
+    repository.findPaymentsByOrderId(orderId, client),
   ]);
 
   const subtotal = calculateSubtotal(items);
