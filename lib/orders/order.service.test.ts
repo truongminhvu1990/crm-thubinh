@@ -381,6 +381,62 @@ test("deleteOrder (non-admin): unchanged — Draft/Unpaid gate still applies, st
   assert.equal(reconciliationCalled, false);
 });
 
+/** BUG-INVENTORY-AUDIT-001 — deleteOrder's non-admin path used to call
+ * repository.releaseProduct(item.product_id) with no audit context, so it
+ * silently fell back to releaseProduct's own anon-fallback default. Since
+ * the release_product RPC has EXECUTE revoked from anon/PUBLIC, that always
+ * failed with 42501 — after the order row itself had already been deleted
+ * (no shared transaction), orphaning the item's product at status
+ * "Reserved" with no order left to release it. Fixed by building the same
+ * `{ actor, client: auditClient }` shape already used by
+ * markOrderLost/removeProductFromOrder and threading it into every
+ * releaseProduct call here too. */
+test("deleteOrder (non-admin): with an auditClient supplied, releaseProduct receives it as real audit context (actor + client), not the anon-fallback default", async () => {
+  const { createOrderService } = await import("./order.service");
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fakeAuditClient = { __marker: "real-authenticated-client" } as any;
+  const releaseProductCalls: { productId: string; audit: unknown }[] = [];
+
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    findOrderItemsByOrderId: async () => [
+      makeItem({ id: "item-1", product_id: "product-1" }),
+      makeItem({ id: "item-2", product_id: "product-2" }),
+    ],
+    deleteOrder: async () => {},
+    releaseProduct: async (productId, audit) => {
+      releaseProductCalls.push({ productId, audit });
+    },
+  });
+
+  await createOrderService(repository).deleteOrder("order-1", "Nguyen Van A", false, undefined, fakeAuditClient);
+
+  assert.deepEqual(releaseProductCalls, [
+    { productId: "product-1", audit: { actor: "Nguyen Van A", client: fakeAuditClient } },
+    { productId: "product-2", audit: { actor: "Nguyen Van A", client: fakeAuditClient } },
+  ]);
+});
+
+test("deleteOrder (non-admin): with no auditClient supplied, releaseProduct still gets called with audit undefined (preserves existing no-client-available behavior)", async () => {
+  const { createOrderService } = await import("./order.service");
+
+  const releaseProductCalls: { productId: string; audit: unknown }[] = [];
+
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    findOrderItemsByOrderId: async () => [makeItem({ product_id: "product-1" })],
+    deleteOrder: async () => {},
+    releaseProduct: async (productId, audit) => {
+      releaseProductCalls.push({ productId, audit });
+    },
+  });
+
+  await createOrderService(repository).deleteOrder("order-1", "actor");
+
+  assert.deepEqual(releaseProductCalls, [{ productId: "product-1", audit: undefined }]);
+});
+
 test("deleteOrder (non-admin): rejects when order is not Draft/Unpaid — never reaches repository.deleteOrder", async () => {
   const { createOrderService, OrderRuleViolationError } = await import("./order.service");
 

@@ -446,9 +446,10 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
         // §7) — order_items cascade-deletes with the order, so their
         // products must be released first or they'd be stranded Reserved
         // with no order left holding them.
+        const audit = auditClient ? { actor: _actor, client: auditClient } : undefined;
         const items = await repository.findOrderItemsByOrderId(orderId, auditClient);
         await repository.deleteOrder(orderId, false, auditClient);
-        await Promise.all(items.map((item) => repository.releaseProduct(item.product_id)));
+        await Promise.all(items.map((item) => repository.releaseProduct(item.product_id, audit)));
         return;
       }
 
