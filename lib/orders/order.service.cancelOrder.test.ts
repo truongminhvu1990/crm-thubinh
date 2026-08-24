@@ -95,6 +95,7 @@ function makeRepository(overrides: Partial<OrderRepository> = {}): OrderReposito
     releaseProduct: async () => {},
     markProductSold: async () => {},
     addPayment: notImplemented as unknown as OrderRepository["addPayment"],
+    addPaymentWithLedgerSync: notImplemented as unknown as OrderRepository["addPaymentWithLedgerSync"],
     markOrderLost: notImplemented as unknown as OrderRepository["markOrderLost"],
     completeOrder: notImplemented as unknown as OrderRepository["completeOrder"],
     cancelOrder: async (orderId: string) => makeOrder({ id: orderId, order_status: "Cancelled" }),

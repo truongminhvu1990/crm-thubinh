@@ -85,6 +85,7 @@ const OPERATION_TABLE: Record<string, string> = {
   releaseProduct: "products",
   markProductSold: "products",
   addPayment: "payments",
+  addPaymentWithLedgerSync: "payments",
   appendOrderEvent: "order_events",
   findCompensationStatusesForOrder: "compensations",
   hasFinancialHistoryForOrder: "compensations",
@@ -1101,6 +1102,44 @@ export async function addPayment(input: AddPaymentInput, client: SupabaseClient 
   return data as OrderPayment;
 }
 
+/**
+ * BUG-MONEY-DEBT-SYNC-001 — atomic counterpart of addPayment, used only
+ * when order.service.ts's addPayment has already determined the payment's
+ * receiving account is Money-Changer-eligible. Calls
+ * create_payment_with_ledger_sync (supabase/migrations/2026081721_money_
+ * debt_ledger_automatic_sync.sql, already live and unchanged) instead of a
+ * plain INSERT — the payment insert and the Money/Debt ledger sync run
+ * inside that RPC's own single transaction, so a ledger-side failure (e.g.
+ * an inactive receiving account, or the acting staff member lacking
+ * orders.record_payment) rolls back the payment insert too. No new
+ * eligibility/permission logic here — this function only forwards
+ * AddPaymentInput's fields plus staffId; every check (idempotency,
+ * duplicate protection, receiving-account validation, permission
+ * re-verification) already lives inside the RPC, unchanged.
+ */
+export async function addPaymentWithLedgerSync(
+  input: AddPaymentInput,
+  staffId: string,
+  client: SupabaseClient = supabase
+): Promise<OrderPayment> {
+  const { data, error } = await client.rpc("create_payment_with_ledger_sync", {
+    p_staff_id: staffId,
+    p_order_id: input.order_id,
+    p_amount: input.amount,
+    p_payment_method: input.payment_method,
+    p_payment_date: input.payment_date,
+    p_note: input.note ?? null,
+    p_receiving_account_id: input.receiving_account_id ?? null,
+  });
+
+  if (error) {
+    console.error("Error adding payment with ledger sync:", error);
+    throw new OrderRepositoryError("addPaymentWithLedgerSync", error);
+  }
+
+  return data as OrderPayment;
+}
+
 // ---------------------------------------------------------------------------
 // Write implementations — order_events. Append-only (ORDERS_DATABASE.md §8,
 // §13): this is the only write function that ever inserts into
@@ -1244,6 +1283,10 @@ export interface OrderWriteRepository {
   releaseProduct(productId: string, audit?: OrderAuditContext): Promise<void>;
   markProductSold(productId: string, audit?: OrderAuditContext): Promise<void>;
   addPayment(input: AddPaymentInput, client?: SupabaseClient): Promise<OrderPayment>;
+  /** BUG-MONEY-DEBT-SYNC-001 — used only for Money-Changer-eligible
+   * receiving accounts (see order.service.ts's addPayment). Every other
+   * payment keeps using addPayment above, unchanged. */
+  addPaymentWithLedgerSync(input: AddPaymentInput, staffId: string, client?: SupabaseClient): Promise<OrderPayment>;
   markOrderLost(input: MarkOrderLostInput, client?: SupabaseClient): Promise<Order>;
   completeOrder(
     orderId: string,
@@ -1294,6 +1337,7 @@ export const supabaseOrderRepository: OrderRepository = {
   releaseProduct,
   markProductSold,
   addPayment,
+  addPaymentWithLedgerSync,
   markOrderLost,
   completeOrder,
   cancelOrder,

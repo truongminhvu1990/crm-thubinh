@@ -56,7 +56,10 @@ mock.module("@/lib/commission/commission.repository", {
  * received, same spy convention as consignmentFinancialRecordCalls below;
  * getReceivingAccountById used to be called with no client at all, silently
  * falling back to its own anon-defaulting default. */
-let receivingAccountLookupResult: { id: string; is_active: boolean } | null = { id: "account-1", is_active: true };
+let receivingAccountLookupResult: { id: string; is_active: boolean; money_changer_partner_id?: string | null } | null = {
+  id: "account-1",
+  is_active: true,
+};
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let getReceivingAccountByIdCalls: any[][] = [];
 mock.module("@/lib/receivingAccount.service", {
@@ -145,6 +148,7 @@ function makeRepository(overrides: Partial<OrderRepository> = {}): OrderReposito
     releaseProduct: async () => {},
     markProductSold: async () => {},
     addPayment: notImplemented as unknown as OrderRepository["addPayment"],
+    addPaymentWithLedgerSync: notImplemented as unknown as OrderRepository["addPaymentWithLedgerSync"],
     markOrderLost: notImplemented as unknown as OrderRepository["markOrderLost"],
     completeOrder: async (orderId: string) => makeOrder({ id: orderId, order_status: "Completed" }),
     cancelOrder: notImplemented as unknown as OrderRepository["cancelOrder"],
@@ -853,4 +857,137 @@ test("addPayment: with no auditClient supplied, repository.findPaymentsByOrderId
   );
 
   assert.equal(findPaymentsByOrderIdClient, undefined);
+});
+
+/**
+ * BUG-MONEY-DEBT-SYNC-001 — addPayment() must route a Money-Changer-eligible
+ * payment through repository.addPaymentWithLedgerSync (the atomic
+ * create_payment_with_ledger_sync RPC) instead of the plain-insert
+ * repository.addPayment, and must never do so for an ineligible payment
+ * (no receiving_account_id, or a receiving account with no
+ * money_changer_partner_id) or when no staffId was supplied — those must
+ * keep using the existing plain-insert path exactly as before this fix.
+ */
+test("addPayment: a Money-Changer-eligible receiving account with a staffId calls addPaymentWithLedgerSync, not addPayment", async () => {
+  const { createOrderService } = await import("./order.service");
+  receivingAccountLookupResult = { id: "account-1", is_active: true, money_changer_partner_id: "money-changer-1" };
+  let addPaymentCalled = false;
+  let ledgerSyncArgs: unknown[] | undefined;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    addPayment: async () => {
+      addPaymentCalled = true;
+      throw new Error("must not be called for a Money-Changer-eligible payment");
+    },
+    addPaymentWithLedgerSync: async (input, staffId) => {
+      ledgerSyncArgs = [input, staffId];
+      return { id: "payment-1", ...input } as OrderPayment;
+    },
+    updateOrderRollups: async (orderId, rollups) => makeOrder({ id: orderId, ...rollups }),
+  });
+
+  await createOrderService(repository).addPayment(
+    {
+      order_id: "order-1",
+      amount: 8100000,
+      payment_method: "Bank Transfer",
+      payment_date: "2026-08-24",
+      receiving_account_id: "account-1",
+    } as never,
+    "actor",
+    undefined,
+    "staff-1"
+  );
+
+  assert.equal(addPaymentCalled, false);
+  assert.ok(ledgerSyncArgs);
+  assert.equal((ledgerSyncArgs![0] as { order_id: string }).order_id, "order-1");
+  assert.equal(ledgerSyncArgs![1], "staff-1");
+});
+
+test("addPayment: a Money-Changer-eligible receiving account with NO staffId falls back to the existing addPayment path", async () => {
+  const { createOrderService } = await import("./order.service");
+  receivingAccountLookupResult = { id: "account-1", is_active: true, money_changer_partner_id: "money-changer-1" };
+  let addPaymentCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    addPayment: async (input) => {
+      addPaymentCalled = true;
+      return { id: "payment-1", ...input } as OrderPayment;
+    },
+    addPaymentWithLedgerSync: async () => {
+      throw new Error("must not be called without a staffId");
+    },
+    updateOrderRollups: async (orderId, rollups) => makeOrder({ id: orderId, ...rollups }),
+  });
+
+  await createOrderService(repository).addPayment(
+    {
+      order_id: "order-1",
+      amount: 8100000,
+      payment_method: "Bank Transfer",
+      payment_date: "2026-08-24",
+      receiving_account_id: "account-1",
+    } as never,
+    "actor"
+  );
+
+  assert.equal(addPaymentCalled, true);
+});
+
+test("addPayment: a normal Bank Transfer receiving account (no money_changer_partner_id) preserves the existing addPayment path even with a staffId", async () => {
+  const { createOrderService } = await import("./order.service");
+  receivingAccountLookupResult = { id: "account-1", is_active: true, money_changer_partner_id: null };
+  let addPaymentCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    addPayment: async (input) => {
+      addPaymentCalled = true;
+      return { id: "payment-1", ...input } as OrderPayment;
+    },
+    addPaymentWithLedgerSync: async () => {
+      throw new Error("must not be called for a non-Money-Changer receiving account");
+    },
+    updateOrderRollups: async (orderId, rollups) => makeOrder({ id: orderId, ...rollups }),
+  });
+
+  await createOrderService(repository).addPayment(
+    {
+      order_id: "order-1",
+      amount: 1000000,
+      payment_method: "Bank Transfer",
+      payment_date: "2026-08-24",
+      receiving_account_id: "account-1",
+    } as never,
+    "actor",
+    undefined,
+    "staff-1"
+  );
+
+  assert.equal(addPaymentCalled, true);
+});
+
+test("addPayment: Cash (no receiving_account_id) preserves the existing addPayment path even with a staffId", async () => {
+  const { createOrderService } = await import("./order.service");
+  let addPaymentCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", payment_status: "Unpaid" }),
+    addPayment: async (input) => {
+      addPaymentCalled = true;
+      return { id: "payment-1", ...input } as OrderPayment;
+    },
+    addPaymentWithLedgerSync: async () => {
+      throw new Error("must not be called for a payment with no receiving account");
+    },
+    updateOrderRollups: async (orderId, rollups) => makeOrder({ id: orderId, ...rollups }),
+  });
+
+  await createOrderService(repository).addPayment(
+    { order_id: "order-1", amount: 1000000, payment_method: "Cash", payment_date: "2026-08-24" } as never,
+    "actor",
+    undefined,
+    "staff-1"
+  );
+
+  assert.equal(addPaymentCalled, true);
 });

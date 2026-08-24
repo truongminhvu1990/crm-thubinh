@@ -29,7 +29,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const authResult = await authorizeOrderWrite(request, detail.order);
     if ("error" in authResult) return authResult.error;
 
-    const payment = await orderService.addPayment({ ...body, order_id: id }, authResult.staff.full_name, auditClient);
+    // BUG-MONEY-DEBT-SYNC-001: authResult.staff.id is the real staff uuid
+    // create_payment_with_ledger_sync needs for its own independent
+    // orders.record_payment re-check — already resolved above for the
+    // authorization gate, just not previously threaded past this point.
+    const payment = await orderService.addPayment(
+      { ...body, order_id: id },
+      authResult.staff.full_name,
+      auditClient,
+      authResult.staff.id
+    );
     return NextResponse.json(payment, { status: 201 });
   } catch (error) {
     return handleOrderServiceError(error, request.headers.get("x-vercel-id") ?? crypto.randomUUID());

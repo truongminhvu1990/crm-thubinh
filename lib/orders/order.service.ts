@@ -303,8 +303,15 @@ export interface OrderWriteService {
    * addPayment's own insert and the rollup recomputation it triggers below
    * (which reads payments back via findPaymentsByOrderId and writes to
    * `orders`) both need it. Same optional-for-tests contract as every other
-   * `auditClient` param in this interface. */
-  addPayment(input: AddPaymentInput, actor: string, auditClient?: SupabaseClient): Promise<OrderPayment>;
+   * `auditClient` param in this interface.
+   * `staffId` (BUG-MONEY-DEBT-SYNC-001): the real staff.id of the acting
+   * user, required only to reach the atomic create_payment_with_ledger_sync
+   * RPC for a Money-Changer-eligible receiving account — see the
+   * implementation's own comment. Optional so every existing caller/fake
+   * that doesn't need Money/Debt sync stays valid unchanged; omitting it
+   * simply keeps using the existing plain-insert addPayment repository
+   * method, exactly as before this fix. */
+  addPayment(input: AddPaymentInput, actor: string, auditClient?: SupabaseClient, staffId?: string): Promise<OrderPayment>;
   /** Standalone entry point for the same rollup recomputation addPayment
    * already triggers internally — exposed for reconciliation/repair use, not
    * a new calculation (reuses the existing private helper as-is). No event
@@ -616,7 +623,7 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       );
     },
 
-    async addPayment(input, actor, auditClient) {
+    async addPayment(input, actor, auditClient, staffId) {
       const order = await requireOrder(repository, input.order_id, auditClient);
       if (!canAddPayment(order.order_status, order.payment_status)) {
         throw new OrderRuleViolationError("Đơn hàng không thể nhận thêm thanh toán ở trạng thái hiện tại");
@@ -631,14 +638,32 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       if (receivingAccountError) {
         throw new OrderValidationError({ receiving_account_id: receivingAccountError });
       }
+
+      // BUG-MONEY-DEBT-SYNC-001: eligibility is the same data relationship
+      // create_payment_with_ledger_sync itself checks (receiving_account.
+      // money_changer_partner_id IS NOT NULL) — reusing the account already
+      // fetched for the existing active-check above, not a second query.
+      // Cash/PayPal (no receiving_account_id) and a normal Bank Transfer to
+      // a non-Money-Changer account both leave this false, preserving the
+      // existing plain-insert addPayment path exactly.
+      let isMoneyChangerEligible = false;
       if (input.receiving_account_id) {
         const account = await getReceivingAccountById(input.receiving_account_id, auditClient);
         if (!account || !account.is_active) {
           throw new OrderRuleViolationError("Tài khoản nhận tiền không tồn tại hoặc đã ngừng hoạt động");
         }
+        isMoneyChangerEligible = Boolean(account.money_changer_partner_id);
       }
 
-      const payment = await repository.addPayment(input, auditClient);
+      // Falls back to the existing plain-insert path (not the RPC) when
+      // eligible but no staffId was supplied — deliberate, not an oversight:
+      // no existing/test caller that omits staffId should gain a new,
+      // stricter failure mode. The one live caller (POST /api/orders/[id]/
+      // payments) always supplies it.
+      const payment =
+        isMoneyChangerEligible && staffId
+          ? await repository.addPaymentWithLedgerSync(input, staffId, auditClient)
+          : await repository.addPayment(input, auditClient);
       await recomputeAndPersistRollups(repository, input.order_id, auditClient);
       await repository.appendOrderEvent(
         {

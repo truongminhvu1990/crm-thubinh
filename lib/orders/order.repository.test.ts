@@ -24,11 +24,22 @@ interface FakeRpcCall {
   args?: Record<string, unknown>;
 }
 
+// BUG-MONEY-DEBT-SYNC-001: create_payment_with_ledger_sync returns a
+// `payments`-shaped row (RETURNS payments), not a sequence integer — the
+// fake branches by function name so both RPCs stay independently testable
+// in this one shared fake, matching the file's existing single-mock-module
+// convention below.
 function createFakeSupabase(rpcCalls: FakeRpcCall[], nextSequence: () => number) {
   return {
     supabase: {
       rpc(fn: string, args?: Record<string, unknown>) {
         rpcCalls.push({ fn, args });
+        if (fn === "create_payment_with_ledger_sync") {
+          return Promise.resolve({
+            data: { id: "fake-payment-id", ...args, order_id: args?.p_order_id },
+            error: null,
+          });
+        }
         return Promise.resolve({ data: nextSequence(), error: null });
       },
       from(_table: string) {
@@ -137,4 +148,58 @@ test("createOrder: honors a caller-supplied order_date over today's business dat
   });
 
   assert.equal(order.order_date, backdatedSaleDate);
+});
+
+/**
+ * BUG-MONEY-DEBT-SYNC-001 — addPaymentWithLedgerSync() calls
+ * create_payment_with_ledger_sync (supabase/migrations/2026081721_money_
+ * debt_ledger_automatic_sync.sql) instead of a plain payments insert. This
+ * pins the exact RPC name and argument mapping from AddPaymentInput +
+ * staffId, and confirms the returned row is passed through unchanged.
+ */
+test("addPaymentWithLedgerSync: calls create_payment_with_ledger_sync with the exact mapped arguments", async () => {
+  const { addPaymentWithLedgerSync } = await import("./order.repository");
+  rpcCalls.length = 0;
+
+  const payment = await addPaymentWithLedgerSync(
+    {
+      order_id: "order-1",
+      amount: 8100000,
+      payment_method: "Bank Transfer",
+      payment_date: "2026-08-24",
+      receiving_account_id: "account-1",
+    },
+    "staff-1"
+  );
+
+  assert.equal(rpcCalls.length, 1);
+  assert.equal(rpcCalls[0].fn, "create_payment_with_ledger_sync");
+  assert.deepEqual(rpcCalls[0].args, {
+    p_staff_id: "staff-1",
+    p_order_id: "order-1",
+    p_amount: 8100000,
+    p_payment_method: "Bank Transfer",
+    p_payment_date: "2026-08-24",
+    p_note: null,
+    p_receiving_account_id: "account-1",
+  });
+  assert.equal(payment.order_id, "order-1");
+});
+
+test("addPaymentWithLedgerSync: omitted note/receiving_account_id map to null, not undefined", async () => {
+  const { addPaymentWithLedgerSync } = await import("./order.repository");
+  rpcCalls.length = 0;
+
+  await addPaymentWithLedgerSync(
+    {
+      order_id: "order-2",
+      amount: 500000,
+      payment_method: "Bank Transfer",
+      payment_date: "2026-08-24",
+    },
+    "staff-2"
+  );
+
+  assert.equal(rpcCalls[0].args?.p_note, null);
+  assert.equal(rpcCalls[0].args?.p_receiving_account_id, null);
 });
