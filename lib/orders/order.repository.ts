@@ -1117,12 +1117,27 @@ export async function addPayment(input: AddPaymentInput, client: SupabaseClient 
  * duplicate protection, receiving-account validation, permission
  * re-verification) already lives inside the RPC, unchanged.
  */
+/**
+ * BUG-MONEY-DEBT-SYNC-001 follow-up: create_payment_with_ledger_sync is
+ * SECURITY DEFINER, granted to service_role only — confirmed live on
+ * Production (`has_function_privilege`: anon=false, authenticated=false,
+ * service_role=true), same boundary as delete_order_with_reconciliation.
+ * The caller-supplied `client` (order.service.ts's own `auditClient`, the
+ * regular authenticated request-scoped client) can never execute this RPC
+ * and is deliberately NOT used for the call itself — same pattern as
+ * deleteOrderWithReconciliation two functions above, which resolves its
+ * own createAdminClient() rather than trusting a passed-in client. The
+ * `client` parameter stays in this function's signature only so every
+ * existing call site (order.service.ts passes `input, staffId, auditClient`)
+ * keeps compiling unchanged — it is intentionally unused for the RPC call.
+ */
 export async function addPaymentWithLedgerSync(
   input: AddPaymentInput,
   staffId: string,
-  client: SupabaseClient = supabase
+  _client?: SupabaseClient
 ): Promise<OrderPayment> {
-  const { data, error } = await client.rpc("create_payment_with_ledger_sync", {
+  const adminClient = createAdminClient();
+  const { data, error } = await adminClient.rpc("create_payment_with_ledger_sync", {
     p_staff_id: staffId,
     p_order_id: input.order_id,
     p_amount: input.amount,
@@ -1285,7 +1300,10 @@ export interface OrderWriteRepository {
   addPayment(input: AddPaymentInput, client?: SupabaseClient): Promise<OrderPayment>;
   /** BUG-MONEY-DEBT-SYNC-001 — used only for Money-Changer-eligible
    * receiving accounts (see order.service.ts's addPayment). Every other
-   * payment keeps using addPayment above, unchanged. */
+   * payment keeps using addPayment above, unchanged. `client` is accepted
+   * for call-site compatibility only — the implementation always resolves
+   * its own createAdminClient() instead, since create_payment_with_ledger_
+   * sync is service_role-only (same boundary as deleteOrderWithReconciliation). */
   addPaymentWithLedgerSync(input: AddPaymentInput, staffId: string, client?: SupabaseClient): Promise<OrderPayment>;
   markOrderLost(input: MarkOrderLostInput, client?: SupabaseClient): Promise<Order>;
   completeOrder(

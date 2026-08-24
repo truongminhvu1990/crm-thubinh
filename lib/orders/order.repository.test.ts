@@ -24,22 +24,11 @@ interface FakeRpcCall {
   args?: Record<string, unknown>;
 }
 
-// BUG-MONEY-DEBT-SYNC-001: create_payment_with_ledger_sync returns a
-// `payments`-shaped row (RETURNS payments), not a sequence integer — the
-// fake branches by function name so both RPCs stay independently testable
-// in this one shared fake, matching the file's existing single-mock-module
-// convention below.
 function createFakeSupabase(rpcCalls: FakeRpcCall[], nextSequence: () => number) {
   return {
     supabase: {
       rpc(fn: string, args?: Record<string, unknown>) {
         rpcCalls.push({ fn, args });
-        if (fn === "create_payment_with_ledger_sync") {
-          return Promise.resolve({
-            data: { id: "fake-payment-id", ...args, order_id: args?.p_order_id },
-            error: null,
-          });
-        }
         return Promise.resolve({ data: nextSequence(), error: null });
       },
       from(_table: string) {
@@ -73,6 +62,34 @@ const rpcCalls: FakeRpcCall[] = [];
 let mockSequence = 4;
 mock.module("@/lib/supabase", {
   namedExports: createFakeSupabase(rpcCalls, () => mockSequence++),
+});
+
+/**
+ * BUG-MONEY-DEBT-SYNC-001 follow-up (RPC client context fix) —
+ * create_payment_with_ledger_sync is service_role-only (confirmed live on
+ * Production via has_function_privilege: anon=false, authenticated=false,
+ * service_role=true). addPaymentWithLedgerSync() now resolves its own
+ * createAdminClient() for this call, exactly like deleteOrderWithReconciliation
+ * a few functions above — never the caller-supplied client. This fake is
+ * mocked separately from the `supabase` singleton above (a different
+ * module, `@/lib/supabase/admin`) precisely so a test can prove the RPC
+ * call lands on THIS fake and never on the plain `supabase` fake's own
+ * `.rpc()` (recorded in `rpcCalls`) — that's the regression this fix closes.
+ */
+const adminRpcCalls: FakeRpcCall[] = [];
+function fakeAdminClient() {
+  return {
+    rpc(fn: string, args?: Record<string, unknown>) {
+      adminRpcCalls.push({ fn, args });
+      return Promise.resolve({
+        data: { id: "fake-payment-id", ...args, order_id: args?.p_order_id },
+        error: null,
+      });
+    },
+  };
+}
+mock.module("@/lib/supabase/admin", {
+  namedExports: { createAdminClient: fakeAdminClient },
 });
 
 test("generateOrderNumber (via createOrder): first generation uses the RPC and returns the configured sequence", async (t) => {
@@ -159,7 +176,7 @@ test("createOrder: honors a caller-supplied order_date over today's business dat
  */
 test("addPaymentWithLedgerSync: calls create_payment_with_ledger_sync with the exact mapped arguments", async () => {
   const { addPaymentWithLedgerSync } = await import("./order.repository");
-  rpcCalls.length = 0;
+  adminRpcCalls.length = 0;
 
   const payment = await addPaymentWithLedgerSync(
     {
@@ -172,9 +189,9 @@ test("addPaymentWithLedgerSync: calls create_payment_with_ledger_sync with the e
     "staff-1"
   );
 
-  assert.equal(rpcCalls.length, 1);
-  assert.equal(rpcCalls[0].fn, "create_payment_with_ledger_sync");
-  assert.deepEqual(rpcCalls[0].args, {
+  assert.equal(adminRpcCalls.length, 1);
+  assert.equal(adminRpcCalls[0].fn, "create_payment_with_ledger_sync");
+  assert.deepEqual(adminRpcCalls[0].args, {
     p_staff_id: "staff-1",
     p_order_id: "order-1",
     p_amount: 8100000,
@@ -188,7 +205,7 @@ test("addPaymentWithLedgerSync: calls create_payment_with_ledger_sync with the e
 
 test("addPaymentWithLedgerSync: omitted note/receiving_account_id map to null, not undefined", async () => {
   const { addPaymentWithLedgerSync } = await import("./order.repository");
-  rpcCalls.length = 0;
+  adminRpcCalls.length = 0;
 
   await addPaymentWithLedgerSync(
     {
@@ -200,6 +217,38 @@ test("addPaymentWithLedgerSync: omitted note/receiving_account_id map to null, n
     "staff-2"
   );
 
-  assert.equal(rpcCalls[0].args?.p_note, null);
-  assert.equal(rpcCalls[0].args?.p_receiving_account_id, null);
+  assert.equal(adminRpcCalls[0].args?.p_note, null);
+  assert.equal(adminRpcCalls[0].args?.p_receiving_account_id, null);
+});
+
+/**
+ * BUG-MONEY-DEBT-SYNC-001 — RPC client context fix, the regression test for
+ * the actual reported Production failure ("permission denied for function
+ * create_payment_with_ledger_sync"): confirms the RPC is invoked through the
+ * admin/service_role client (createAdminClient()), never through a
+ * caller-supplied regular client, even when one is explicitly passed —
+ * exactly the caller-supplied `auditClient` shape order.service.ts's
+ * addPayment() actually passes in production.
+ */
+test("addPaymentWithLedgerSync: uses the admin client, never the caller-supplied client, even when one is passed", async () => {
+  const { addPaymentWithLedgerSync } = await import("./order.repository");
+  adminRpcCalls.length = 0;
+  rpcCalls.length = 0;
+  const callerRpcCalls: FakeRpcCall[] = [];
+  const fakeAuthenticatedClient = {
+    rpc(fn: string, args?: Record<string, unknown>) {
+      callerRpcCalls.push({ fn, args });
+      return Promise.resolve({ data: null, error: { message: "permission denied", code: "42501" } });
+    },
+  };
+
+  await addPaymentWithLedgerSync(
+    { order_id: "order-3", amount: 1000000, payment_method: "Bank Transfer", payment_date: "2026-08-24" },
+    "staff-3",
+    fakeAuthenticatedClient as never
+  );
+
+  assert.equal(adminRpcCalls.length, 1, "the admin client's rpc() must be called");
+  assert.equal(callerRpcCalls.length, 0, "the caller-supplied client's rpc() must never be called");
+  assert.equal(rpcCalls.length, 0, "the plain @/lib/supabase singleton must never be used for this RPC either");
 });
