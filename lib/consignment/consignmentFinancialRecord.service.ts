@@ -64,12 +64,15 @@ export async function createConsignmentFinancialRecordsForOrder(
       if (error) throw error;
 
       await markConsignmentSold(consignment.id, client);
-      await logActivity({
-        staff_id: null,
-        action: "consignment_financial_record_created",
-        entity: "consignment_financial_record",
-        entity_id: data.id,
-      });
+      await logActivity(
+        {
+          staff_id: null,
+          action: "consignment_financial_record_created",
+          entity: "consignment_financial_record",
+          entity_id: data.id,
+        },
+        client
+      );
     } catch (error) {
       console.error("Error creating consignment financial record for order item:", item.id, error);
     }

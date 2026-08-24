@@ -10,13 +10,22 @@ import { applyActivityLogScope } from "@/lib/permission/dataScope";
 // convention for side-effect writes that must never block the primary
 // action (see markProductSold/createSnapshotForPurchase in
 // purchase.service.ts).
-export async function logActivity(entry: {
-  staff_id: string | null;
-  action: string;
-  entity: string;
-  entity_id: string | null;
-}): Promise<void> {
-  const { error } = await supabase.from("activity_logs").insert(entry);
+/** `client` (BUG-003): optional, threaded through - activity_logs' RLS is
+ * intended to be narrowed to authenticated-only. Every existing caller that
+ * doesn't pass one keeps its exact current behavior unchanged (falls back
+ * to this module's own anon-defaulting `supabase` default); callers reached
+ * from an authenticated API route should pass their real request-scoped
+ * client instead. */
+export async function logActivity(
+  entry: {
+    staff_id: string | null;
+    action: string;
+    entity: string;
+    entity_id: string | null;
+  },
+  client: SupabaseClient = supabase
+): Promise<void> {
+  const { error } = await client.from("activity_logs").insert(entry);
   if (error) console.error("Error logging activity:", error);
 }
 
