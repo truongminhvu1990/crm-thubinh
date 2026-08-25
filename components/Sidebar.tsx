@@ -34,6 +34,11 @@ import {
   PackageSearch,
   PackageOpen,
   Warehouse,
+  ShieldOff,
+  MessageSquareOff,
+  Sparkles,
+  FolderSearch,
+  ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getFollowUpSummaryCounts } from "@/lib/customer.service";
@@ -151,6 +156,16 @@ const LINKS: NavEntry[] = [
     ],
   },
   { href: "/knowledge-vault", icon: BookOpen, label: "Kho kiến thức", enabled: true },
+  {
+    label: "Facebook Tools",
+    icon: ShieldOff,
+    children: [
+      { href: "/facebook-tools/comment-shield", icon: MessageSquareOff, label: "Comment Shield", enabled: true },
+      { href: "/facebook-tools/semi-seeding", icon: Sparkles, label: "Semi Seeding", enabled: true },
+      { href: "/facebook-tools/semi-seeding/my-tasks", icon: ClipboardList, label: "Công việc của tôi", enabled: true },
+      { href: "/facebook-tools/content-repository", icon: FolderSearch, label: "Content Repository", enabled: true },
+    ],
+  },
   { href: "/settings", icon: Settings, label: "Cài đặt", enabled: true },
 ];
 
