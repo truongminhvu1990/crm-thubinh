@@ -738,7 +738,7 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       // never read here. source is NULL (Rule 2/Revision 2): Orders has
       // no source field of its own, so nothing is inferred from Product.
       const staff = await getStaffByName(order.sales_owner, auditClient);
-      const commissionRules = await getActiveCommissionRules();
+      const commissionRules = await getActiveCommissionRules(auditClient);
 
       const purchaseRows: PurchaseSnapshotInput[] = [];
       const commissionRows: CommissionSnapshotInput[] = [];

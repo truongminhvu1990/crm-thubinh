@@ -23,6 +23,8 @@ import type { OrderRepository, PurchaseSnapshotInput, CommissionSnapshotInput } 
 let staffLookupResult: { id: string; full_name: string } | null = { id: "staff-1", full_name: "Nguyen Van A" };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let getStaffByNameCalls: any[][] = [];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let getActiveCommissionRulesCalls: any[][] = [];
 let activeCommissionRules: CommissionRule[] = [
   { id: "rule-1", minimum_amount: 0, maximum_amount: 9999999, commission_percent: 5, is_active: true, created_at: "", updated_at: "" },
   { id: "rule-2", minimum_amount: 10000000, maximum_amount: null, commission_percent: 3, is_active: true, created_at: "", updated_at: "" },
@@ -46,7 +48,11 @@ mock.module("@/lib/staff.service", {
 });
 mock.module("@/lib/commission/commission.repository", {
   namedExports: {
-    getActiveCommissionRules: async () => activeCommissionRules,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    getActiveCommissionRules: async (...args: any[]) => {
+      getActiveCommissionRulesCalls.push(args);
+      return activeCommissionRules;
+    },
   },
 });
 
@@ -176,6 +182,7 @@ test.beforeEach(() => {
   receivingAccountLookupResult = { id: "account-1", is_active: true };
   getReceivingAccountByIdCalls = [];
   getStaffByNameCalls = [];
+  getActiveCommissionRulesCalls = [];
 });
 
 test("completeOrder: sale_price = order_item.line_total, never order.total_amount", async () => {
@@ -764,6 +771,28 @@ test("completeOrder: with no auditClient supplied, getStaffByName is still calle
   assert.equal(getStaffByNameCalls.length, 1);
   const [, client] = getStaffByNameCalls[0];
   assert.equal(client, undefined);
+});
+
+test("completeOrder: passes the caller's auditClient through to getActiveCommissionRules (commission_rules RLS fix)", async () => {
+  const { createOrderService } = await import("./order.service");
+  const repository = makeRepository();
+  const fakeAuditClient = { marker: "real-authenticated-client" };
+
+  await createOrderService(repository).completeOrder("order-1", "actor", fakeAuditClient as never);
+
+  assert.equal(getActiveCommissionRulesCalls.length, 1);
+  const [client] = getActiveCommissionRulesCalls[0];
+  assert.equal(client, fakeAuditClient, "must be the exact client completeOrder was given, not commission.repository.ts's own default");
+});
+
+test("completeOrder: with no auditClient supplied, getActiveCommissionRules still gets called (preserves existing behavior/its own anon-fallback default)", async () => {
+  const { createOrderService } = await import("./order.service");
+  const repository = makeRepository();
+
+  await createOrderService(repository).completeOrder("order-1", "actor");
+
+  assert.equal(getActiveCommissionRulesCalls.length, 1);
+  assert.equal(getActiveCommissionRulesCalls[0][0], undefined);
 });
 
 test("completeOrder: with no auditClient supplied, createConsignmentFinancialRecordsForOrder still gets called (preserves existing behavior/its own anon-fallback default)", async () => {
