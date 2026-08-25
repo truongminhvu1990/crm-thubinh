@@ -13,8 +13,15 @@ import { CommissionRule, SalesCommission, CommissionStatus } from "@/types/commi
  * this list. */
 const STATUS_UPDATE_FIELDS = ["status", "paid_at", "paid_by", "note"] as const;
 
-export async function getActiveCommissionRules(): Promise<CommissionRule[]> {
-  const { data, error } = await supabase
+/** `client` defaults to the anon-defaulting singleton so every existing
+ * caller that doesn't pass one (createSnapshotForPurchase, scripts/backfill-
+ * orders.ts) keeps its exact current behavior unchanged. completeOrder()
+ * (lib/orders/order.service.ts) passes its own authenticated auditClient —
+ * commission_rules' RLS is authenticated-only, so without this the anon
+ * role sees zero rows and Order completion falsely reports "no matching
+ * commission rate found." */
+export async function getActiveCommissionRules(client: SupabaseClient = supabase): Promise<CommissionRule[]> {
+  const { data, error } = await client
     .from("commission_rules")
     .select("*")
     .eq("is_active", true)
