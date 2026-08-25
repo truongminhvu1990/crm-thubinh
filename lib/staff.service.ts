@@ -66,8 +66,8 @@ export async function getStaffById(id: string): Promise<Staff | null> {
  * fuzzy matching. Returns null (not an error) when no staff member has that
  * exact name, which is expected for names that were never onboarded as
  * staff. */
-export async function getStaffByName(fullName: string): Promise<Staff | null> {
-  const { data, error } = await supabase.from("staff").select("*").eq("full_name", fullName).maybeSingle();
+export async function getStaffByName(fullName: string, client: SupabaseClient = supabase): Promise<Staff | null> {
+  const { data, error } = await client.from("staff").select("*").eq("full_name", fullName).maybeSingle();
 
   if (error) {
     console.error("Error resolving staff by name:", error);
@@ -83,8 +83,8 @@ export async function getStaffByName(fullName: string): Promise<Staff | null> {
  * with no wildcards - Postgres's case-insensitive exact-match operator),
  * matching the case-insensitive `staff_email_unique` partial unique index
  * (20260730_staff_email_unique_index.sql) this backs at the DB layer. */
-export async function getStaffByEmail(email: string): Promise<Staff | null> {
-  const { data, error } = await supabase.from("staff").select("*").ilike("email", email).maybeSingle();
+export async function getStaffByEmail(email: string, client: SupabaseClient = supabase): Promise<Staff | null> {
+  const { data, error } = await client.from("staff").select("*").ilike("email", email).maybeSingle();
 
   if (error) {
     console.error("Error resolving staff by email:", error);

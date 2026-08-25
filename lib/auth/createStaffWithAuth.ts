@@ -56,16 +56,6 @@ export async function createStaffWithAuth(
     throw new CreateStaffWithAuthError("EMAIL_REQUIRED", "Email là bắt buộc");
   }
 
-  // Application-level duplicate check (Implementation item 8), ahead of the
-  // Auth call so an obviously-duplicate request never creates an orphaned
-  // Auth user in the first place. staff_email_unique (DB layer) and
-  // auth.admin.createUser's own rejection (below) are the backstops this
-  // doesn't fully replace.
-  const existingStaff = await getStaffByEmail(email);
-  if (existingStaff) {
-    throw new CreateStaffWithAuthError("EMAIL_DUPLICATE", "Email đã tồn tại");
-  }
-
   let admin;
   try {
     admin = createAdminClient();
@@ -74,6 +64,18 @@ export async function createStaffWithAuth(
       throw new CreateStaffWithAuthError("CONFIG_MISSING", error.message);
     }
     throw error;
+  }
+
+  // Application-level duplicate check (Implementation item 8), ahead of the
+  // Auth call so an obviously-duplicate request never creates an orphaned
+  // Auth user in the first place. staff_email_unique (DB layer) and
+  // auth.admin.createUser's own rejection (below) are the backstops this
+  // doesn't fully replace. Uses the admin client, same as every other
+  // operation in this function - this runs server-side with no browser
+  // session for the anon-key client to attach.
+  const existingStaff = await getStaffByEmail(email, admin);
+  if (existingStaff) {
+    throw new CreateStaffWithAuthError("EMAIL_DUPLICATE", "Email đã tồn tại");
   }
 
   const temporaryPassword = generateTempPassword();

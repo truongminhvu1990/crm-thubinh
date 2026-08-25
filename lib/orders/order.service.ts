@@ -737,7 +737,7 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
       // discount_total are order-level rollups across every item and are
       // never read here. source is NULL (Rule 2/Revision 2): Orders has
       // no source field of its own, so nothing is inferred from Product.
-      const staff = await getStaffByName(order.sales_owner);
+      const staff = await getStaffByName(order.sales_owner, auditClient);
       const commissionRules = await getActiveCommissionRules();
 
       const purchaseRows: PurchaseSnapshotInput[] = [];
