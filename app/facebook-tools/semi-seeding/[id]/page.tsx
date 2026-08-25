@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, use } from "react";
-import { Sparkles, RefreshCw, AlertTriangle, ImageOff, ExternalLink, Plus, ThumbsUp, MessageCircle, Share2 } from "lucide-react";
+import { Sparkles, RefreshCw, AlertTriangle, ImageOff, ExternalLink, Plus, ThumbsUp, MessageCircle, Share2, SearchCheck } from "lucide-react";
 import {
   SeedingCampaign,
   SeedingCommentSuggestion,
@@ -9,8 +9,11 @@ import {
   SeedingTaskStatus,
   SeedingCampaignTargetWithPost,
   SeedingCampaignProgress,
+  SeedingTaskWithEvidence,
+  SeedingEvidenceReconciliationBatchResult,
   SEEDING_COMMENT_CATEGORY_LABELS,
   SEEDING_TASK_ALLOWED_TRANSITIONS,
+  SEEDING_TASK_EVIDENCE_EXCEPTION_RESULTS,
 } from "@/types/seeding";
 import { seedingCampaignStatusLabel, seedingTaskStatusLabel, seedingTaskActionTypeLabel } from "@/lib/seeding/seeding.constants";
 import { useStaffOptions } from "@/lib/hooks/useStaffOptions";
@@ -47,6 +50,36 @@ const CAMPAIGN_STATUS_TRANSITIONS: Record<SeedingCampaign["status"], SeedingCamp
  * null), no new business rule. */
 const STATUSES_REQUIRING_REASON = new Set<SeedingTaskStatus>(["Failed", "Skipped"]);
 
+/** Phase 2F — evidence result badge. CONTENT-only reconciliation: this
+ * never claims staff identity is verified, only that matching text was (or
+ * wasn't) found on the target post. Exception results (see
+ * SEEDING_TASK_EVIDENCE_EXCEPTION_RESULTS) render as "warning" — they're
+ * the ones a manager should look at; Exact Match/AI Match/Not Found are
+ * real, resolved answers and render as "success"/"muted". */
+function evidenceResultBadge(evidence: SeedingTaskWithEvidence | undefined) {
+  if (!evidence?.evidence_result) {
+    return <span className="text-xs text-muted-foreground">Chưa kiểm tra</span>;
+  }
+  const result = evidence.evidence_result;
+  const isException = (SEEDING_TASK_EVIDENCE_EXCEPTION_RESULTS as string[]).includes(result);
+  const variant = isException ? "warning" : result === "Not Found" ? "muted" : "success";
+  return (
+    <div className="space-y-0.5">
+      <Badge variant={variant}>{result}</Badge>
+      {evidence.evidence_checked_at && (
+        <p className="text-[10px] text-muted-foreground">
+          {new Date(evidence.evidence_checked_at).toLocaleString("vi-VN", {
+            hour: "2-digit",
+            minute: "2-digit",
+            day: "2-digit",
+            month: "2-digit",
+          })}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function actionIcon(actionType: string) {
   if (actionType === "Like") return <ThumbsUp className="w-3.5 h-3.5" />;
   if (actionType === "Share") return <Share2 className="w-3.5 h-3.5" />;
@@ -64,6 +97,12 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
   const [progress, setProgress] = useState<SeedingCampaignProgress | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Phase 2F — AI-Powered Evidence Reconciliation. Content-only: never
+  // implies staff identity is verified.
+  const [evidenceByTaskId, setEvidenceByTaskId] = useState<Map<string, SeedingTaskWithEvidence>>(new Map());
+  const [isReconciling, setIsReconciling] = useState(false);
+  const [reconcileError, setReconcileError] = useState<string | null>(null);
 
   const [productDescription, setProductDescription] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -98,12 +137,13 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
     setIsLoading(true);
     setForbidden(false);
     try {
-      const [campaignRes, targetsRes, suggestionsRes, tasksRes, progressRes] = await Promise.all([
+      const [campaignRes, targetsRes, suggestionsRes, tasksRes, progressRes, evidenceRes] = await Promise.all([
         fetch(`/api/seeding/campaigns/${id}`),
         fetch(`/api/seeding/campaigns/${id}/targets`),
         fetch(`/api/seeding/campaigns/${id}/generate-comments`),
         fetch(`/api/seeding/tasks?campaignId=${id}`),
         fetch(`/api/seeding/campaigns/${id}/progress`),
+        fetch(`/api/seeding/campaigns/${id}/evidence-reconciliation`),
       ]);
       if (campaignRes.status === 403) {
         setForbidden(true);
@@ -115,6 +155,10 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       if (suggestionsRes.ok) setSuggestions(await suggestionsRes.json());
       if (tasksRes.ok) setTasks(await tasksRes.json());
       if (progressRes.ok) setProgress(await progressRes.json());
+      if (evidenceRes.ok) {
+        const queue: SeedingTaskWithEvidence[] = await evidenceRes.json();
+        setEvidenceByTaskId(new Map(queue.map((t) => [t.id, t])));
+      }
     } catch (error) {
       console.error("Failed to load seeding campaign detail:", error);
     } finally {
@@ -142,6 +186,38 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       setGenerateError(error instanceof Error ? error.message : "Không thể tạo gợi ý");
     } finally {
       setIsGenerating(false);
+    }
+  }
+
+  // Phase 2F — browser-driven batch polling (same pattern as Comment
+  // Shield's processNextBatch): calls the batch endpoint repeatedly until
+  // no more eligible candidates remain or a safety round cap is hit. No
+  // cron/queue — closing this page simply stops the loop; every round
+  // already persisted is unaffected, safe to resume by clicking again.
+  const MAX_RECONCILE_ROUNDS = 20;
+
+  async function runEvidenceReconciliation() {
+    setIsReconciling(true);
+    setReconcileError(null);
+    try {
+      let hasMore = true;
+      let rounds = 0;
+      while (hasMore && rounds < MAX_RECONCILE_ROUNDS) {
+        const res = await fetch(`/api/seeding/campaigns/${id}/evidence-reconciliation`, { method: "POST" });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Không thể đối soát bằng chứng");
+        const result: SeedingEvidenceReconciliationBatchResult = await res.json();
+        hasMore = result.hasMoreCandidates;
+        rounds += 1;
+      }
+      const queueRes = await fetch(`/api/seeding/campaigns/${id}/evidence-reconciliation`);
+      if (queueRes.ok) {
+        const queue: SeedingTaskWithEvidence[] = await queueRes.json();
+        setEvidenceByTaskId(new Map(queue.map((t) => [t.id, t])));
+      }
+    } catch (error) {
+      setReconcileError(error instanceof Error ? error.message : "Không thể đối soát bằng chứng");
+    } finally {
+      setIsReconciling(false);
     }
   }
 
@@ -337,6 +413,28 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       )}
 
       <Card>
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <SearchCheck className="w-5 h-5 text-primary" />
+            <h2 className="font-medium text-foreground">Đối soát bằng chứng (AI)</h2>
+            {(() => {
+              const exceptionCount = [...evidenceByTaskId.values()].filter(
+                (e) => e.evidence_result && (SEEDING_TASK_EVIDENCE_EXCEPTION_RESULTS as string[]).includes(e.evidence_result)
+              ).length;
+              return exceptionCount > 0 ? <Badge variant="warning">{exceptionCount} cần xem xét</Badge> : null;
+            })()}
+          </div>
+          <Button size="sm" onClick={runEvidenceReconciliation} isLoading={isReconciling}>
+            <SearchCheck className="w-4 h-4" /> Chạy đối soát
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground bg-muted/50 border border-border rounded-lg px-3 py-2">
+          Chỉ đối soát nội dung comment với các comment thực tế trên bài viết — <strong>không xác minh danh tính người thực hiện</strong>.
+        </p>
+        {reconcileError && <p className="text-destructive text-sm mt-2">{reconcileError}</p>}
+      </Card>
+
+      <Card>
         <div className="flex items-end gap-3 mb-4 flex-wrap">
           <h2 className="font-medium text-foreground">Gợi ý comment (AI) — dùng chung cho cả campaign</h2>
         </div>
@@ -451,6 +549,7 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                         <th className="py-2 pr-4">Nội dung</th>
                         <th className="py-2 pr-4">Người thực hiện</th>
                         <th className="py-2 pr-4">Trạng thái</th>
+                        <th className="py-2 pr-4">Bằng chứng (nội dung)</th>
                         <th className="py-2 pr-4"></th>
                       </tr>
                     </thead>
@@ -471,6 +570,13 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                             <td className="py-3 pr-4">
                               {taskStatusBadge(t.status)}
                               {t.result_note && <p className="text-xs text-muted-foreground mt-1">{t.result_note}</p>}
+                            </td>
+                            <td className="py-3 pr-4">
+                              {t.action_type === "Comment" ? (
+                                evidenceResultBadge(evidenceByTaskId.get(t.id))
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
                             </td>
                             <td className="py-3 pr-4 whitespace-nowrap">
                               <div className="flex gap-1.5 flex-wrap">

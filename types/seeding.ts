@@ -193,3 +193,84 @@ export interface SeedingTaskWithContext extends SeedingTask {
    * Warn-only: never blocks a task action. */
   target_discovery_status: string | null;
 }
+
+/** Phase 2F — AI-Powered Evidence Reconciliation. This is CONTENT evidence
+ * only: whether text matching a Comment task's assigned comment_text exists
+ * on the target Page post. It is NEVER identity verification — no result
+ * here may ever be read, displayed, or coded as "who performed the action."
+ * Confirmed PROVEN NO-GO by the preceding capability spike: Meta does not
+ * expose reliable third-party commenter identity to a Page token. */
+export type SeedingTaskEvidenceResult =
+  | "Exact Match"
+  | "AI Match (High Confidence)"
+  | "Ambiguous"
+  | "Not Found"
+  | "Partial Evidence"
+  | "Evidence Unavailable"
+  | "Reconnect Required";
+
+/** Locked confidence mapping (PO decision, 2026-08-26) — the only results
+ * NOT auto-resolved, i.e. the manager's default "needs attention" queue.
+ * Exact Match / AI Match (High Confidence) / Not Found are real, final
+ * answers and are deliberately excluded from this set. */
+export const SEEDING_TASK_EVIDENCE_EXCEPTION_RESULTS: SeedingTaskEvidenceResult[] = [
+  "Ambiguous",
+  "Partial Evidence",
+  "Evidence Unavailable",
+  "Reconnect Required",
+];
+
+/** Transient-failure results: auto-eligible for the next reconciliation
+ * batch round without any explicit recheck trigger, since they represent
+ * "we couldn't get a real answer yet," not a real conclusion. Every other
+ * result requires the task's comment_text to change (hash mismatch) before
+ * it becomes eligible again — never re-fetched/re-AI'd just because a batch
+ * ran (PO-locked idempotency rule, §7-8). */
+export const SEEDING_TASK_EVIDENCE_TRANSIENT_RESULTS: SeedingTaskEvidenceResult[] = [
+  "Partial Evidence",
+  "Evidence Unavailable",
+  "Reconnect Required",
+];
+
+export type SeedingTaskEvidenceConfidence = "high" | "medium" | "low";
+
+export interface SeedingTaskEvidenceResultRow {
+  id: string;
+  task_id: string;
+  result: SeedingTaskEvidenceResult;
+  matched_comment_id?: string | null;
+  matched_comment_snippet?: string | null;
+  confidence?: SeedingTaskEvidenceConfidence | null;
+  comment_text_hash: string;
+  evidence_snapshot_hash?: string | null;
+  model_version?: string | null;
+  prompt_version?: string | null;
+  checked_at: string;
+  checked_by_staff_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** One row per reconciliation run ever performed for a task — the
+ * append-only counterpart to SeedingTaskEvidenceResultRow's current-state
+ * row. Same shape minus created_at/updated_at (never updated). */
+export type SeedingTaskEvidenceCheckLog = Omit<SeedingTaskEvidenceResultRow, "created_at" | "updated_at">;
+
+/** A Comment task enriched with its current evidence result (or nulls if
+ * never checked) — what the campaign detail UI's evidence queue reads. */
+export interface SeedingTaskWithEvidence extends SeedingTask {
+  evidence_result: SeedingTaskEvidenceResult | null;
+  evidence_confidence: SeedingTaskEvidenceConfidence | null;
+  evidence_matched_comment_snippet: string | null;
+  evidence_checked_at: string | null;
+}
+
+/** One reconciliation batch round's outcome — mirrors
+ * FacebookHideJobProgress's shape (a job/log precedent this feature reuses
+ * architecturally): the caller polls again while hasMoreCandidates is true,
+ * exactly like Comment Shield's processNextBatch loop. */
+export interface SeedingEvidenceReconciliationBatchResult {
+  processed: number;
+  hasMoreCandidates: boolean;
+  results: { taskId: string; result: SeedingTaskEvidenceResult }[];
+}

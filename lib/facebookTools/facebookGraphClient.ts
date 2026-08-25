@@ -360,6 +360,41 @@ export async function listLivePostComments(objectId: string, pageAccessToken: st
   return comments;
 }
 
+const EVIDENCE_COMMENT_FETCH_LIMIT = 100;
+
+export interface FacebookBoundedCommentsResult {
+  comments: FacebookLivePostCommentData[];
+  /** true when Graph API's own paging.next indicates more comments exist
+   * beyond this single fetched page — the caller (Phase 2F evidence
+   * reconciliation) must treat this as "sample incomplete," never as
+   * grounds for a false Not Found. */
+  hasMore: boolean;
+}
+
+/** Single bounded GET /{objectId}/comments — deliberately NOT
+ * auto-paginating, unlike listAllComments/listLivePostComments above. Built
+ * for Phase 2F's evidence reconciliation, which must never scan a post's
+ * full comment history (module scope: "bounded pagination... no unbounded
+ * history scan"). Same fields/filter as listLivePostComments (id, from,
+ * message, created_time; filter=stream) — reuses that shape rather than
+ * inventing a new one. */
+export async function getPostCommentsBoundedSample(
+  objectId: string,
+  pageAccessToken: string,
+  limit: number = EVIDENCE_COMMENT_FETCH_LIMIT
+): Promise<FacebookBoundedCommentsResult> {
+  const result = await graphFetch<{
+    data: FacebookLivePostCommentData[];
+    paging?: { cursors?: { after?: string }; next?: string };
+  }>(`/${objectId}/comments`, {
+    access_token: pageAccessToken,
+    fields: "id,from,message,created_time",
+    filter: "stream",
+    limit: String(limit),
+  });
+  return { comments: result.data, hasMore: !!result.paging?.next };
+}
+
 export interface HideCommentResult {
   commentId: string;
   success: boolean;
