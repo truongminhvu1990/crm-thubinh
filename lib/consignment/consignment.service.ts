@@ -59,7 +59,7 @@ export async function createConsignment(
     .single();
   if (error) throw error;
 
-  await logActivity({ staff_id: actorStaffId, action: "consignment_received", entity: "consignment", entity_id: data.id });
+  await logActivity({ staff_id: actorStaffId, action: "consignment_received", entity: "consignment", entity_id: data.id }, client);
   return data as unknown as Consignment;
 }
 
@@ -125,7 +125,7 @@ export async function markConsignmentAvailable(
   const { error } = await client.from("consignments").update({ status: "AVAILABLE_FOR_SALE" }).eq("id", id);
   if (error) throw error;
 
-  await logActivity({ staff_id: actorStaffId, action: "consignment_available", entity: "consignment", entity_id: id });
+  await logActivity({ staff_id: actorStaffId, action: "consignment_available", entity: "consignment", entity_id: id }, client);
   return requireConsignment(id, client);
 }
 
@@ -154,7 +154,7 @@ export async function returnConsignment(
     .eq("id", id);
   if (error) throw error;
 
-  await logActivity({ staff_id: actorStaffId, action: "consignment_returned", entity: "consignment", entity_id: id });
+  await logActivity({ staff_id: actorStaffId, action: "consignment_returned", entity: "consignment", entity_id: id }, client);
   return requireConsignment(id, client);
 }
 
@@ -186,7 +186,7 @@ export async function markConsignmentSold(
   const { error } = await client.from("consignments").update({ status: "SOLD" }).eq("id", id);
   if (error) throw error;
 
-  await logActivity({ staff_id: null, action: "consignment_sold", entity: "consignment", entity_id: id });
+  await logActivity({ staff_id: null, action: "consignment_sold", entity: "consignment", entity_id: id }, client);
   return getConsignmentById(id, client);
 }
 

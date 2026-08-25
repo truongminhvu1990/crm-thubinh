@@ -13,7 +13,17 @@ import { Order, OrderItem } from "@/types/order";
  */
 
 mock.module("@/lib/supabase", { namedExports: { supabase: {} } });
-mock.module("@/lib/activityLog.service", { namedExports: { logActivity: async () => {} } });
+
+/** BUG-003 — createConsignmentFinancialRecordsForOrder's logActivity() call
+ * must forward the same client it was itself given. */
+let logActivityCalls: { entry: unknown; client: unknown }[] = [];
+mock.module("@/lib/activityLog.service", {
+  namedExports: {
+    logActivity: async (entry: unknown, client: unknown) => {
+      logActivityCalls.push({ entry, client });
+    },
+  },
+});
 
 interface FakeResult {
   data: unknown;
@@ -86,6 +96,23 @@ function makeItem(overrides: Partial<OrderItem> = {}): OrderItem {
     ...overrides,
   };
 }
+
+test.beforeEach(() => {
+  logActivityCalls = [];
+});
+
+test("createConsignmentFinancialRecordsForOrder: forwards its own client into logActivity, not the anon-defaulting default (BUG-003)", async () => {
+  const { createConsignmentFinancialRecordsForOrder } = await import("./consignmentFinancialRecord.service");
+  const { client } = makeClient({
+    consignments: [{ data: { id: "cns-1", status: "AVAILABLE_FOR_SALE" } }, { data: {} }, { data: { id: "cns-1", status: "SOLD" } }],
+    consignment_financial_records: [{ data: { id: "cfr-1" } }],
+  });
+
+  await createConsignmentFinancialRecordsForOrder(makeOrder(), [makeItem()], client);
+
+  assert.equal(logActivityCalls.length, 1);
+  assert.equal(logActivityCalls[0].client, client, "must be the exact client the function was given, not the module's own default");
+});
 
 test("createConsignmentFinancialRecordsForOrder: Fee = round(Sale Price × 10%), Customer Payable = Sale Price − Fee (D1/D2, LOCKED)", async () => {
   const { createConsignmentFinancialRecordsForOrder } = await import("./consignmentFinancialRecord.service");

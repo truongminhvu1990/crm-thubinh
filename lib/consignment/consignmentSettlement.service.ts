@@ -135,12 +135,15 @@ export async function createConsignmentSettlement(
   );
   if (itemsError) throw itemsError;
 
-  await logActivity({
-    staff_id: null,
-    action: "consignment_settlement_created",
-    entity: "consignment_settlement",
-    entity_id: settlement.id,
-  });
+  await logActivity(
+    {
+      staff_id: null,
+      action: "consignment_settlement_created",
+      entity: "consignment_settlement",
+      entity_id: settlement.id,
+    },
+    client
+  );
 
   const created = await getConsignmentSettlementById(settlement.id, client);
   if (!created) throw new ConsignmentSettlementRuleViolationError("Đã tạo settlement nhưng không thể tải lại");
@@ -225,7 +228,7 @@ export async function approveConsignmentSettlement(
     .eq("id", id);
   if (error) throw error;
 
-  await logActivity({ staff_id: actorStaffId, action: "consignment_settlement_approved", entity: "consignment_settlement", entity_id: id });
+  await logActivity({ staff_id: actorStaffId, action: "consignment_settlement_approved", entity: "consignment_settlement", entity_id: id }, client);
   return requireConsignmentSettlement(id, client);
 }
 
@@ -253,7 +256,7 @@ export async function completeConsignmentSettlement(
     .eq("id", id);
   if (error) throw error;
 
-  await logActivity({ staff_id: actorStaffId, action: "consignment_settlement_completed", entity: "consignment_settlement", entity_id: id });
+  await logActivity({ staff_id: actorStaffId, action: "consignment_settlement_completed", entity: "consignment_settlement", entity_id: id }, client);
   return requireConsignmentSettlement(id, client);
 }
 
@@ -269,7 +272,7 @@ export async function cancelConsignmentSettlement(id: string, client: SupabaseCl
     .eq("id", id);
   if (error) throw error;
 
-  await logActivity({ staff_id: null, action: "consignment_settlement_cancelled", entity: "consignment_settlement", entity_id: id });
+  await logActivity({ staff_id: null, action: "consignment_settlement_cancelled", entity: "consignment_settlement", entity_id: id }, client);
   return requireConsignmentSettlement(id, client);
 }
 

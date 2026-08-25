@@ -12,7 +12,18 @@ import { mock } from "node:test";
  */
 
 mock.module("@/lib/supabase", { namedExports: { supabase: {} } });
-mock.module("@/lib/activityLog.service", { namedExports: { logActivity: async () => {} } });
+
+/** BUG-003 — every logActivity() call in this file must forward the same
+ * client it was itself given, not fall back to activityLog.service.ts's
+ * own anon-defaulting default. */
+let logActivityCalls: { entry: unknown; client: unknown }[] = [];
+mock.module("@/lib/activityLog.service", {
+  namedExports: {
+    logActivity: async (entry: unknown, client: unknown) => {
+      logActivityCalls.push({ entry, client });
+    },
+  },
+});
 
 interface FakeResult {
   data: unknown;
@@ -54,6 +65,71 @@ function makeClient(perTableSequence: Record<string, FakeResult[]>) {
     } as never,
   };
 }
+
+test.beforeEach(() => {
+  logActivityCalls = [];
+});
+
+test("createConsignmentSettlement/approveConsignmentSettlement/completeConsignmentSettlement/cancelConsignmentSettlement: each forwards its own client into logActivity, not the anon-defaulting default (BUG-003)", async () => {
+  const {
+    createConsignmentSettlement,
+    approveConsignmentSettlement,
+    completeConsignmentSettlement,
+    cancelConsignmentSettlement,
+  } = await import("./consignmentSettlement.service");
+
+  const { client: clientA } = makeClient({
+    consignment_financial_records: [
+      { data: [{ id: "cfr-1", customer_payable: 100000, consignment: { customer_id: "customer-1" } }] },
+    ],
+    consignment_settlement_items: [{ data: [] }, { data: {} }],
+    consignment_settlements: [{ data: { id: "sett-1" } }],
+  });
+  try {
+    await createConsignmentSettlement(["cfr-1"], "Bank Transfer", clientA);
+  } catch {
+    // getConsignmentSettlementById's own re-fetch isn't stubbed in this
+    // fixture — logActivity has already fired by this point either way.
+  }
+  assert.equal(logActivityCalls.length, 1);
+  assert.equal(logActivityCalls[0].client, clientA, "createConsignmentSettlement must forward its own client");
+
+  logActivityCalls = [];
+  const { client: clientB } = makeClient({
+    consignment_settlements: [
+      { data: { id: "sett-1", status: "Pending", items: [] } },
+      { data: {} },
+      { data: { id: "sett-1", status: "Approved", items: [] } },
+    ],
+  });
+  await approveConsignmentSettlement("sett-1", "staff-1", clientB);
+  assert.equal(logActivityCalls.length, 1);
+  assert.equal(logActivityCalls[0].client, clientB, "approveConsignmentSettlement must forward its own client");
+
+  logActivityCalls = [];
+  const { client: clientC } = makeClient({
+    consignment_settlements: [
+      { data: { id: "sett-1", status: "Approved", items: [] } },
+      { data: {} },
+      { data: { id: "sett-1", status: "Completed", items: [] } },
+    ],
+  });
+  await completeConsignmentSettlement("sett-1", "staff-1", clientC);
+  assert.equal(logActivityCalls.length, 1);
+  assert.equal(logActivityCalls[0].client, clientC, "completeConsignmentSettlement must forward its own client");
+
+  logActivityCalls = [];
+  const { client: clientD } = makeClient({
+    consignment_settlements: [
+      { data: { id: "sett-1", status: "Draft", items: [] } },
+      { data: {} },
+      { data: { id: "sett-1", status: "Cancelled", items: [] } },
+    ],
+  });
+  await cancelConsignmentSettlement("sett-1", clientD);
+  assert.equal(logActivityCalls.length, 1);
+  assert.equal(logActivityCalls[0].client, clientD, "cancelConsignmentSettlement must forward its own client");
+});
 
 test("createConsignmentSettlement: rejects an empty selection", async () => {
   const { createConsignmentSettlement, ConsignmentSettlementRuleViolationError } = await import(

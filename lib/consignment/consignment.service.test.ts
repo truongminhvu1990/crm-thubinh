@@ -11,7 +11,19 @@ import { mock } from "node:test";
  */
 
 mock.module("@/lib/supabase", { namedExports: { supabase: {} } });
-mock.module("@/lib/activityLog.service", { namedExports: { logActivity: async () => {} } });
+
+/** BUG-003 — every logActivity() call in this file must forward the same
+ * client it was itself given, not fall back to activityLog.service.ts's
+ * own anon-defaulting default. Captured here (object identity) rather than
+ * left as a no-op stub, so a regression is caught directly. */
+let logActivityCalls: { entry: unknown; client: unknown }[] = [];
+mock.module("@/lib/activityLog.service", {
+  namedExports: {
+    logActivity: async (entry: unknown, client: unknown) => {
+      logActivityCalls.push({ entry, client });
+    },
+  },
+});
 
 interface FakeResult {
   data: unknown;
@@ -56,6 +68,45 @@ function makeClient(perTableSequence: Record<string, FakeResult[]>) {
     } as never,
   };
 }
+
+test.beforeEach(() => {
+  logActivityCalls = [];
+});
+
+test("createConsignment/markConsignmentAvailable/returnConsignment/markConsignmentSold: each forwards its own client into logActivity, not the anon-defaulting default (BUG-003)", async () => {
+  const { createConsignment, markConsignmentAvailable, returnConsignment, markConsignmentSold } = await import("./consignment.service");
+
+  const { client: clientA } = makeClient({
+    consignments: [{ data: [] }, { data: { id: "cns-1", status: "RECEIVED" } }],
+  });
+  await createConsignment({ customer_id: "customer-1", product_id: "product-1" }, "staff-1", clientA);
+  assert.equal(logActivityCalls.length, 1);
+  assert.equal(logActivityCalls[0].client, clientA, "createConsignment must forward its own client");
+
+  logActivityCalls = [];
+  const { client: clientB } = makeClient({
+    consignments: [{ data: { id: "cns-1", status: "RECEIVED" } }, { data: {} }, { data: { id: "cns-1", status: "AVAILABLE_FOR_SALE" } }],
+  });
+  await markConsignmentAvailable("cns-1", "staff-1", clientB);
+  assert.equal(logActivityCalls.length, 1);
+  assert.equal(logActivityCalls[0].client, clientB, "markConsignmentAvailable must forward its own client");
+
+  logActivityCalls = [];
+  const { client: clientC } = makeClient({
+    consignments: [{ data: { id: "cns-1", status: "RECEIVED" } }, { data: {} }, { data: { id: "cns-1", status: "RETURNED" } }],
+  });
+  await returnConsignment("cns-1", "staff-1", clientC);
+  assert.equal(logActivityCalls.length, 1);
+  assert.equal(logActivityCalls[0].client, clientC, "returnConsignment must forward its own client");
+
+  logActivityCalls = [];
+  const { client: clientD } = makeClient({
+    consignments: [{ data: { id: "cns-1", status: "RECEIVED" } }, { data: {} }, { data: { id: "cns-1", status: "SOLD" } }],
+  });
+  await markConsignmentSold("cns-1", clientD);
+  assert.equal(logActivityCalls.length, 1);
+  assert.equal(logActivityCalls[0].client, clientD, "markConsignmentSold must forward its own client");
+});
 
 test("createConsignment: creates with status RECEIVED, generates a CNS- code", async () => {
   const { createConsignment } = await import("./consignment.service");
