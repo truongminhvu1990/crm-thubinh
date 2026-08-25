@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermissionCenterAccess } from "@/lib/permission/serverAuth";
+import { requirePermissionCenterAccess, createRequestClient } from "@/lib/permission/serverAuth";
 import { toggleRolePermission } from "@/lib/permission/permissionCenter.service";
 import { getRolePermissions } from "@/lib/permission/permissionCenter.repository";
 import { handlePermissionServiceError } from "../_errors";
@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   if ("error" in auth) return auth.error;
 
   try {
-    const grants = await getRolePermissions();
+    const grants = await getRolePermissions(createRequestClient(request));
     return NextResponse.json(grants);
   } catch (error) {
     return handlePermissionServiceError(error);
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
     if (!role_id || !permission_id || typeof grant !== "boolean") {
       return NextResponse.json({ error: "role_id, permission_id, grant là bắt buộc" }, { status: 400 });
     }
-    await toggleRolePermission(auth.staff.id, role_id, permission_id, grant);
+    await toggleRolePermission(auth.staff.id, role_id, permission_id, grant, createRequestClient(request));
     return NextResponse.json({ ok: true });
   } catch (error) {
     return handlePermissionServiceError(error);

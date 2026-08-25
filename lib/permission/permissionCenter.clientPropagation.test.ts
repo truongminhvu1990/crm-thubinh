@@ -60,6 +60,12 @@ function makeTable(allRows: any[]) {
       rows = rows.filter((r) => r[field] === value);
       return builder;
     },
+    // Additive, no-op-on-filtering passthroughs so callers this fixture
+    // doesn't otherwise care about the exact result of (e.g.
+    // getPermissionDashboardKpis' activity_logs .in()/.gte() query) don't
+    // throw — no existing test here relies on their filtering behavior.
+    in: () => builder,
+    gte: () => builder,
     order: () => builder,
     then: (resolve: (v: unknown) => void) => resolve({ data: rows, error: null }),
     maybeSingle: () => Promise.resolve({ data: rows[0] ?? null, error: null }),
@@ -284,4 +290,211 @@ test("toggleSensitiveFieldPairing (service): pair=false threads the client throu
     { op: "delete", table: "permission_sensitive_fields" },
     { op: "insert", table: "activity_logs" },
   ]);
+});
+
+// ============================================================
+// BUG-002 Phase 2F — remaining Permission Center mutation functions
+// (createRole/updateRole/setRoleActive/toggleRolePermission/
+// cloneRolePermissions/setDataScope/renameTeam/assignTeam/
+// assignStaffRoleAndTeam), getTeams, and getPermissionDashboardKpis.
+//
+// A more general chain-recording spy than makeWriteSpyClient above, since
+// this batch touches insert/update/upsert/delete across roles/
+// role_permissions/role_data_scopes/staff, not just one table's
+// insert/delete. Deliberately doesn't simulate real row data/filtering —
+// these functions' business logic is unit-tested implicitly by the full
+// regression suite passing unchanged; what these tests prove is narrowly
+// "does the supplied client reach every underlying call," matching the
+// same standard as every other propagation test in this file.
+// ============================================================
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function makeMutationSpyClient(returnData: any = { id: "generated-id" }) {
+  const calls: { op: string; table: string }[] = [];
+  const client = {
+    calls,
+    from(table: string) {
+      const record = (op: string) => calls.push({ op, table });
+      let recordedSelect = false;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const chain: any = {
+        select: () => {
+          if (!recordedSelect) {
+            recordedSelect = true;
+            record("select");
+          }
+          return chain;
+        },
+        eq: () => chain,
+        in: () => chain,
+        not: () => chain,
+        gte: () => chain,
+        order: () => chain,
+        insert: () => {
+          record("insert");
+          return chain;
+        },
+        update: () => {
+          record("update");
+          return chain;
+        },
+        upsert: () => {
+          record("upsert");
+          return chain;
+        },
+        delete: () => {
+          record("delete");
+          return chain;
+        },
+        single: () => Promise.resolve({ data: returnData, error: null }),
+        maybeSingle: () => Promise.resolve({ data: returnData, error: null }),
+        then: (resolve: (v: unknown) => void) => resolve({ data: [], error: null, count: 0 }),
+      };
+      return chain;
+    },
+  };
+  return client;
+}
+
+test("createRole: threads the client into insertRole and logActivity", async () => {
+  const { createRole } = await import("./permissionCenter.service");
+  const spy = makeMutationSpyClient();
+  await createRole("actor-1", { role_key: "test_role", name: "Test Role" }, spy as never);
+  assert.deepEqual(spy.calls, [
+    { op: "insert", table: "roles" },
+    { op: "select", table: "roles" },
+    { op: "insert", table: "activity_logs" },
+  ]);
+});
+
+test("updateRole: threads the client into updateRoleRow and logActivity", async () => {
+  const { updateRole } = await import("./permissionCenter.service");
+  const spy = makeMutationSpyClient();
+  await updateRole("actor-1", "role-1", { name: "Renamed" }, spy as never);
+  assert.deepEqual(spy.calls, [
+    { op: "update", table: "roles" },
+    { op: "select", table: "roles" },
+    { op: "insert", table: "activity_logs" },
+  ]);
+});
+
+test("setRoleActive: threads the client into updateRoleRow and logActivity", async () => {
+  const { setRoleActive } = await import("./permissionCenter.service");
+  const spy = makeMutationSpyClient();
+  await setRoleActive("actor-1", "role-1", false, spy as never);
+  assert.deepEqual(spy.calls, [
+    { op: "update", table: "roles" },
+    { op: "select", table: "roles" },
+    { op: "insert", table: "activity_logs" },
+  ]);
+});
+
+test("toggleRolePermission: grant=true threads the client into grantPermission and logActivity", async () => {
+  const { toggleRolePermission } = await import("./permissionCenter.service");
+  const spy = makeMutationSpyClient();
+  await toggleRolePermission("actor-1", "role-1", "perm-1", true, spy as never);
+  assert.deepEqual(spy.calls, [
+    { op: "insert", table: "role_permissions" },
+    { op: "insert", table: "activity_logs" },
+  ]);
+});
+
+test("toggleRolePermission: grant=false threads the client into revokePermission and logActivity", async () => {
+  const { toggleRolePermission } = await import("./permissionCenter.service");
+  const spy = makeMutationSpyClient();
+  await toggleRolePermission("actor-1", "role-1", "perm-1", false, spy as never);
+  assert.deepEqual(spy.calls, [
+    { op: "delete", table: "role_permissions" },
+    { op: "insert", table: "activity_logs" },
+  ]);
+});
+
+test("cloneRolePermissions: threads the client into clonePermissions' two reads and logActivity", async () => {
+  const { cloneRolePermissions } = await import("./permissionCenter.service");
+  const spy = makeMutationSpyClient();
+  await cloneRolePermissions("actor-1", "role-source", "role-target", spy as never);
+  // sourceGrants resolves empty via this spy, so clonePermissions returns
+  // early (0 cloned) without ever reaching its own insert — still proves
+  // both reads and the unconditional logActivity call use the right client.
+  assert.deepEqual(spy.calls, [
+    { op: "select", table: "role_permissions" },
+    { op: "select", table: "role_permissions" },
+    { op: "insert", table: "activity_logs" },
+  ]);
+});
+
+test("setDataScope: threads the client into setRoleDataScope's upsert and logActivity", async () => {
+  const { setDataScope } = await import("./permissionCenter.service");
+  const spy = makeMutationSpyClient();
+  await setDataScope("actor-1", "role-1", "orders", "all", spy as never);
+  assert.deepEqual(spy.calls, [
+    { op: "upsert", table: "role_data_scopes" },
+    { op: "insert", table: "activity_logs" },
+  ]);
+});
+
+test("renameTeam: threads the client into renameTeamForAllMembers' update and logActivity", async () => {
+  const { renameTeam } = await import("./permissionCenter.service");
+  const spy = makeMutationSpyClient();
+  await renameTeam("actor-1", "team-old", "team-new", spy as never);
+  assert.deepEqual(spy.calls, [
+    { op: "update", table: "staff" },
+    { op: "select", table: "staff" },
+    { op: "insert", table: "activity_logs" },
+  ]);
+});
+
+test("assignTeam: threads the client into assignStaffTeam's update and logActivity", async () => {
+  const { assignTeam } = await import("./permissionCenter.service");
+  const spy = makeMutationSpyClient();
+  await assignTeam("actor-1", ["staff-1", "staff-2"], "team-1", spy as never);
+  assert.deepEqual(spy.calls, [
+    { op: "update", table: "staff" },
+    { op: "insert", table: "activity_logs" },
+  ]);
+});
+
+test("assignStaffRoleAndTeam: threads the client into updateStaffRoleAssignment and both logActivity calls (role_id + team_id both set)", async () => {
+  const { assignStaffRoleAndTeam } = await import("./permissionCenter.service");
+  const spy = makeMutationSpyClient();
+  await assignStaffRoleAndTeam("actor-1", "staff-1", { role_id: "role-1", team_id: "team-1" }, spy as never);
+  assert.deepEqual(spy.calls, [
+    { op: "update", table: "staff" },
+    { op: "select", table: "staff" },
+    { op: "insert", table: "activity_logs" },
+    { op: "insert", table: "activity_logs" },
+  ]);
+});
+
+test("getTeams: threads the client into getStaffTeams", async () => {
+  const { getTeams } = await import("./permissionCenter.service");
+  const spy = makeMutationSpyClient();
+  await getTeams(spy as never);
+  assert.deepEqual(spy.calls, [{ op: "select", table: "staff" }]);
+});
+
+test("getPermissionDashboardKpis: threads the supplied client into all 4 underlying queries (roles/permissions/staff/activity_logs)", async () => {
+  const { getPermissionDashboardKpis } = await import("./permissionCenter.service");
+  const spy = makeMutationSpyClient();
+  await getPermissionDashboardKpis(spy as never);
+  assert.deepEqual(spy.calls, [
+    { op: "select", table: "roles" },
+    { op: "select", table: "permissions" },
+    { op: "select", table: "staff" },
+    { op: "select", table: "activity_logs" },
+  ]);
+});
+
+test("getPermissionDashboardKpis: with no client argument, falls back to the default (existing behavior preserved)", async () => {
+  const { getPermissionDashboardKpis } = await import("./permissionCenter.service");
+  const kpis = await getPermissionDashboardKpis();
+  assert.equal(typeof kpis.totalRoles, "number");
+});
+
+test("getPermissionDashboardKpis: with the real client, sees Owner/Sales staff rows; with the anon-equivalent client, sees none (RLS denies)", async () => {
+  const { getPermissionDashboardKpis } = await import("./permissionCenter.service");
+  const withReal = await getPermissionDashboardKpis(realClient as never);
+  const withAnon = await getPermissionDashboardKpis(anonClient as never);
+  assert.equal(withReal.totalStaff, STAFF.length);
+  assert.equal(withAnon.totalStaff, 0);
 });

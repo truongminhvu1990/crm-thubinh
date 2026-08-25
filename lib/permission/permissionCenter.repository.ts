@@ -43,14 +43,21 @@ export async function getRoleById(id: string, client: SupabaseClient = supabase)
   return data as Role | null;
 }
 
-export async function insertRole(role: { role_key: string; name: string; description?: string }) {
-  const { data, error } = await supabase.from("roles").insert(role).select().single();
+export async function insertRole(
+  role: { role_key: string; name: string; description?: string },
+  client: SupabaseClient = supabase
+) {
+  const { data, error } = await client.from("roles").insert(role).select().single();
   if (error) return { data: null, error };
   return { data: data as Role, error: null };
 }
 
-export async function updateRoleRow(id: string, fields: Partial<Pick<Role, "name" | "description" | "is_active">>) {
-  const { data, error } = await supabase.from("roles").update(fields).eq("id", id).select().single();
+export async function updateRoleRow(
+  id: string,
+  fields: Partial<Pick<Role, "name" | "description" | "is_active">>,
+  client: SupabaseClient = supabase
+) {
+  const { data, error } = await client.from("roles").update(fields).eq("id", id).select().single();
   if (error) return { data: null, error };
   return { data: data as Role, error: null };
 }
@@ -81,8 +88,8 @@ export async function getRolePermissions(client: SupabaseClient = supabase): Pro
   return data as RolePermission[];
 }
 
-export async function grantPermission(roleId: string, permissionId: string) {
-  const { error } = await supabase
+export async function grantPermission(roleId: string, permissionId: string, client: SupabaseClient = supabase) {
+  const { error } = await client
     .from("role_permissions")
     .insert({ role_id: roleId, permission_id: permissionId });
   // 23505 = already granted (unique violation) - treat as success, idempotent.
@@ -90,8 +97,8 @@ export async function grantPermission(roleId: string, permissionId: string) {
   return { error: null };
 }
 
-export async function revokePermission(roleId: string, permissionId: string) {
-  const { error } = await supabase
+export async function revokePermission(roleId: string, permissionId: string, client: SupabaseClient = supabase) {
+  const { error } = await client
     .from("role_permissions")
     .delete()
     .eq("role_id", roleId)
@@ -101,8 +108,12 @@ export async function revokePermission(roleId: string, permissionId: string) {
 
 /** Clone Permission (Decision 14) - copies every permission grant from
  * sourceRoleId onto targetRoleId, skipping ones the target already has. */
-export async function clonePermissions(sourceRoleId: string, targetRoleId: string): Promise<number> {
-  const { data: sourceGrants, error: sourceError } = await supabase
+export async function clonePermissions(
+  sourceRoleId: string,
+  targetRoleId: string,
+  client: SupabaseClient = supabase
+): Promise<number> {
+  const { data: sourceGrants, error: sourceError } = await client
     .from("role_permissions")
     .select("permission_id")
     .eq("role_id", sourceRoleId);
@@ -111,7 +122,7 @@ export async function clonePermissions(sourceRoleId: string, targetRoleId: strin
     return 0;
   }
 
-  const { data: targetGrants } = await supabase
+  const { data: targetGrants } = await client
     .from("role_permissions")
     .select("permission_id")
     .eq("role_id", targetRoleId);
@@ -124,7 +135,7 @@ export async function clonePermissions(sourceRoleId: string, targetRoleId: strin
 
   if (toInsert.length === 0) return 0;
 
-  const { error } = await supabase.from("role_permissions").insert(toInsert);
+  const { error } = await client.from("role_permissions").insert(toInsert);
   if (error) {
     console.error("Error cloning permissions:", error);
     return 0;
@@ -146,8 +157,13 @@ export async function getRoleDataScopes(client: SupabaseClient = supabase): Prom
 }
 
 /** Upsert on (role_id, resource) - "selecting any option creates the row" (UI §3.2). */
-export async function setRoleDataScope(roleId: string, resource: string, scope: DataScope) {
-  const { error } = await supabase
+export async function setRoleDataScope(
+  roleId: string,
+  resource: string,
+  scope: DataScope,
+  client: SupabaseClient = supabase
+) {
+  const { error } = await client
     .from("role_data_scopes")
     .upsert({ role_id: roleId, resource, scope }, { onConflict: "role_id,resource" });
   return { error };
@@ -197,8 +213,8 @@ export async function unpairSensitiveField(
 // staff.team_id / staff.role_id (Decision 9, Decision 10)
 // ============================================================
 
-export async function getStaffTeams(): Promise<TeamSummary[]> {
-  const { data, error } = await supabase.from("staff").select("team_id").not("team_id", "is", null);
+export async function getStaffTeams(client: SupabaseClient = supabase): Promise<TeamSummary[]> {
+  const { data, error } = await client.from("staff").select("team_id").not("team_id", "is", null);
   if (error) {
     console.error("Error fetching staff teams:", error);
     return [];
@@ -246,8 +262,8 @@ export async function getUnassignedStaff(): Promise<Staff[]> {
 
 /** Team Management's "Rename Team" (§7) - bulk UPDATE of every staff row
  * currently holding the old team_id value. */
-export async function renameTeamForAllMembers(oldTeamId: string, newTeamId: string) {
-  const { data, error } = await supabase
+export async function renameTeamForAllMembers(oldTeamId: string, newTeamId: string, client: SupabaseClient = supabase) {
+  const { data, error } = await client
     .from("staff")
     .update({ team_id: newTeamId })
     .eq("team_id", oldTeamId)
@@ -255,13 +271,17 @@ export async function renameTeamForAllMembers(oldTeamId: string, newTeamId: stri
   return { error, count: data?.length ?? 0 };
 }
 
-export async function assignStaffTeam(staffIds: string[], teamId: string | null) {
-  const { error } = await supabase.from("staff").update({ team_id: teamId }).in("id", staffIds);
+export async function assignStaffTeam(staffIds: string[], teamId: string | null, client: SupabaseClient = supabase) {
+  const { error } = await client.from("staff").update({ team_id: teamId }).in("id", staffIds);
   return { error };
 }
 
-export async function updateStaffRoleAssignment(staffId: string, fields: { role_id?: string | null; team_id?: string | null }) {
-  const { data, error } = await supabase.from("staff").update(fields).eq("id", staffId).select().single();
+export async function updateStaffRoleAssignment(
+  staffId: string,
+  fields: { role_id?: string | null; team_id?: string | null },
+  client: SupabaseClient = supabase
+) {
+  const { data, error } = await client.from("staff").update(fields).eq("id", staffId).select().single();
   if (error) return { data: null, error };
   return { data: data as Staff, error: null };
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermissionCenterAccess } from "@/lib/permission/serverAuth";
+import { requirePermissionCenterAccess, createRequestClient } from "@/lib/permission/serverAuth";
 import { assignStaffRoleAndTeam, getTeams } from "@/lib/permission/permissionCenter.service";
 import { handlePermissionServiceError } from "../../../permissions/_errors";
 
@@ -22,9 +22,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if ("role_id" in body) fields.role_id = body.role_id;
     if ("team_id" in body) fields.team_id = body.team_id;
 
+    const client = createRequestClient(request);
+
     // Decision 13: Team must come from the existing Team list - no free text.
     if (fields.team_id) {
-      const existingTeams = await getTeams();
+      const existingTeams = await getTeams(client);
       if (!existingTeams.some((t) => t.team_id === fields.team_id)) {
         return NextResponse.json(
           { error: "Nhóm không tồn tại - vui lòng tạo nhóm trước khi gán" },
@@ -33,7 +35,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       }
     }
 
-    const staff = await assignStaffRoleAndTeam(auth.staff.id, staffId, fields);
+    const staff = await assignStaffRoleAndTeam(auth.staff.id, staffId, fields, client);
     return NextResponse.json(staff);
   } catch (error) {
     return handlePermissionServiceError(error);

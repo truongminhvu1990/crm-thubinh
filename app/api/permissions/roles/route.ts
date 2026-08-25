@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermissionCenterAccess } from "@/lib/permission/serverAuth";
+import { requirePermissionCenterAccess, createRequestClient } from "@/lib/permission/serverAuth";
 import { createRole, getRoles } from "@/lib/permission/permissionCenter.service";
 import { handlePermissionServiceError } from "../_errors";
 
@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   if ("error" in auth) return auth.error;
 
   try {
-    const roles = await getRoles();
+    const roles = await getRoles(createRequestClient(request));
     return NextResponse.json(roles);
   } catch (error) {
     return handlePermissionServiceError(error);
@@ -28,11 +28,15 @@ export async function POST(request: NextRequest) {
     if (!body.role_key?.trim() || !body.name?.trim()) {
       return NextResponse.json({ error: "role_key và name là bắt buộc" }, { status: 400 });
     }
-    const role = await createRole(auth.staff.id, {
-      role_key: body.role_key.trim(),
-      name: body.name.trim(),
-      description: body.description?.trim() || undefined,
-    });
+    const role = await createRole(
+      auth.staff.id,
+      {
+        role_key: body.role_key.trim(),
+        name: body.name.trim(),
+        description: body.description?.trim() || undefined,
+      },
+      createRequestClient(request)
+    );
     return NextResponse.json(role, { status: 201 });
   } catch (error) {
     return handlePermissionServiceError(error);

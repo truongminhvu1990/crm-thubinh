@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermissionCenterAccess } from "@/lib/permission/serverAuth";
+import { requirePermissionCenterAccess, createRequestClient } from "@/lib/permission/serverAuth";
 import { setDataScope } from "@/lib/permission/permissionCenter.service";
 import { getRoleDataScopes } from "@/lib/permission/permissionCenter.repository";
 import { DataScopeResource, DataScope } from "@/types/permissionCenter";
@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   if ("error" in auth) return auth.error;
 
   try {
-    const scopes = await getRoleDataScopes();
+    const scopes = await getRoleDataScopes(createRequestClient(request));
     return NextResponse.json(scopes);
   } catch (error) {
     return handlePermissionServiceError(error);
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     if (!role_id || !resource || !scope) {
       return NextResponse.json({ error: "role_id, resource, scope là bắt buộc" }, { status: 400 });
     }
-    await setDataScope(auth.staff.id, role_id, resource, scope);
+    await setDataScope(auth.staff.id, role_id, resource, scope, createRequestClient(request));
     return NextResponse.json({ ok: true });
   } catch (error) {
     return handlePermissionServiceError(error);

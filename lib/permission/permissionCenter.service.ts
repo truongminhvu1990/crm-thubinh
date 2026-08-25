@@ -137,10 +137,14 @@ export async function getVisibleSensitiveFields(roleId: string, client?: Supabas
 
 export class PermissionServiceError extends Error {}
 
-export async function createRole(actorStaffId: string, input: { role_key: string; name: string; description?: string }) {
-  const { data, error } = await repo.insertRole(input);
+export async function createRole(
+  actorStaffId: string,
+  input: { role_key: string; name: string; description?: string },
+  client?: SupabaseClient
+) {
+  const { data, error } = await repo.insertRole(input, client);
   if (error || !data) throw new PermissionServiceError(error?.message || "Error creating role");
-  await logActivity({ staff_id: actorStaffId, action: "role_created", entity: "role", entity_id: data.id });
+  await logActivity({ staff_id: actorStaffId, action: "role_created", entity: "role", entity_id: data.id }, client);
   invalidatePermissionCache();
   return data;
 }
@@ -148,24 +152,28 @@ export async function createRole(actorStaffId: string, input: { role_key: string
 export async function updateRole(
   actorStaffId: string,
   roleId: string,
-  fields: Partial<Pick<Role, "name" | "description">>
+  fields: Partial<Pick<Role, "name" | "description">>,
+  client?: SupabaseClient
 ) {
-  const { data, error } = await repo.updateRoleRow(roleId, fields);
+  const { data, error } = await repo.updateRoleRow(roleId, fields, client);
   if (error || !data) throw new PermissionServiceError(error?.message || "Error updating role");
-  await logActivity({ staff_id: actorStaffId, action: "role_updated", entity: "role", entity_id: roleId });
+  await logActivity({ staff_id: actorStaffId, action: "role_updated", entity: "role", entity_id: roleId }, client);
   invalidatePermissionCache();
   return data;
 }
 
-export async function setRoleActive(actorStaffId: string, roleId: string, isActive: boolean) {
-  const { data, error } = await repo.updateRoleRow(roleId, { is_active: isActive });
+export async function setRoleActive(actorStaffId: string, roleId: string, isActive: boolean, client?: SupabaseClient) {
+  const { data, error } = await repo.updateRoleRow(roleId, { is_active: isActive }, client);
   if (error || !data) throw new PermissionServiceError(error?.message || "Error updating role status");
-  await logActivity({
-    staff_id: actorStaffId,
-    action: isActive ? "role_enabled" : "role_disabled",
-    entity: "role",
-    entity_id: roleId,
-  });
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: isActive ? "role_enabled" : "role_disabled",
+      entity: "role",
+      entity_id: roleId,
+    },
+    client
+  );
   invalidatePermissionCache();
   return data;
 }
@@ -174,43 +182,66 @@ export async function toggleRolePermission(
   actorStaffId: string,
   roleId: string,
   permissionId: string,
-  grant: boolean
+  grant: boolean,
+  client?: SupabaseClient
 ) {
-  const { error } = grant ? await repo.grantPermission(roleId, permissionId) : await repo.revokePermission(roleId, permissionId);
+  const { error } = grant
+    ? await repo.grantPermission(roleId, permissionId, client)
+    : await repo.revokePermission(roleId, permissionId, client);
   if (error) throw new PermissionServiceError(error.message);
-  await logActivity({
-    staff_id: actorStaffId,
-    action: grant ? "permission_granted" : "permission_revoked",
-    entity: "role_permission",
-    entity_id: `${roleId}:${permissionId}`,
-  });
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: grant ? "permission_granted" : "permission_revoked",
+      entity: "role_permission",
+      entity_id: `${roleId}:${permissionId}`,
+    },
+    client
+  );
   invalidatePermissionCache();
 }
 
 /** Clone Permission (Decision 14, UI §3.3) - scoped to role_permissions
  * only, per the action's literal name. Data Scope and Sensitive Field
  * visibility are not separately copied. */
-export async function cloneRolePermissions(actorStaffId: string, sourceRoleId: string, targetRoleId: string) {
-  const clonedCount = await repo.clonePermissions(sourceRoleId, targetRoleId);
-  await logActivity({
-    staff_id: actorStaffId,
-    action: "permissions_cloned",
-    entity: "role_permission",
-    entity_id: `${sourceRoleId}->${targetRoleId}`,
-  });
+export async function cloneRolePermissions(
+  actorStaffId: string,
+  sourceRoleId: string,
+  targetRoleId: string,
+  client?: SupabaseClient
+) {
+  const clonedCount = await repo.clonePermissions(sourceRoleId, targetRoleId, client);
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: "permissions_cloned",
+      entity: "role_permission",
+      entity_id: `${sourceRoleId}->${targetRoleId}`,
+    },
+    client
+  );
   invalidatePermissionCache();
   return clonedCount;
 }
 
-export async function setDataScope(actorStaffId: string, roleId: string, resource: DataScopeResource, scope: DataScope) {
-  const { error } = await repo.setRoleDataScope(roleId, resource, scope);
+export async function setDataScope(
+  actorStaffId: string,
+  roleId: string,
+  resource: DataScopeResource,
+  scope: DataScope,
+  client?: SupabaseClient
+) {
+  const { error } = await repo.setRoleDataScope(roleId, resource, scope, client);
   if (error) throw new PermissionServiceError(error.message);
-  await logActivity({
-    staff_id: actorStaffId,
-    action: "data_scope_changed",
-    entity: "role_data_scope",
-    entity_id: `${roleId}:${resource}`,
-  });
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: "data_scope_changed",
+      entity: "role_data_scope",
+      entity_id: `${roleId}:${resource}`,
+    },
+    client
+  );
 }
 
 export async function toggleSensitiveFieldPairing(
@@ -235,42 +266,55 @@ export async function toggleSensitiveFieldPairing(
   );
 }
 
-export async function renameTeam(actorStaffId: string, oldTeamId: string, newTeamId: string) {
-  const { error, count } = await repo.renameTeamForAllMembers(oldTeamId, newTeamId);
+export async function renameTeam(actorStaffId: string, oldTeamId: string, newTeamId: string, client?: SupabaseClient) {
+  const { error, count } = await repo.renameTeamForAllMembers(oldTeamId, newTeamId, client);
   if (error) throw new PermissionServiceError(error.message);
-  await logActivity({ staff_id: actorStaffId, action: "team_renamed", entity: "role_data_scope", entity_id: newTeamId });
+  await logActivity(
+    { staff_id: actorStaffId, action: "team_renamed", entity: "role_data_scope", entity_id: newTeamId },
+    client
+  );
   return count;
 }
 
-export async function assignTeam(actorStaffId: string, staffIds: string[], teamId: string | null) {
-  const { error } = await repo.assignStaffTeam(staffIds, teamId);
+export async function assignTeam(actorStaffId: string, staffIds: string[], teamId: string | null, client?: SupabaseClient) {
+  const { error } = await repo.assignStaffTeam(staffIds, teamId, client);
   if (error) throw new PermissionServiceError(error.message);
-  await logActivity({
-    staff_id: actorStaffId,
-    action: teamId ? "team_assigned" : "team_removed",
-    entity: "role_data_scope",
-    entity_id: teamId ?? "unassigned",
-  });
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: teamId ? "team_assigned" : "team_removed",
+      entity: "role_data_scope",
+      entity_id: teamId ?? "unassigned",
+    },
+    client
+  );
 }
 
 /** User Role Assignment (Decision 10, UI §8). */
 export async function assignStaffRoleAndTeam(
   actorStaffId: string,
   staffId: string,
-  fields: { role_id?: string | null; team_id?: string | null }
+  fields: { role_id?: string | null; team_id?: string | null },
+  client?: SupabaseClient
 ) {
-  const { data, error } = await repo.updateStaffRoleAssignment(staffId, fields);
+  const { data, error } = await repo.updateStaffRoleAssignment(staffId, fields, client);
   if (error || !data) throw new PermissionServiceError(error?.message || "Error assigning role/team");
   if (fields.role_id !== undefined) {
-    await logActivity({ staff_id: actorStaffId, action: "staff_role_assigned", entity: "role", entity_id: fields.role_id });
+    await logActivity(
+      { staff_id: actorStaffId, action: "staff_role_assigned", entity: "role", entity_id: fields.role_id },
+      client
+    );
   }
   if (fields.team_id !== undefined) {
-    await logActivity({
-      staff_id: actorStaffId,
-      action: "staff_team_assigned",
-      entity: "role_data_scope",
-      entity_id: fields.team_id ?? "unassigned",
-    });
+    await logActivity(
+      {
+        staff_id: actorStaffId,
+        action: "staff_team_assigned",
+        entity: "role_data_scope",
+        entity_id: fields.team_id ?? "unassigned",
+      },
+      client
+    );
   }
   return data;
 }
@@ -290,12 +334,12 @@ export interface PermissionDashboardKpis {
 
 const AUDITED_ENTITIES = ["role", "permission", "role_permission", "role_data_scope"];
 
-export async function getPermissionDashboardKpis(): Promise<PermissionDashboardKpis> {
+export async function getPermissionDashboardKpis(client: SupabaseClient = supabase): Promise<PermissionDashboardKpis> {
   const [rolesRes, permissionsRes, staffRes, changesRes] = await Promise.all([
-    supabase.from("roles").select("id", { count: "exact", head: true }).eq("is_active", true),
-    supabase.from("permissions").select("id", { count: "exact", head: true }).eq("is_active", true),
-    supabase.from("staff").select("id, role_id, team_id"),
-    supabase
+    client.from("roles").select("id", { count: "exact", head: true }).eq("is_active", true),
+    client.from("permissions").select("id", { count: "exact", head: true }).eq("is_active", true),
+    client.from("staff").select("id, role_id, team_id"),
+    client
       .from("activity_logs")
       .select("id", { count: "exact", head: true })
       .in("entity", AUDITED_ENTITIES)
@@ -321,8 +365,8 @@ export async function getPermissionDashboardKpis(): Promise<PermissionDashboardK
 // business logic beyond what's already in the repository.
 // ============================================================
 
-export async function getTeams(): Promise<TeamSummary[]> {
-  return repo.getStaffTeams();
+export async function getTeams(client?: SupabaseClient): Promise<TeamSummary[]> {
+  return repo.getStaffTeams(client);
 }
 
 export { getRoles, getRoleById, getPermissions } from "./permissionCenter.repository";

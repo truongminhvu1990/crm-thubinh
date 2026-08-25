@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermissionCenterAccess } from "@/lib/permission/serverAuth";
+import { requirePermissionCenterAccess, createRequestClient } from "@/lib/permission/serverAuth";
 import { updateRole, setRoleActive, getRoleById } from "@/lib/permission/permissionCenter.service";
 import { handlePermissionServiceError } from "../../_errors";
 
@@ -11,7 +11,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const { id } = await params;
   try {
-    const role = await getRoleById(id);
+    const role = await getRoleById(id, createRequestClient(request));
     if (!role) return NextResponse.json({ error: "Không tìm thấy vai trò" }, { status: 404 });
     return NextResponse.json(role);
   } catch (error) {
@@ -28,14 +28,20 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   try {
     const body = await request.json();
+    const client = createRequestClient(request);
     let role;
     if (typeof body.is_active === "boolean") {
-      role = await setRoleActive(auth.staff.id, id, body.is_active);
+      role = await setRoleActive(auth.staff.id, id, body.is_active, client);
     } else {
-      role = await updateRole(auth.staff.id, id, {
-        name: body.name?.trim(),
-        description: body.description?.trim(),
-      });
+      role = await updateRole(
+        auth.staff.id,
+        id,
+        {
+          name: body.name?.trim(),
+          description: body.description?.trim(),
+        },
+        client
+      );
     }
     return NextResponse.json(role);
   } catch (error) {

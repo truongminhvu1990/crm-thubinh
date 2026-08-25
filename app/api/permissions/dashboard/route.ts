@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermissionCenterAccess } from "@/lib/permission/serverAuth";
+import { requirePermissionCenterAccess, createRequestClient } from "@/lib/permission/serverAuth";
 import { getPermissionDashboardKpis } from "@/lib/permission/permissionCenter.service";
 import { handlePermissionServiceError } from "../_errors";
 
@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   if ("error" in auth) return auth.error;
 
   try {
-    const kpis = await getPermissionDashboardKpis();
+    const kpis = await getPermissionDashboardKpis(createRequestClient(request));
     return NextResponse.json(kpis);
   } catch (error) {
     return handlePermissionServiceError(error);
