@@ -83,7 +83,12 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
   // Phase 2G (M1-B) — only set when closing (-> Completed) would leave
   // Pending/In Progress tasks behind; holds the count so the confirmation
   // modal can state it explicitly. Never itself mutates any task.
-  const [completionWarning, setCompletionWarning] = useState<{ next: SeedingCampaign["status"]; unfinishedCount: number } | null>(null);
+  // Phase 2H (H1) — unfinishedCount is null specifically when progress
+  // could not be determined (never a fabricated number) — the modal
+  // renders distinct, honest copy for that case instead of a count.
+  const [completionWarning, setCompletionWarning] = useState<{ next: SeedingCampaign["status"]; unfinishedCount: number | null } | null>(
+    null
+  );
   const [targets, setTargets] = useState<SeedingCampaignTargetWithPost[]>([]);
   const [suggestions, setSuggestions] = useState<SeedingCommentSuggestion[]>([]);
   const [tasks, setTasks] = useState<SeedingTask[]>([]);
@@ -332,9 +337,22 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
    * every other transition (including the M1-A reopen, Completed ->
    * Active) proceeds immediately, unchanged from before. Purely a UI
    * checkpoint — no task is touched here or anywhere in
-   * handleChangeCampaignStatus regardless of which path is taken. */
+   * handleChangeCampaignStatus regardless of which path is taken.
+   *
+   * Phase 2H (H1) — fail-safe, not fail-open: if `progress` never loaded
+   * (its fetch in loadAll() only calls setProgress on progressRes.ok, so a
+   * transient failure of just that one request leaves it null with no
+   * retry), this used to fall straight through to immediate completion
+   * with zero warning regardless of real unfinished-task count. Now an
+   * unknown count is treated the same as "don't skip the confirmation" —
+   * the modal shows honest "could not determine" copy instead of ever
+   * fabricating a number. */
   function handleStatusButtonClick(next: SeedingCampaign["status"]) {
-    if (next === "Completed" && progress) {
+    if (next === "Completed") {
+      if (!progress) {
+        setCompletionWarning({ next, unfinishedCount: null });
+        return;
+      }
       const unfinishedCount = progress.pending + progress.inProgress;
       if (unfinishedCount > 0) {
         setCompletionWarning({ next, unfinishedCount });
@@ -692,11 +710,19 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
           <div className="space-y-4">
             <div className="flex items-start gap-2 text-sm text-foreground">
               <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <p>
-                Campaign này còn <strong>{completionWarning.unfinishedCount} task</strong> chưa hoàn thành (chờ xử lý hoặc đang thực
-                hiện). Trạng thái các task này sẽ giữ nguyên — không tự động đánh dấu Hoàn thành/Thất bại/Bỏ qua. Bạn có chắc muốn
-                chuyển campaign sang {seedingCampaignStatusLabel(completionWarning.next)}?
-              </p>
+              {completionWarning.unfinishedCount === null ? (
+                <p>
+                  Không thể xác định số task chưa hoàn tất vào lúc này. Trạng thái các task sẽ giữ nguyên — không tự động đánh dấu
+                  Hoàn thành/Thất bại/Bỏ qua. Bạn vẫn muốn chuyển Campaign sang {seedingCampaignStatusLabel(completionWarning.next)}{" "}
+                  không?
+                </p>
+              ) : (
+                <p>
+                  Campaign này còn <strong>{completionWarning.unfinishedCount} task</strong> chưa hoàn thành (chờ xử lý hoặc đang thực
+                  hiện). Trạng thái các task này sẽ giữ nguyên — không tự động đánh dấu Hoàn thành/Thất bại/Bỏ qua. Bạn có chắc muốn
+                  chuyển campaign sang {seedingCampaignStatusLabel(completionWarning.next)}?
+                </p>
+              )}
             </div>
             <div className="flex justify-end gap-3">
               <Button variant="secondary" onClick={() => setCompletionWarning(null)}>
