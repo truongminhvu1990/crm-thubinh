@@ -1,0 +1,133 @@
+-- 2026082302_bug002_phase1b_rls_anon_lockdown.sql
+--
+-- BUG-002 Phase 1B — RLS anon/public policy removal for 3 tables:
+-- permission_sensitive_fields, consignments, consignment_financial_records.
+--
+-- Prerequisite code fixes (client propagation) landed and were validated
+-- end-to-end against Dev before this migration was prepared:
+--   - lib/orders/order.service.ts: completeOrder() now threads auditClient
+--     into createConsignmentFinancialRecordsForOrder(), which was already
+--     threading-capable internally (INSERT + markConsignmentSold()).
+--   - lib/permission/permissionCenter.repository.ts /
+--     permissionCenter.service.ts / app/api/permissions/sensitive-fields/
+--     route.ts: getSensitiveFieldPairings/pairSensitiveField/
+--     unpairSensitiveField/getVisibleSensitiveFields/
+--     toggleSensitiveFieldPairing now accept and correctly thread a
+--     request-scoped authenticated client.
+--
+-- PROVENANCE NOTE (added after forensic reconciliation, 2026-08-26):
+-- a fresh, read-only Production audit found all 3 tables below already
+-- authenticated-only, with no anon/public policy remaining, at the time
+-- this repository was checked — independent of whether this file's own
+-- statements had ever executed. The two subsections below document, per
+-- table, how much of that already-secure state this file can and cannot
+-- take credit for. See each table's own note for the exact distinction;
+-- this migration is retained as a repository/audit reconciliation
+-- record, not as proof that its own execution is what secured every
+-- table it lists.
+--
+-- Drops only anon/public policies; every `authenticated` policy already
+-- in place is left untouched. No schema change, no function change, no
+-- data operation, no permission change outside these targeted RLS
+-- policies. Does not touch activity_logs or any other BUG-002 table
+-- outside this batch's 3 tables.
+--
+-- Every statement is idempotent (`DROP POLICY IF EXISTS`) — safe to run
+-- against a database that has already had these policies removed, and
+-- safe to run against a database where they were never created under
+-- these exact names to begin with.
+
+-- ============================================================
+-- 1. permission_sensitive_fields
+-- ============================================================
+-- Note: the anon-equivalent policy here targets role `public` (the
+-- broadest possible grant — applies to every role, anon included), not
+-- specifically `anon` — matching its exact current Production definition.
+--
+-- Provenance: PROVEN accurate. This table's live Production policy is
+-- still named "Allow full access to authenticated" — the original name
+-- from its creation — with no anon/public policy remaining. This
+-- statement's DROP target and KEEP assumption both match the verified
+-- live state exactly.
+DROP POLICY IF EXISTS "Allow full access to anon" ON public.permission_sensitive_fields;
+-- KEEP: "Allow full access to authenticated"
+
+-- ============================================================
+-- 2. consignments
+-- ============================================================
+-- Provenance: this migration is NOT the original mechanism that secured
+-- this table. Production's live authenticated-only policy is named
+-- "consignments_authenticated_full_access" — not "Allow full access to
+-- authenticated" (the name this table was created with in
+-- 2026081801_consignment_module.sql). A forensic audit (2026-08-26)
+-- found:
+--   - PROVEN: no migration file anywhere in this repository's history
+--     (any branch) ever creates a policy with this exact name, and no
+--     supabase_migrations.schema_migrations entry explains it either.
+--   - STRONGLY SUPPORTED (direct textual evidence, not inference): a
+--     separate, earlier change referred to as "INV-015" already closed
+--     this table's anon access before 2026-08-22 — cited by name in the
+--     comments of the real, committed migration
+--     2026082203_products_batches_rls_hardening.sql ("...already closed
+--     on inventory_audit (INV-014) and Consignment (INV-015)..."), and
+--     corroborated by that same migration independently using the
+--     identical `<table>_authenticated_full_access` naming convention
+--     for product_batches.
+--   - UNKNOWN: the exact historical SQL that created
+--     "consignments_authenticated_full_access" — no file or migration
+--     record of it exists; it was applied outside this repository's
+--     tracked migration history (direct SQL or dashboard), consistent
+--     with two other confirmed instances of the same pattern in this
+--     project (2026082214_products_rogue_policy_cleanup.sql and
+--     2026082301_bug002_phase1a_rls_anon_lockdown.sql).
+-- This DROP statement targets the original policy name for completeness
+-- and safety only; on current Production it is a no-op, since that
+-- named policy no longer exists (INV-015 already removed/replaced it by
+-- an unrecorded mechanism before this file was authored).
+DROP POLICY IF EXISTS "Allow full access to anon" ON public.consignments;
+-- Live authenticated policy (NOT created by this migration):
+-- "consignments_authenticated_full_access"
+
+-- ============================================================
+-- 3. consignment_financial_records
+-- ============================================================
+-- Provenance: same distinction as consignments above. Production's live
+-- authenticated-only policy is named
+-- "consignment_financial_records_authenticated_full_access" — not
+-- "Allow full access to authenticated" (this table's original name from
+-- 2026081802_consignment_financial_record_and_settlement.sql). The same
+-- forensic findings apply: PROVEN no repository migration or
+-- schema_migrations entry created this exact name; STRONGLY SUPPORTED
+-- that the same untracked "INV-015" change (per
+-- 2026082203_products_batches_rls_hardening.sql's own comments) covered
+-- this table alongside consignments; UNKNOWN exact historical SQL. This
+-- statement is a no-op against current Production for the same reason.
+DROP POLICY IF EXISTS "Allow full access to anon" ON public.consignment_financial_records;
+-- Live authenticated policy (NOT created by this migration):
+-- "consignment_financial_records_authenticated_full_access"
+
+-- ============================================================
+-- Rollback
+-- ============================================================
+-- permission_sensitive_fields: re-create the dropped policy verbatim —
+-- this migration's DROP is the actual, sole cause of that policy's
+-- absence, so this is a true rollback:
+-- CREATE POLICY "Allow full access to anon" ON public.permission_sensitive_fields
+--   FOR ALL TO public USING (true) WITH CHECK (true);
+--
+-- consignments / consignment_financial_records: this migration's own
+-- DROP statements are no-ops against current Production (the anon
+-- policy was already absent before this file could act on it — see the
+-- provenance notes above), so there is nothing for this migration's own
+-- execution to roll back on either table. Re-creating their historical
+-- "Allow full access to anon" policies (below, for completeness only)
+-- would reintroduce a security regression this migration never caused
+-- and should not be run as a "rollback" of this file:
+-- CREATE POLICY "Allow full access to anon" ON public.consignments
+--   FOR ALL TO anon USING (true) WITH CHECK (true);
+-- CREATE POLICY "Allow full access to anon" ON public.consignment_financial_records
+--   FOR ALL TO anon USING (true) WITH CHECK (true);
+--
+-- DROP POLICY is metadata-only — no data touched, no schema change — so
+-- rollback (where applicable) is low-risk and near-instant either as a
+-- follow-up migration or an ad-hoc query.
