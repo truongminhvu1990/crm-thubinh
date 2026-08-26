@@ -1,6 +1,7 @@
 import test, { beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { mock } from "node:test";
+import { Staff } from "@/types/staff";
 
 /**
  * Authorization Resolution Client Propagation (Production Incident
@@ -12,7 +13,21 @@ import { mock } from "node:test";
  */
 
 const OWNER_ROLE_ID = "role-owner";
-const OWNER_STAFF = { id: "staff-owner", role: "Owner", role_id: OWNER_ROLE_ID, team_id: null, full_name: "Vũ" };
+// Explicit Pick<Staff, ...> annotation (not inferred): this object is
+// declared once and reused across every test below via the OWNER_STAFF
+// binding, unlike permissionCenter.clientPropagation.test.ts's identical-
+// looking literals, which are written inline at each call site and never
+// hit this - TypeScript widens an object literal's string-valued
+// properties (here, `role: "Owner"`) to `string` at its own declaration
+// site when there's no annotation and no contextual type to narrow
+// against, so the widened type is what every later call site sees.
+const OWNER_STAFF: Pick<Staff, "id" | "role" | "role_id" | "team_id" | "full_name"> = {
+  id: "staff-owner",
+  role: "Owner",
+  role_id: OWNER_ROLE_ID,
+  team_id: null,
+  full_name: "Vũ",
+};
 
 const ROLES = [{ id: OWNER_ROLE_ID, role_key: "Owner", name: "Owner", is_active: true }];
 const ROLE_DATA_SCOPES = [
@@ -149,7 +164,7 @@ test("applyDataScopeWithFallback (revenue/commissions): with the real client, Ow
 
 test("applyActivityLogScope: with the real client, Owner's locked 'all' mapping applies (query unchanged)", async () => {
   const { applyActivityLogScope } = await import("./dataScope");
-  const query = { eq: () => query, in: () => query };
+  const query = { eq: () => query, in: () => query, ilike: () => query };
   const { query: scoped } = await applyActivityLogScope(query, OWNER_STAFF, "staff_id", realClient as never);
   assert.equal(scoped, query);
 });
@@ -163,6 +178,7 @@ test("applyActivityLogScope: with the anon-equivalent client, role resolves null
       return query;
     },
     in: () => query,
+    ilike: () => query,
   };
   await applyActivityLogScope(query, OWNER_STAFF, "staff_id", anonClient as never);
   assert.equal(filteredValue, "00000000-0000-0000-0000-000000000000");
