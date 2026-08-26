@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ImageOff, ExternalLink, ThumbsUp, MessageCircle, Share2, ClipboardList } from "lucide-react";
+import { AlertTriangle, ImageOff, ExternalLink, ThumbsUp, MessageCircle, Share2, ClipboardList, Lock } from "lucide-react";
 import { SeedingTaskWithContext, SeedingTaskStatus, SEEDING_TASK_ALLOWED_TRANSITIONS } from "@/types/seeding";
 import { seedingTaskStatusLabel, seedingTaskActionTypeLabel } from "@/lib/seeding/seeding.constants";
 import Card from "@/components/ui/Card";
@@ -41,6 +41,19 @@ function discoveryStatusWarning(status: string | null) {
   return (
     <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 flex items-center gap-1.5">
       <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {message}
+    </p>
+  );
+}
+
+/** Phase 2G (M1-C) — informational + UI-gating only: closing a campaign
+ * never touches task data (see seedingTask.service.ts), this just tells
+ * the assignee not to expect normal execution to still be tracked here.
+ * A Manager reopening the campaign (Completed -> Active) makes this
+ * disappear on the next load with no other action needed. */
+function campaignClosedNotice() {
+  return (
+    <p className="text-xs text-foreground bg-muted border border-border rounded-lg px-2 py-1.5 flex items-center gap-1.5">
+      <Lock className="w-3.5 h-3.5 shrink-0" /> Campaign này đã đóng (Hoàn thành) — không cần tiếp tục thao tác cho task này.
     </p>
   );
 }
@@ -148,7 +161,8 @@ export default function MySeedingTasksPage() {
       ) : (
         <div className="space-y-3">
           {tasks.map((task) => {
-            const nextActions = SEEDING_TASK_ALLOWED_TRANSITIONS[task.status] ?? [];
+            const campaignClosed = task.campaign_status === "Completed";
+            const nextActions = campaignClosed ? [] : (SEEDING_TASK_ALLOWED_TRANSITIONS[task.status] ?? []);
             return (
               <Card key={task.id}>
                 <div className="flex items-start gap-3">
@@ -175,6 +189,7 @@ export default function MySeedingTasksPage() {
                       </Badge>
                       {taskStatusBadge(task.status)}
                     </div>
+                    {campaignClosed && campaignClosedNotice()}
                     {discoveryStatusWarning(task.target_discovery_status)}
                     {task.action_type === "Comment" && task.comment_text && (
                       <p className="text-sm text-foreground rounded-lg border border-border p-2 whitespace-pre-wrap">

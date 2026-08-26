@@ -26,7 +26,7 @@ export async function getTasksByCampaign(campaignId: string, client: SupabaseCli
 }
 
 interface TaskWithEmbeds {
-  seeding_campaigns: { name: string } | null;
+  seeding_campaigns: { name: string; status: string } | null;
   seeding_campaign_targets: {
     facebook_page_posts: {
       message: string | null;
@@ -57,7 +57,7 @@ export async function getTasksAssignedToStaff(
   const { data, error } = await client
     .from("seeding_tasks")
     .select(
-      "*, seeding_campaigns(name), seeding_campaign_targets(facebook_page_posts(message, permalink_url, full_picture_url, discovery_status))"
+      "*, seeding_campaigns(name, status), seeding_campaign_targets(facebook_page_posts(message, permalink_url, full_picture_url, discovery_status))"
     )
     .eq("assigned_staff_id", staffId)
     .order("scheduled_at", { ascending: true, nullsFirst: false });
@@ -72,6 +72,7 @@ export async function getTasksAssignedToStaff(
     return {
       ...(task as unknown as SeedingTask),
       campaign_name: seeding_campaigns?.name ?? null,
+      campaign_status: (seeding_campaigns?.status as SeedingTaskWithContext["campaign_status"]) ?? null,
       target_message: post?.message ?? null,
       target_permalink_url: post?.permalink_url ?? null,
       target_full_picture_url: post?.full_picture_url ?? null,

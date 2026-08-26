@@ -252,7 +252,7 @@ interface FakeEmbeddedRow {
   comment_text: string | null;
   status: string;
   assigned_staff_id: string;
-  seeding_campaigns: { name: string } | null;
+  seeding_campaigns: { name: string; status?: string } | null;
   seeding_campaign_targets: {
     facebook_page_posts: {
       message: string | null;
@@ -308,6 +308,66 @@ test("getTasksAssignedToStaff: returns campaign name context", async () => {
 
   const [task] = await getTasksAssignedToStaff("staff-A", client);
   assert.equal(task.campaign_name, "Chiến dịch livestream 20/08");
+});
+
+test("getTasksAssignedToStaff: Phase 2G — surfaces campaign_status='Completed' so My Tasks can indicate a closed campaign", async () => {
+  const { getTasksAssignedToStaff } = await import("./seedingTask.service");
+  const { client } = makeAssignedClient([
+    {
+      id: "t1",
+      campaign_id: "c1",
+      campaign_target_id: "tg1",
+      action_type: "Like",
+      comment_text: null,
+      status: "Pending",
+      assigned_staff_id: "staff-A",
+      seeding_campaigns: { name: "Campaign đã đóng", status: "Completed" },
+      seeding_campaign_targets: { facebook_page_posts: { message: "Hello", permalink_url: null, full_picture_url: null, discovery_status: "Active" } },
+    },
+  ]);
+
+  const [task] = await getTasksAssignedToStaff("staff-A", client);
+  assert.equal(task.campaign_status, "Completed");
+});
+
+test("getTasksAssignedToStaff: campaign_status is 'Active' for an ongoing campaign's task", async () => {
+  const { getTasksAssignedToStaff } = await import("./seedingTask.service");
+  const { client } = makeAssignedClient([
+    {
+      id: "t1",
+      campaign_id: "c1",
+      campaign_target_id: "tg1",
+      action_type: "Like",
+      comment_text: null,
+      status: "Pending",
+      assigned_staff_id: "staff-A",
+      seeding_campaigns: { name: "Campaign đang chạy", status: "Active" },
+      seeding_campaign_targets: { facebook_page_posts: { message: "Hello", permalink_url: null, full_picture_url: null, discovery_status: "Active" } },
+    },
+  ]);
+
+  const [task] = await getTasksAssignedToStaff("staff-A", client);
+  assert.equal(task.campaign_status, "Active");
+});
+
+test("getTasksAssignedToStaff: a legacy task with no resolvable campaign gets campaign_status null, never crashes", async () => {
+  const { getTasksAssignedToStaff } = await import("./seedingTask.service");
+  const { client } = makeAssignedClient([
+    {
+      id: "t1",
+      campaign_id: "c1",
+      campaign_target_id: null,
+      action_type: "Like",
+      comment_text: null,
+      status: "Pending",
+      assigned_staff_id: "staff-A",
+      seeding_campaigns: null,
+      seeding_campaign_targets: null,
+    },
+  ]);
+
+  const [task] = await getTasksAssignedToStaff("staff-A", client);
+  assert.equal(task.campaign_status, null);
 });
 
 test("getTasksAssignedToStaff: returns target/post context (message, permalink, thumbnail)", async () => {

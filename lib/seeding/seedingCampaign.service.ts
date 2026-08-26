@@ -1,9 +1,10 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
-import { SeedingCampaign, CreateSeedingCampaignInput, UpdateSeedingCampaignInput } from "@/types/seeding";
+import { SeedingCampaign, CreateSeedingCampaignInput, UpdateSeedingCampaignInput, SEEDING_CAMPAIGN_ALLOWED_TRANSITIONS } from "@/types/seeding";
 import { logActivity } from "@/lib/activityLog.service";
 import { getPageByFacebookPageId, getDecryptedPageAccessToken, isReconnectRequiredError, markPageReconnectRequired } from "@/lib/facebookTools/facebookPage.service";
 import { getPostContent } from "@/lib/facebookTools/facebookGraphClient";
+import { SeedingValidationError } from "./seeding.errors";
 
 const WRITABLE_FIELDS: (keyof UpdateSeedingCampaignInput)[] = ["name", "objective", "status", "post_content_snapshot"];
 
@@ -97,12 +98,32 @@ export async function createCampaign(
   return data as SeedingCampaign;
 }
 
+/** Phase 2G (M2) — a status change is validated against
+ * SEEDING_CAMPAIGN_ALLOWED_TRANSITIONS before the write, the same
+ * fetch-current/check-allowed/reject shape already established by
+ * seedingTask.service.ts's updateTaskStatus — no new validation engine.
+ * Only triggers when `changes.status` is present and actually differs from
+ * the current value, so this stays a no-op for every other field edit
+ * (name/objective/post_content_snapshot) and for an idempotent resend of
+ * the current status. A direct API call cannot bypass this by skipping
+ * the UI — the check lives here, not in the page component. */
 export async function updateCampaign(
   id: string,
   changes: UpdateSeedingCampaignInput,
   actorStaffId: string | null,
   client: SupabaseClient = supabase
 ): Promise<SeedingCampaign> {
+  if (changes.status !== undefined) {
+    const current = await getCampaignById(id, client);
+    if (!current) throw new Error("Seeding campaign not found");
+    if (changes.status !== current.status) {
+      const allowed = SEEDING_CAMPAIGN_ALLOWED_TRANSITIONS[current.status] ?? [];
+      if (!allowed.includes(changes.status)) {
+        throw new SeedingValidationError(`Invalid campaign status transition: ${current.status} -> ${changes.status}`);
+      }
+    }
+  }
+
   const { data, error } = await client
     .from("seeding_campaigns")
     .update(pickWritableFields(changes))

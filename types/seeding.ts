@@ -9,6 +9,19 @@
 
 export type SeedingCampaignStatus = "Draft" | "Active" | "Completed";
 
+/** Phase 2G (M2) — server-enforced lifecycle, the single source of truth
+ * for both the API layer (seedingCampaign.service.ts's updateCampaign) and
+ * the UI (campaign detail page imports this directly, same convention as
+ * SEEDING_TASK_ALLOWED_TRANSITIONS below — no separate client-side copy
+ * that could silently drift out of sync with the server). Completed ->
+ * Active (reopen) is the one addition over the pre-2G lifecycle; Draft and
+ * Active's own allowed transitions are unchanged. */
+export const SEEDING_CAMPAIGN_ALLOWED_TRANSITIONS: Record<SeedingCampaignStatus, SeedingCampaignStatus[]> = {
+  Draft: ["Active"],
+  Active: ["Completed"],
+  Completed: ["Active"],
+};
+
 /** Free text at the DB layer (no CHECK constraint) — this union documents
  * the starting set, same convention as PartnerType/PartnerStatus. */
 export type SeedingCampaignObjective = "Tăng tương tác" | "Tạo thảo luận" | "Kéo inbox";
@@ -185,6 +198,12 @@ export interface UpdateSeedingTaskStatusInput {
  * render gracefully, never crash. */
 export interface SeedingTaskWithContext extends SeedingTask {
   campaign_name: string | null;
+  /** Phase 2G (M1-C) — null only for a legacy task with no resolvable
+   * campaign context (same nullability convention as campaign_name).
+   * My Tasks uses this to indicate a closed campaign and withhold the
+   * normal execution actions — informational/gating in the UI only, never
+   * used to alter task data. */
+  campaign_status: SeedingCampaignStatus | null;
   target_message: string | null;
   target_permalink_url: string | null;
   target_full_picture_url: string | null;

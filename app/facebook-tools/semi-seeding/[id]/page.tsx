@@ -14,6 +14,7 @@ import {
   SEEDING_COMMENT_CATEGORY_LABELS,
   SEEDING_TASK_ALLOWED_TRANSITIONS,
   SEEDING_TASK_EVIDENCE_EXCEPTION_RESULTS,
+  SEEDING_CAMPAIGN_ALLOWED_TRANSITIONS,
 } from "@/types/seeding";
 import { seedingCampaignStatusLabel, seedingTaskStatusLabel, seedingTaskActionTypeLabel } from "@/lib/seeding/seeding.constants";
 import { useStaffOptions } from "@/lib/hooks/useStaffOptions";
@@ -32,18 +33,6 @@ function taskStatusBadge(status: SeedingTaskStatus) {
   if (status === "Skipped" || status === "Cancelled") return <Badge variant="muted">{label}</Badge>;
   return <Badge variant="warning">{label}</Badge>;
 }
-
-/** Campaign status control (Phase 2D) — the two arrows PO locked, nothing
- * else: Draft -> Active, Active -> Completed. Completed is terminal.
- * Manual only — this page never auto-transitions a campaign; a Manager
- * clicks the button. Kept local to this page (not exported/shared) since
- * PO's instruction was "không thêm campaign state mới," not a new
- * service-layer state machine — updateCampaign() itself is unchanged. */
-const CAMPAIGN_STATUS_TRANSITIONS: Record<SeedingCampaign["status"], SeedingCampaign["status"][]> = {
-  Draft: ["Active"],
-  Active: ["Completed"],
-  Completed: [],
-};
 
 /** Statuses that ask for a reason before committing (Phase 2E) — same
  * result_note field/API every other status already writes to (with
@@ -91,6 +80,10 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
 
   const [campaign, setCampaign] = useState<SeedingCampaign | null>(null);
   const [isChangingCampaignStatus, setIsChangingCampaignStatus] = useState(false);
+  // Phase 2G (M1-B) — only set when closing (-> Completed) would leave
+  // Pending/In Progress tasks behind; holds the count so the confirmation
+  // modal can state it explicitly. Never itself mutates any task.
+  const [completionWarning, setCompletionWarning] = useState<{ next: SeedingCampaign["status"]; unfinishedCount: number } | null>(null);
   const [targets, setTargets] = useState<SeedingCampaignTargetWithPost[]>([]);
   const [suggestions, setSuggestions] = useState<SeedingCommentSuggestion[]>([]);
   const [tasks, setTasks] = useState<SeedingTask[]>([]);
@@ -334,6 +327,29 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
     }
   }
 
+  /** Phase 2G (M1-B) — gates the "-> Completed" transition behind an
+   * explicit confirmation whenever Pending/In Progress tasks still exist;
+   * every other transition (including the M1-A reopen, Completed ->
+   * Active) proceeds immediately, unchanged from before. Purely a UI
+   * checkpoint — no task is touched here or anywhere in
+   * handleChangeCampaignStatus regardless of which path is taken. */
+  function handleStatusButtonClick(next: SeedingCampaign["status"]) {
+    if (next === "Completed" && progress) {
+      const unfinishedCount = progress.pending + progress.inProgress;
+      if (unfinishedCount > 0) {
+        setCompletionWarning({ next, unfinishedCount });
+        return;
+      }
+    }
+    handleChangeCampaignStatus(next);
+  }
+
+  async function confirmCompletionWarning() {
+    if (!completionWarning) return;
+    await handleChangeCampaignStatus(completionWarning.next);
+    setCompletionWarning(null);
+  }
+
   if (forbidden) {
     return (
       <div className="p-6">
@@ -374,13 +390,13 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
           </div>
         </div>
         <div className="flex gap-2">
-          {(CAMPAIGN_STATUS_TRANSITIONS[campaign.status] ?? []).map((next) => (
+          {(SEEDING_CAMPAIGN_ALLOWED_TRANSITIONS[campaign.status] ?? []).map((next) => (
             <Button
               key={next}
               size="sm"
               variant="secondary"
               isLoading={isChangingCampaignStatus}
-              onClick={() => handleChangeCampaignStatus(next)}
+              onClick={() => handleStatusButtonClick(next)}
             >
               Chuyển sang {seedingCampaignStatusLabel(next)}
             </Button>
@@ -666,6 +682,29 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                 Hủy
               </Button>
               <Button onClick={confirmPendingTaskChange}>Xác nhận {seedingTaskStatusLabel(pendingTaskChange.status)}</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {completionWarning && (
+        <Modal open={!!completionWarning} title="Xác nhận hoàn thành campaign" onClose={() => setCompletionWarning(null)}>
+          <div className="space-y-4">
+            <div className="flex items-start gap-2 text-sm text-foreground">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <p>
+                Campaign này còn <strong>{completionWarning.unfinishedCount} task</strong> chưa hoàn thành (chờ xử lý hoặc đang thực
+                hiện). Trạng thái các task này sẽ giữ nguyên — không tự động đánh dấu Hoàn thành/Thất bại/Bỏ qua. Bạn có chắc muốn
+                chuyển campaign sang {seedingCampaignStatusLabel(completionWarning.next)}?
+              </p>
+            </div>
+            <div className="flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setCompletionWarning(null)}>
+                Hủy
+              </Button>
+              <Button isLoading={isChangingCampaignStatus} onClick={confirmCompletionWarning}>
+                Xác nhận {seedingCampaignStatusLabel(completionWarning.next)}
+              </Button>
             </div>
           </div>
         </Modal>
