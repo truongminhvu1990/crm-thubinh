@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ImageOff, ExternalLink, ThumbsUp, MessageCircle, Share2, ClipboardList, Lock } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, ImageOff, ExternalLink, ThumbsUp, MessageCircle, Share2, ClipboardList, Lock, PlayCircle } from "lucide-react";
 import { SeedingTaskWithContext, SeedingTaskStatus, SEEDING_TASK_ALLOWED_TRANSITIONS } from "@/types/seeding";
 import { seedingTaskStatusLabel, seedingTaskActionTypeLabel } from "@/lib/seeding/seeding.constants";
 import Card from "@/components/ui/Card";
@@ -153,13 +154,35 @@ export default function MySeedingTasksPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-10">
-          <div className="animate-spin text-2xl">⟳</div>
+        // Phase 2I (I6) — keeps the page header/context visible instead of
+        // an almost-blank screen; states what is loading.
+        <div className="space-y-3">
+          <div className="h-20 bg-muted rounded-lg animate-pulse" />
+          <div className="h-20 bg-muted rounded-lg animate-pulse" />
+          <p className="text-sm text-muted-foreground text-center">Đang tải công việc của bạn...</p>
         </div>
       ) : tasks.length === 0 ? (
         <Card className="text-sm text-muted-foreground text-center py-10">Bạn chưa được giao task nào.</Card>
       ) : (
         <div className="space-y-3">
+          {(() => {
+            // Phase 2I (I4) — the sequential runner only makes sense when
+            // there's actually eligible (Pending/In Progress, non-closed-
+            // campaign) work; hidden otherwise rather than linking to an
+            // empty runner.
+            const eligibleCount = tasks.filter(
+              (t) => t.campaign_status !== "Completed" && (t.status === "Pending" || t.status === "In Progress")
+            ).length;
+            if (eligibleCount === 0) return null;
+            return (
+              <Link
+                href="/facebook-tools/semi-seeding/my-tasks/run"
+                className="flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground px-4 py-2.5 text-sm font-medium hover:bg-primary/90 touch-manipulation"
+              >
+                <PlayCircle className="w-4 h-4" /> Bắt đầu thực hiện tuần tự ({eligibleCount} task)
+              </Link>
+            );
+          })()}
           {tasks.map((task) => {
             const campaignClosed = task.campaign_status === "Completed";
             const nextActions = campaignClosed ? [] : (SEEDING_TASK_ALLOWED_TRANSITIONS[task.status] ?? []);

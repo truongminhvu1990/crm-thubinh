@@ -121,6 +121,26 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
   const [scheduledAt, setScheduledAt] = useState("");
   const [editableComment, setEditableComment] = useState("");
   const [taskError, setTaskError] = useState<string | null>(null);
+  // Phase 2I (I1) — duplicate-click protection: disables the submit button
+  // and blocks re-entrant calls while a create request is in flight. The
+  // server-side check in createTask/createTaskInternal is the real safety
+  // net; this is the immediate visible feedback the PO specifically asked
+  // for ("Đang tạo...") so a manager never has a reason to click again.
+  const [isSubmittingTask, setIsSubmittingTask] = useState(false);
+
+  // Phase 2I (I2/I3) — bulk Comment task creation across many selected
+  // targets with one shared comment. Independent of the single-target
+  // assigning/creatingSimpleTask flows above — reuses the same
+  // staffOptions/suggestions state, nothing duplicated.
+  const [bulkSelectMode, setBulkSelectMode] = useState(false);
+  const [selectedTargetIds, setSelectedTargetIds] = useState<Set<string>>(new Set());
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkComment, setBulkComment] = useState("");
+  const [bulkAssigneeId, setBulkAssigneeId] = useState("");
+  const [bulkScheduledAt, setBulkScheduledAt] = useState("");
+  const [isSubmittingBulk, setIsSubmittingBulk] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkResultSummary, setBulkResultSummary] = useState<string | null>(null);
 
   // Result note capture (Phase 2E) — Failed/Skipped ask for a reason
   // before the PATCH fires; every other transition stays immediate,
@@ -236,7 +256,12 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
   }
 
   async function submitTask(body: Record<string, unknown>) {
+    // Phase 2I (I1) — ignore a re-entrant call outright (belt-and-suspenders
+    // alongside the button's own disabled state) rather than letting a
+    // second network request fire at all.
+    if (isSubmittingTask) return;
     setTaskError(null);
+    setIsSubmittingTask(true);
     try {
       const res = await fetch("/api/seeding/tasks", {
         method: "POST",
@@ -245,13 +270,18 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Không thể tạo task");
       const task: SeedingTask = await res.json();
-      setTasks((prev) => [...prev, task]);
+      // Dedupe by id: if the server returned an existing non-terminal
+      // duplicate instead of a new row (createTask's own protection), this
+      // never pushes a second visual copy of the same task.
+      setTasks((prev) => (prev.some((t) => t.id === task.id) ? prev : [...prev, task]));
       setAssigning(null);
       setCreatingSimpleTask(null);
       const progressRes = await fetch(`/api/seeding/campaigns/${id}/progress`);
       if (progressRes.ok) setProgress(await progressRes.json());
     } catch (error) {
       setTaskError(error instanceof Error ? error.message : "Không thể tạo task");
+    } finally {
+      setIsSubmittingTask(false);
     }
   }
 
@@ -280,6 +310,89 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       assigned_staff_id: assigneeId || undefined,
       scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
     });
+  }
+
+  // Phase 2I (I2) — bulk target selection, independent of any single-target
+  // modal state above.
+  function toggleBulkSelectMode() {
+    setBulkSelectMode((prev) => !prev);
+    setSelectedTargetIds(new Set());
+  }
+
+  function toggleTargetSelected(targetId: string) {
+    setSelectedTargetIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(targetId)) next.delete(targetId);
+      else next.add(targetId);
+      return next;
+    });
+  }
+
+  function openBulkModal() {
+    setBulkComment("");
+    setBulkAssigneeId("");
+    setBulkScheduledAt("");
+    setBulkError(null);
+    setBulkResultSummary(null);
+    setShowBulkModal(true);
+  }
+
+  /** Phase 2I (I2) — one deliberate action creates one Comment task per
+   * selected target, all sharing the same content/assignee/date. Always
+   * reports an honest per-target outcome (created/skipped/failed) — never
+   * a single fabricated pass/fail, per the module's own requirement. */
+  async function submitBulkCommentTasks() {
+    if (isSubmittingBulk) return;
+    if (!bulkComment.trim()) {
+      setBulkError("Vui lòng nhập nội dung comment");
+      return;
+    }
+    setIsSubmittingBulk(true);
+    setBulkError(null);
+    setBulkResultSummary(null);
+    try {
+      const res = await fetch(`/api/seeding/campaigns/${id}/tasks/bulk-comment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetIds: [...selectedTargetIds],
+          comment_text: bulkComment,
+          assigned_staff_id: bulkAssigneeId || undefined,
+          scheduled_at: bulkScheduledAt ? new Date(bulkScheduledAt).toISOString() : undefined,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Không thể tạo task hàng loạt");
+      const result: {
+        created: { targetId: string; taskId: string }[];
+        skipped: { targetId: string; reason: string }[];
+        failed: { targetId: string; error: string }[];
+      } = await res.json();
+
+      setBulkResultSummary(
+        `Đã tạo ${result.created.length} task` +
+          (result.skipped.length > 0 ? ` · bỏ qua ${result.skipped.length} (đã có task giống hệt)` : "") +
+          (result.failed.length > 0 ? ` · lỗi ${result.failed.length}` : "")
+      );
+
+      // Refresh from the server rather than fabricating the new rows
+      // client-side — the honest source of truth for what actually exists.
+      const [tasksRes, progressRes] = await Promise.all([
+        fetch(`/api/seeding/tasks?campaignId=${id}`),
+        fetch(`/api/seeding/campaigns/${id}/progress`),
+      ]);
+      if (tasksRes.ok) setTasks(await tasksRes.json());
+      if (progressRes.ok) setProgress(await progressRes.json());
+
+      if (result.failed.length === 0) {
+        setShowBulkModal(false);
+        setBulkSelectMode(false);
+        setSelectedTargetIds(new Set());
+      }
+    } catch (error) {
+      setBulkError(error instanceof Error ? error.message : "Không thể tạo task hàng loạt");
+    } finally {
+      setIsSubmittingBulk(false);
+    }
   }
 
   function handleTaskStatusClick(taskId: string, status: SeedingTaskStatus) {
@@ -382,9 +495,25 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
   }
 
   if (isLoading || !campaign) {
+    // Phase 2I (I6) — keeps the page's own shell/context (icon, padding,
+    // card outlines) instead of an almost-blank screen with a tiny
+    // spinner, and states what is loading rather than leaving it to guess.
     return (
-      <div className="p-6">
-        <div className="animate-spin text-2xl">⟳</div>
+      <div className="p-6 space-y-6 max-w-5xl">
+        <div className="flex items-center gap-3">
+          <Sparkles className="w-6 h-6 text-primary/40 animate-pulse" />
+          <div className="space-y-2">
+            <div className="h-5 w-56 bg-muted rounded animate-pulse" />
+            <div className="h-3 w-40 bg-muted rounded animate-pulse" />
+          </div>
+        </div>
+        <Card>
+          <div className="h-16 bg-muted rounded animate-pulse" />
+        </Card>
+        <Card>
+          <div className="h-16 bg-muted rounded animate-pulse" />
+        </Card>
+        <p className="text-sm text-muted-foreground text-center">Đang tải campaign...</p>
       </div>
     );
   }
@@ -513,11 +642,39 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       {targets.length === 0 ? (
         <Card className="text-sm text-muted-foreground">Campaign này chưa có bài viết (target) nào.</Card>
       ) : (
-        targets.map((target) => {
+        <>
+          {/* Phase 2I (I2) — bulk Comment task creation across many
+           * selected targets. Toggling this mode reveals a checkbox on
+           * every target card below; it never affects the single-target
+           * Task Like/Share/Comment buttons on each card. */}
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <Button size="sm" variant="secondary" onClick={toggleBulkSelectMode}>
+              {bulkSelectMode ? "Hủy chọn nhiều bài viết" : "Chọn nhiều bài viết"}
+            </Button>
+            {bulkSelectMode && (
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-sm text-muted-foreground">Đã chọn {selectedTargetIds.size} bài viết</span>
+                <Button size="sm" disabled={selectedTargetIds.size === 0} onClick={openBulkModal}>
+                  Tạo Task Comment hàng loạt
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {targets.map((target) => {
           const targetTasks = tasks.filter((t) => t.campaign_target_id === target.id);
           return (
             <Card key={target.id}>
               <div className="flex items-start gap-3 mb-4">
+                {bulkSelectMode && (
+                  <input
+                    type="checkbox"
+                    className="mt-1.5 w-4 h-4 shrink-0 touch-manipulation"
+                    checked={selectedTargetIds.has(target.id)}
+                    onChange={() => toggleTargetSelected(target.id)}
+                    aria-label="Chọn bài viết này cho task hàng loạt"
+                  />
+                )}
                 {target.full_picture_url ? (
                   <img src={target.full_picture_url} alt="" className="w-16 h-16 rounded-lg object-cover bg-muted shrink-0" />
                 ) : (
@@ -630,7 +787,8 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
               )}
             </Card>
           );
-        })
+          })}
+        </>
       )}
 
       {assigning && (
@@ -644,7 +802,9 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
               <Button variant="secondary" onClick={() => setAssigning(null)}>
                 Hủy
               </Button>
-              <Button onClick={handleCreateCommentTask}>Tạo task</Button>
+              <Button onClick={handleCreateCommentTask} isLoading={isSubmittingTask}>
+                {isSubmittingTask ? "Đang tạo..." : "Tạo task"}
+              </Button>
             </div>
           </div>
         </Modal>
@@ -676,7 +836,68 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
               <Button variant="secondary" onClick={() => setCreatingSimpleTask(null)}>
                 Hủy
               </Button>
-              <Button onClick={handleCreateSimpleTask}>Tạo task</Button>
+              <Button onClick={handleCreateSimpleTask} isLoading={isSubmittingTask}>
+                {isSubmittingTask ? "Đang tạo..." : "Tạo task"}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showBulkModal && (
+        <Modal
+          open={showBulkModal}
+          title={`Tạo Task Comment hàng loạt (${selectedTargetIds.size} bài viết)`}
+          onClose={() => setShowBulkModal(false)}
+          size="xl"
+        >
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Một nội dung comment sẽ được áp dụng cho tất cả {selectedTargetIds.size} bài viết đã chọn — mỗi bài một task Comment
+              riêng, cùng người thực hiện và ngày dự kiến.
+            </p>
+
+            {suggestions.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Chọn từ gợi ý AI:</p>
+                <div className="flex flex-wrap gap-2">
+                  {suggestions.map((s) => (
+                    <Button key={s.id} type="button" size="sm" variant="secondary" onClick={() => setBulkComment(s.content)}>
+                      <Plus className="w-3.5 h-3.5" /> {s.content.slice(0, 24)}
+                      {s.content.length > 24 ? "…" : ""}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <Input
+              label="Nội dung comment (áp dụng cho tất cả bài đã chọn)"
+              value={bulkComment}
+              onChange={(e) => setBulkComment(e.target.value)}
+            />
+            <Select
+              label="Người thực hiện"
+              placeholder="Chưa gán"
+              options={staffOptions}
+              value={bulkAssigneeId}
+              onChange={(e) => setBulkAssigneeId(e.target.value)}
+            />
+            <Input
+              label="Thời gian dự kiến"
+              type="datetime-local"
+              value={bulkScheduledAt}
+              onChange={(e) => setBulkScheduledAt(e.target.value)}
+            />
+            {bulkError && <p className="text-destructive text-sm">{bulkError}</p>}
+            {bulkResultSummary && <p className="text-sm text-foreground">{bulkResultSummary}</p>}
+            <div className="flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setShowBulkModal(false)}>
+                Hủy
+              </Button>
+              <Button onClick={submitBulkCommentTasks} isLoading={isSubmittingBulk} disabled={selectedTargetIds.size === 0}>
+                {isSubmittingBulk ? "Đang tạo..." : `Tạo ${selectedTargetIds.size} task`}
+              </Button>
             </div>
           </div>
         </Modal>

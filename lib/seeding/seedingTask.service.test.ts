@@ -178,6 +178,7 @@ test("createTask: Comment action stores the comment text and derives campaign_id
   const client = makeClient({
     seeding_campaign_targets: [{ data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
     seeding_tasks: [
+      { data: null }, // duplicate-check finds nothing (Phase 2I, I1)
       {
         data: {
           id: "t5",
@@ -209,7 +210,10 @@ test("createTask: Like/Share actions never require (or store) comment text", asy
 
   const client = makeClient({
     seeding_campaign_targets: [{ data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
-    seeding_tasks: [{ data: { id: "t6", campaign_id: "c1", campaign_target_id: "tg1", action_type: "Like", comment_text: null, status: "Pending" } }],
+    seeding_tasks: [
+      { data: null }, // duplicate-check finds nothing (Phase 2I, I1)
+      { data: { id: "t6", campaign_id: "c1", campaign_target_id: "tg1", action_type: "Like", comment_text: null, status: "Pending" } },
+    ],
   });
 
   const result = await createTask({ campaign_target_id: "tg1", action_type: "Like" }, "staff-1", client);
@@ -235,6 +239,434 @@ test("createTask: an invalid action_type is rejected before any write", async ()
     () => createTask({ campaign_target_id: "tg1", action_type: "Poke" as never }, "staff-1", client),
     /Invalid action_type: Poke/
   );
+});
+
+/**
+ * Phase 2I (I1) — server-side duplicate protection: the safety net behind
+ * the UI's own submit-button disable/loading state, for the exact
+ * accidental-double-submission scenario (same target + action + assignee +
+ * content, still non-terminal).
+ */
+
+test("createTask: an identical non-terminal existing task is returned instead of inserting a duplicate row", async () => {
+  const { createTask } = await import("./seedingTask.service");
+
+  const existingTask = {
+    id: "already-exists",
+    campaign_id: "c1",
+    campaign_target_id: "tg1",
+    action_type: "Comment",
+    comment_text: "hàng sẵn sg nha",
+    assigned_staff_id: "staff-1",
+    status: "Pending",
+  };
+  const client = makeClient({
+    seeding_campaign_targets: [{ data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
+    // Only ONE seeding_tasks entry: the duplicate-check call must find this
+    // and return it directly — if the code incorrectly proceeded to a
+    // second (insert) call, the fake client would fall back to this exact
+    // same fixture, which is why the assertion below checks the id
+    // explicitly rather than just "some task was returned".
+    seeding_tasks: [{ data: existingTask }],
+  });
+
+  const result = await createTask(
+    { campaign_target_id: "tg1", action_type: "Comment", comment_text: "hàng sẵn sg nha", assigned_staff_id: "staff-1" },
+    "staff-1",
+    client
+  );
+  assert.equal(result.id, "already-exists");
+});
+
+test("createTask: same target/action but a DIFFERENT assignee is never blocked as a duplicate", async () => {
+  const { createTask } = await import("./seedingTask.service");
+  const client = makeClient({
+    seeding_campaign_targets: [{ data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
+    seeding_tasks: [
+      { data: null }, // the duplicate query is scoped to assigned_staff_id "staff-2", finds nothing
+      { data: { id: "t-new", campaign_id: "c1", campaign_target_id: "tg1", action_type: "Comment", comment_text: "hàng sẵn sg nha", assigned_staff_id: "staff-2", status: "Pending" } },
+    ],
+  });
+
+  const result = await createTask(
+    { campaign_target_id: "tg1", action_type: "Comment", comment_text: "hàng sẵn sg nha", assigned_staff_id: "staff-2" },
+    "staff-1",
+    client
+  );
+  assert.equal(result.id, "t-new");
+});
+
+test("createTask: same target/action/assignee but DIFFERENT comment_text is never blocked as a duplicate", async () => {
+  const { createTask } = await import("./seedingTask.service");
+  const client = makeClient({
+    seeding_campaign_targets: [{ data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
+    seeding_tasks: [
+      { data: null },
+      { data: { id: "t-new2", campaign_id: "c1", campaign_target_id: "tg1", action_type: "Comment", comment_text: "còn hàng không ạ", assigned_staff_id: "staff-1", status: "Pending" } },
+    ],
+  });
+
+  const result = await createTask(
+    { campaign_target_id: "tg1", action_type: "Comment", comment_text: "còn hàng không ạ", assigned_staff_id: "staff-1" },
+    "staff-1",
+    client
+  );
+  assert.equal(result.id, "t-new2");
+});
+
+test("createTask: a TERMINAL existing task (e.g. Done) never blocks a new identical task — re-doing resolved work is legitimate", async () => {
+  const { createTask } = await import("./seedingTask.service");
+  // The duplicate query only ever matches Pending/In Progress rows — a
+  // terminal-status row is never returned by it, simulated here as the
+  // query finding nothing (the fake client can't filter by status itself,
+  // so this asserts the code's own consumption of that null correctly,
+  // exactly like the "no duplicate" tests above).
+  const client = makeClient({
+    seeding_campaign_targets: [{ data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
+    seeding_tasks: [
+      { data: null },
+      { data: { id: "t-redo", campaign_id: "c1", campaign_target_id: "tg1", action_type: "Like", assigned_staff_id: "staff-1", status: "Pending" } },
+    ],
+  });
+
+  const result = await createTask({ campaign_target_id: "tg1", action_type: "Like", assigned_staff_id: "staff-1" }, "staff-1", client);
+  assert.equal(result.id, "t-redo");
+});
+
+/**
+ * Phase 2I (I7a) — scheduled_at joins the duplicate signature: same target/
+ * action/assignee/comment AND same scheduled_at is a duplicate; a
+ * different date is genuinely distinct work, never blocked.
+ */
+
+test("createTask: same target/action/assignee/comment AND the same scheduled_at returns the existing task instead of inserting a duplicate row", async () => {
+  const { createTask } = await import("./seedingTask.service");
+
+  const existingTask = {
+    id: "already-exists-scheduled",
+    campaign_id: "c1",
+    campaign_target_id: "tg1",
+    action_type: "Comment",
+    comment_text: "hàng sẵn sg nha",
+    assigned_staff_id: "staff-1",
+    scheduled_at: "2026-09-01T09:00:00.000Z",
+    status: "Pending",
+  };
+  const client = makeClient({
+    seeding_campaign_targets: [{ data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
+    // Only ONE seeding_tasks entry: the duplicate-check call must find this
+    // and return it directly, exactly like the base (unscheduled) duplicate
+    // test above — now with an explicit scheduled_at on both sides.
+    seeding_tasks: [{ data: existingTask }],
+  });
+
+  const result = await createTask(
+    {
+      campaign_target_id: "tg1",
+      action_type: "Comment",
+      comment_text: "hàng sẵn sg nha",
+      assigned_staff_id: "staff-1",
+      scheduled_at: "2026-09-01T09:00:00.000Z",
+    },
+    "staff-1",
+    client
+  );
+  assert.equal(result.id, "already-exists-scheduled");
+});
+
+test("createTask: same target/action/assignee/comment but a DIFFERENT scheduled_at is never blocked as a duplicate", async () => {
+  const { createTask } = await import("./seedingTask.service");
+  const client = makeClient({
+    seeding_campaign_targets: [{ data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
+    seeding_tasks: [
+      { data: null }, // the duplicate query is scoped to this different scheduled_at, finds nothing
+      {
+        data: {
+          id: "t-new-date",
+          campaign_id: "c1",
+          campaign_target_id: "tg1",
+          action_type: "Comment",
+          comment_text: "hàng sẵn sg nha",
+          assigned_staff_id: "staff-1",
+          scheduled_at: "2026-09-08T09:00:00.000Z",
+          status: "Pending",
+        },
+      },
+    ],
+  });
+
+  const result = await createTask(
+    {
+      campaign_target_id: "tg1",
+      action_type: "Comment",
+      comment_text: "hàng sẵn sg nha",
+      assigned_staff_id: "staff-1",
+      scheduled_at: "2026-09-08T09:00:00.000Z",
+    },
+    "staff-1",
+    client
+  );
+  assert.equal(result.id, "t-new-date");
+});
+
+test("createTask: two otherwise-identical tasks with no scheduled_at (both null) are treated as duplicates — null matches null", async () => {
+  const { createTask } = await import("./seedingTask.service");
+  const existingTask = {
+    id: "already-exists-unscheduled",
+    campaign_id: "c1",
+    campaign_target_id: "tg1",
+    action_type: "Comment",
+    comment_text: "hàng sẵn sg nha",
+    assigned_staff_id: "staff-1",
+    scheduled_at: null,
+    status: "Pending",
+  };
+  const client = makeClient({
+    seeding_campaign_targets: [{ data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
+    seeding_tasks: [{ data: existingTask }],
+  });
+
+  // No scheduled_at provided at all — must take the same IS NULL branch
+  // that finds this existing, also-unscheduled, task.
+  const result = await createTask(
+    { campaign_target_id: "tg1", action_type: "Comment", comment_text: "hàng sẵn sg nha", assigned_staff_id: "staff-1" },
+    "staff-1",
+    client
+  );
+  assert.equal(result.id, "already-exists-unscheduled");
+});
+
+test("createTask: an omitted scheduled_at is scoped to IS NULL — it is never matched by (or blocked by) a task that has a real scheduled_at", async () => {
+  const { createTask } = await import("./seedingTask.service");
+  const client = makeClient({
+    seeding_campaign_targets: [{ data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
+    seeding_tasks: [
+      // The duplicate query for this call is scoped to scheduled_at IS
+      // NULL — a task that actually has a scheduled_at set lives outside
+      // that scope entirely, so the query correctly finds nothing here.
+      { data: null },
+      {
+        data: {
+          id: "t-new-unscheduled",
+          campaign_id: "c1",
+          campaign_target_id: "tg1",
+          action_type: "Comment",
+          comment_text: "hàng sẵn sg nha",
+          assigned_staff_id: "staff-1",
+          scheduled_at: null,
+          status: "Pending",
+        },
+      },
+    ],
+  });
+
+  const result = await createTask(
+    { campaign_target_id: "tg1", action_type: "Comment", comment_text: "hàng sẵn sg nha", assigned_staff_id: "staff-1" },
+    "staff-1",
+    client
+  );
+  assert.equal(result.id, "t-new-unscheduled");
+});
+
+/**
+ * Phase 2I (I2) — bulk Comment task creation across many selected targets
+ * with one shared comment/assignee/date, reusing createTask's own
+ * validation/duplicate-protection per target via createTaskInternal.
+ */
+
+test("createBulkCommentTasks: creates one task per selected target with the same content/assignee/date", async () => {
+  const { createBulkCommentTasks } = await import("./seedingTask.service");
+
+  const client = makeClient({
+    // 1st call: bulk campaign-ownership validity check (both targets valid).
+    // 2nd/3rd calls: per-target single lookups inside createTaskInternal.
+    seeding_campaign_targets: [
+      { data: [{ id: "tg1" }, { id: "tg2" }] },
+      { data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } },
+      { data: { id: "tg2", campaign_id: "c1", facebook_post_id: "post2" } },
+    ],
+    // Interleaved per target: duplicate-check (null) then insert.
+    seeding_tasks: [
+      { data: null },
+      { data: { id: "bulk-t1", campaign_id: "c1", campaign_target_id: "tg1", action_type: "Comment", comment_text: "hàng sẵn sg nha", assigned_staff_id: "staff-1", status: "Pending" } },
+      { data: null },
+      { data: { id: "bulk-t2", campaign_id: "c1", campaign_target_id: "tg2", action_type: "Comment", comment_text: "hàng sẵn sg nha", assigned_staff_id: "staff-1", status: "Pending" } },
+    ],
+  });
+
+  const result = await createBulkCommentTasks(
+    "c1",
+    { targetIds: ["tg1", "tg2"], comment_text: "hàng sẵn sg nha", assigned_staff_id: "staff-1" },
+    "manager-1",
+    client
+  );
+
+  assert.equal(result.created.length, 2);
+  assert.equal(result.skipped.length, 0);
+  assert.equal(result.failed.length, 0);
+  assert.deepEqual(
+    result.created.map((c) => c.targetId).sort(),
+    ["tg1", "tg2"]
+  );
+});
+
+test("createBulkCommentTasks: a target id that does not belong to this campaign is reported as failed, never silently included", async () => {
+  const { createBulkCommentTasks } = await import("./seedingTask.service");
+
+  const client = makeClient({
+    // Only tg1 belongs to campaign c1 — tg-other does not come back from
+    // the bulk validity check at all.
+    seeding_campaign_targets: [{ data: [{ id: "tg1" }] }, { data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
+    seeding_tasks: [
+      { data: null },
+      { data: { id: "bulk-t1", campaign_id: "c1", campaign_target_id: "tg1", action_type: "Comment", comment_text: "x", assigned_staff_id: "staff-1", status: "Pending" } },
+    ],
+  });
+
+  const result = await createBulkCommentTasks(
+    "c1",
+    { targetIds: ["tg1", "tg-other"], comment_text: "x", assigned_staff_id: "staff-1" },
+    "manager-1",
+    client
+  );
+
+  assert.equal(result.created.length, 1);
+  assert.equal(result.failed.length, 1);
+  assert.equal(result.failed[0].targetId, "tg-other");
+});
+
+test("createBulkCommentTasks: rejects an empty target selection before any write", async () => {
+  const { createBulkCommentTasks } = await import("./seedingTask.service");
+  const client = makeClient({});
+  await assert.rejects(
+    () => createBulkCommentTasks("c1", { targetIds: [], comment_text: "x" }, "manager-1", client),
+    /At least one target must be selected/
+  );
+});
+
+test("createBulkCommentTasks: rejects an empty/missing comment_text before any write", async () => {
+  const { createBulkCommentTasks } = await import("./seedingTask.service");
+  const client = makeClient({});
+  await assert.rejects(
+    () => createBulkCommentTasks("c1", { targetIds: ["tg1"], comment_text: "  " }, "manager-1", client),
+    /comment_text is required/
+  );
+});
+
+/**
+ * Phase 2I (I7b) — a per-target failure must never leak a raw internal/
+ * driver error message through failed[].error. Only SeedingValidationError
+ * (the module's own established "safe to show the user" type, the same
+ * rule handleSeedingError already applies at the route level) passes its
+ * message through; everything else is sanitized to one generic message.
+ */
+
+test("createBulkCommentTasks: a known-safe SeedingValidationError from a per-target attempt is preserved in failed[].error", async () => {
+  const { createBulkCommentTasks } = await import("./seedingTask.service");
+  const { SeedingValidationError } = await import("./seeding.errors");
+
+  const client = makeClient({
+    seeding_campaign_targets: [{ data: [{ id: "tg1" }] }, { data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
+    seeding_tasks: [
+      // Simulates a SeedingValidationError surfacing from createTaskInternal
+      // for this target — regardless of which internal step produces it,
+      // this is always the module's own safe-to-show-the-user error type.
+      { data: null, error: new SeedingValidationError("Nội dung comment không hợp lệ") },
+    ],
+  });
+
+  const result = await createBulkCommentTasks(
+    "c1",
+    { targetIds: ["tg1"], comment_text: "x", assigned_staff_id: "staff-1" },
+    "manager-1",
+    client
+  );
+
+  assert.equal(result.created.length, 0);
+  assert.equal(result.failed.length, 1);
+  assert.equal(result.failed[0].error, "Nội dung comment không hợp lệ");
+});
+
+test("createBulkCommentTasks: an unknown Error with an internal-looking message never leaks that message in failed[].error", async () => {
+  const { createBulkCommentTasks } = await import("./seedingTask.service");
+
+  const client = makeClient({
+    seeding_campaign_targets: [{ data: [{ id: "tg1" }] }, { data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
+    seeding_tasks: [
+      // Simulates a raw DB/driver-style failure surfacing from
+      // createTaskInternal — must never reach the client verbatim.
+      { data: null, error: new Error('duplicate key value violates unique constraint "seeding_tasks_pkey" on relation "seeding_tasks"') },
+    ],
+  });
+
+  const result = await createBulkCommentTasks(
+    "c1",
+    { targetIds: ["tg1"], comment_text: "x", assigned_staff_id: "staff-1" },
+    "manager-1",
+    client
+  );
+
+  assert.equal(result.failed.length, 1);
+  assert.equal(result.failed[0].error, "Không thể tạo task cho bài viết này");
+  assert.ok(!result.failed[0].error.includes("constraint"), "must never leak the raw driver message");
+  assert.ok(!result.failed[0].error.includes("relation"), "must never leak schema/table internals");
+});
+
+test("createBulkCommentTasks: created/skipped/failed counts stay honest even when a failure's message is sanitized", async () => {
+  const { createBulkCommentTasks } = await import("./seedingTask.service");
+
+  const client = makeClient({
+    seeding_campaign_targets: [
+      { data: [{ id: "tg1" }, { id: "tg2" }, { id: "tg3" }] },
+      { data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } },
+      { data: { id: "tg2", campaign_id: "c1", facebook_post_id: "post2" } },
+      { data: { id: "tg3", campaign_id: "c1", facebook_post_id: "post3" } },
+    ],
+    seeding_tasks: [
+      // tg1: duplicate-check finds nothing, insert succeeds -> created.
+      { data: null },
+      {
+        data: {
+          id: "bulk-t1",
+          campaign_id: "c1",
+          campaign_target_id: "tg1",
+          action_type: "Comment",
+          comment_text: "x",
+          assigned_staff_id: "staff-1",
+          status: "Pending",
+        },
+      },
+      // tg2: duplicate-check finds an existing row -> skipped.
+      {
+        data: {
+          id: "existing-t2",
+          campaign_id: "c1",
+          campaign_target_id: "tg2",
+          action_type: "Comment",
+          comment_text: "x",
+          assigned_staff_id: "staff-1",
+          status: "Pending",
+        },
+      },
+      // tg3: duplicate-check itself fails with a raw internal error -> failed, sanitized.
+      { data: null, error: new Error("connection terminated unexpectedly") },
+    ],
+  });
+
+  const result = await createBulkCommentTasks(
+    "c1",
+    { targetIds: ["tg1", "tg2", "tg3"], comment_text: "x", assigned_staff_id: "staff-1" },
+    "manager-1",
+    client
+  );
+
+  assert.equal(result.created.length, 1);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.failed.length, 1);
+  assert.equal(result.created[0].targetId, "tg1");
+  assert.equal(result.skipped[0].targetId, "tg2");
+  assert.equal(result.failed[0].targetId, "tg3");
+  assert.equal(result.failed[0].error, "Không thể tạo task cho bài viết này");
 });
 
 /**

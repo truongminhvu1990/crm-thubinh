@@ -213,6 +213,27 @@ export interface SeedingTaskWithContext extends SeedingTask {
   target_discovery_status: string | null;
 }
 
+/** Phase 2I (I2) — bulk Comment task creation across many selected targets
+ * with one shared comment. Reuses createTask's existing validation/
+ * duplicate-protection per target (lib/seeding/seedingTask.service.ts) —
+ * this is a thin per-target loop, not a new persistence path. */
+export interface CreateBulkCommentTasksInput {
+  targetIds: string[];
+  comment_text: string;
+  assigned_staff_id?: string;
+  scheduled_at?: string;
+}
+
+/** Honest, non-fabricated per-target outcome — never collapsed into a
+ * single success/fail flag. `skipped` is a target where an identical
+ * non-terminal task already existed (Phase 2I I1's duplicate protection) —
+ * distinct from `failed`, which is a genuine error. */
+export interface BulkCommentTaskResult {
+  created: { targetId: string; taskId: string }[];
+  skipped: { targetId: string; reason: string }[];
+  failed: { targetId: string; error: string }[];
+}
+
 /** Phase 2F — AI-Powered Evidence Reconciliation. This is CONTENT evidence
  * only: whether text matching a Comment task's assigned comment_text exists
  * on the target Page post. It is NEVER identity verification — no result
