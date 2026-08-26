@@ -135,7 +135,7 @@ export async function findCustomerByPhone(
   return data as Customer | null;
 }
 
-export async function addCustomer(customer: Partial<Customer>) {
+export async function addCustomer(customer: Partial<Customer>, client: SupabaseClient = supabase) {
   // New customers start at the first VIP Care pipeline stage unless the
   // caller already set one explicitly.
   const filteredData = pickWritableFields(
@@ -143,7 +143,7 @@ export async function addCustomer(customer: Partial<Customer>) {
     { skipEmpty: true }
   );
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("customers")
     .insert(filteredData)
     .select()
@@ -155,18 +155,21 @@ export async function addCustomer(customer: Partial<Customer>) {
   }
 
   if (filteredData.assigned_staff_id) {
-    logActivity({
-      staff_id: filteredData.assigned_staff_id,
-      action: "assigned",
-      entity: "customer",
-      entity_id: data.id,
-    });
+    logActivity(
+      {
+        staff_id: filteredData.assigned_staff_id,
+        action: "assigned",
+        entity: "customer",
+        entity_id: data.id,
+      },
+      client
+    );
   }
 
   return { data, error: null };
 }
 
-export async function updateCustomer(id: string, customer: Partial<Customer>) {
+export async function updateCustomer(id: string, customer: Partial<Customer>, client: SupabaseClient = supabase) {
   const filteredData = pickWritableFields(customer);
 
   // Feature 4/8 - Customer Assignment + Activity Log: only worth a read
@@ -176,7 +179,7 @@ export async function updateCustomer(id: string, customer: Partial<Customer>) {
   // to real assignment changes, not every unrelated field edit).
   let previousAssignedStaffId: string | null = null;
   if ("assigned_staff_id" in filteredData) {
-    const { data: existing } = await supabase
+    const { data: existing } = await client
       .from("customers")
       .select("assigned_staff_id")
       .eq("id", id)
@@ -184,7 +187,7 @@ export async function updateCustomer(id: string, customer: Partial<Customer>) {
     previousAssignedStaffId = existing?.assigned_staff_id ?? null;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from("customers")
     .update(filteredData)
     .eq("id", id)
@@ -199,12 +202,15 @@ export async function updateCustomer(id: string, customer: Partial<Customer>) {
   if ("assigned_staff_id" in filteredData) {
     const newStaffId = (filteredData.assigned_staff_id as string | null) ?? null;
     if (newStaffId !== previousAssignedStaffId) {
-      logActivity({
-        staff_id: newStaffId || previousAssignedStaffId,
-        action: newStaffId ? "assigned" : "unassigned",
-        entity: "customer",
-        entity_id: id,
-      });
+      logActivity(
+        {
+          staff_id: newStaffId || previousAssignedStaffId,
+          action: newStaffId ? "assigned" : "unassigned",
+          entity: "customer",
+          entity_id: id,
+        },
+        client
+      );
     }
   }
 
