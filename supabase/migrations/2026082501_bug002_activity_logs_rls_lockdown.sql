@@ -1,0 +1,39 @@
+-- 2026082501_bug002_activity_logs_rls_lockdown.sql
+--
+-- BUG-002 — activity_logs RLS lockdown (final table in this batch).
+--
+-- Production live-state verification confirmed: roles, permissions,
+-- role_permissions, role_data_scopes, and staff are already
+-- authenticated-only (no anon/public policy exists on any of them) —
+-- only activity_logs still carries a permissive "Allow full access to
+-- anon" policy (role public, FOR ALL, USING(true), WITH CHECK(true)).
+--
+-- Prerequisite code fixes (client propagation) are confirmed live in
+-- Production as of commit 95e637987b6288ae32d0d5065cc5dc975cc4e1b4 —
+-- core activity_logs write/read paths, Ops Console (all 8 routes/16
+-- functions), and Permission Center Phase 2F (11 functions/9 routes) all
+-- thread a real request-scoped/admin client into every activity_logs
+-- operation. A full read-only code re-verification against this exact
+-- commit found no live server-side path still dependent on the
+-- anon/public fallback.
+--
+-- Drops only the anon/public policy; the existing "Allow full access to
+-- authenticated" policy is left untouched. No schema change, no function
+-- change, no data operation, no permission change outside this single
+-- targeted RLS policy.
+--
+-- Idempotent (`DROP POLICY IF EXISTS`) — safe to run against a database
+-- that has already had this policy removed.
+
+DROP POLICY IF EXISTS "Allow full access to anon" ON public.activity_logs;
+-- KEEP: "Allow full access to authenticated"
+
+-- ============================================================
+-- Rollback
+-- ============================================================
+-- Re-create the dropped policy verbatim:
+-- CREATE POLICY "Allow full access to anon" ON public.activity_logs
+--   FOR ALL TO public USING (true) WITH CHECK (true);
+-- DROP POLICY is metadata-only — no data touched, no schema change — so
+-- rollback is low-risk and near-instant either as a follow-up migration or
+-- an ad-hoc query.
