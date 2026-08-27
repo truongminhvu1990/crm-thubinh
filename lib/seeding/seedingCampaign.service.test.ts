@@ -120,3 +120,83 @@ test("updateCampaign: campaign not found throws before any write", async () => {
   await assert.rejects(() => updateCampaign("missing", { status: "Active" }, "staff-1", client), /not found/i);
   assert.equal((client as never as { __updateCalls: unknown[] }).__updateCalls.length, 0);
 });
+
+/**
+ * Phase 2J-D — createCampaign now supports a manual-only campaign
+ * (facebook_page_id omitted/null, Architecture B) alongside the existing
+ * Page-backed path, which stays byte-for-byte unchanged.
+ */
+
+interface FakeResult {
+  data: unknown;
+  error?: unknown;
+}
+
+function makeCreateClient(perTableSequence: Record<string, FakeResult[]>) {
+  const counters: Record<string, number> = {};
+  const insertedRows: { table: string; values: unknown }[] = [];
+  return {
+    from(table: string) {
+      const seq = perTableSequence[table];
+      if (!seq) throw new Error(`Unexpected table in test fake: ${table}`);
+      return {
+        select() {
+          const idx = counters[`${table}:select`] ?? 0;
+          counters[`${table}:select`] = idx + 1;
+          const result = seq[idx] ?? seq[seq.length - 1];
+          return { eq: () => ({ maybeSingle: () => Promise.resolve({ error: null, ...result }) }) };
+        },
+        insert(values: unknown) {
+          insertedRows.push({ table, values });
+          const idx = counters[`${table}:insert`] ?? 0;
+          counters[`${table}:insert`] = idx + 1;
+          const result = seq[idx] ?? seq[seq.length - 1];
+          return { select: () => ({ single: () => Promise.resolve({ error: null, ...result }) }) };
+        },
+      };
+    },
+    __insertedRows: insertedRows,
+  } as never;
+}
+
+test("createCampaign: a Page-backed campaign stores the real facebook_page_id, unchanged from before this phase", async () => {
+  const { createCampaign } = await loadModule();
+  const client = makeCreateClient({
+    facebook_page_posts: [{ data: { message: "Hàng mới về" } }],
+    seeding_campaigns: [{ data: { id: "camp-1", facebook_page_id: "page-1" } }],
+  });
+
+  const campaign = await createCampaign(
+    { name: "Campaign A", facebook_page_id: "page-1", objective: "Tăng tương tác", targetFacebookPagePostIds: ["post-1"] },
+    "staff-1",
+    client
+  );
+
+  assert.equal(campaign.facebook_page_id, "page-1");
+  const inserted = (client as unknown as { __insertedRows: { table: string; values: { facebook_page_id: unknown; post_content_snapshot: unknown } }[] })
+    .__insertedRows[0].values;
+  assert.equal(inserted.facebook_page_id, "page-1");
+  assert.equal(inserted.post_content_snapshot, "Hàng mới về");
+});
+
+test("createCampaign: a manual-only campaign (no facebook_page_id) is created with a null Page id — no synthetic Page row involved", async () => {
+  const { createCampaign } = await loadModule();
+  const client = makeCreateClient({
+    facebook_manual_content_references: [{ data: { message: null } }],
+    seeding_campaigns: [{ data: { id: "camp-2", facebook_page_id: null } }],
+  });
+
+  const campaign = await createCampaign(
+    { name: "Manual campaign", objective: "Tăng tương tác", targetManualContentReferenceIds: ["ref-1"] },
+    "staff-1",
+    client
+  );
+
+  assert.equal(campaign.facebook_page_id, null);
+  const inserted = (client as unknown as { __insertedRows: { table: string; values: { facebook_page_id: unknown; post_content_snapshot: unknown } }[] })
+    .__insertedRows[0].values;
+  assert.equal(inserted.facebook_page_id, null);
+  // Honest — no token can read Personal/Group content, so message is null
+  // and the snapshot must never be fabricated.
+  assert.equal(inserted.post_content_snapshot, null);
+});

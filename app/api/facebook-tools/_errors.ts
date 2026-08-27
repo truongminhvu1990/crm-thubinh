@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { FacebookGraphError } from "@/lib/facebookTools/facebookGraphClient";
+import { FacebookToolsValidationError } from "@/lib/facebookTools/facebookTools.errors";
 
 export function handleFacebookToolsError(error: unknown): NextResponse {
+  if (error instanceof FacebookToolsValidationError) {
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
   if (error instanceof FacebookGraphError) {
     return NextResponse.json(
       { error: error.message, requiresReconnect: error.requiresReconnect },

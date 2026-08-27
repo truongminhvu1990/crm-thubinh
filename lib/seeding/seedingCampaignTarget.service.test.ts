@@ -13,7 +13,10 @@ import { mock } from "node:test";
 mock.module("@/lib/supabase", { namedExports: { supabase: {} } });
 mock.module("@/lib/activityLog.service", { namedExports: { logActivity: async () => {} } });
 
-const getCampaignByIdMock = mock.fn(async () => ({ id: "c1", facebook_page_id: "page-1" }));
+const getCampaignByIdMock = mock.fn(async (id: string) => {
+  if (id === "manual-campaign") return { id: "manual-campaign", facebook_page_id: null };
+  return { id: "c1", facebook_page_id: "page-1" };
+});
 mock.module("./seedingCampaign.service", {
   namedExports: { getCampaignById: getCampaignByIdMock },
 });
@@ -24,18 +27,33 @@ interface FakePost {
   facebook_post_id: string;
 }
 
+interface FakeManualRef {
+  id: string;
+  source_type: string;
+  source_label: string | null;
+  facebook_object_id: string;
+}
+
 interface FakeTargetRow {
   id: string;
   campaign_id: string;
-  facebook_page_post_id: string;
+  facebook_page_post_id?: string | null;
+  manual_content_reference_id?: string | null;
   facebook_post_id: string;
 }
 
-/** Models facebook_page_posts (read-only lookup by id) + seeding_campaign_targets
- * (select existing / insert) + seeding_tasks (count:"exact",head:true per
- * status, for progress aggregation). */
-function makeClient(opts: { posts?: FakePost[]; existingTargets?: FakeTargetRow[]; tasksByStatus?: Record<string, number> }) {
+/** Models facebook_page_posts / facebook_manual_content_references
+ * (read-only lookup by id) + seeding_campaign_targets (select existing /
+ * insert) + seeding_tasks (count:"exact",head:true per status, for
+ * progress aggregation). */
+function makeClient(opts: {
+  posts?: FakePost[];
+  manualRefs?: FakeManualRef[];
+  existingTargets?: FakeTargetRow[];
+  tasksByStatus?: Record<string, number>;
+}) {
   const posts = opts.posts ?? [];
+  const manualRefs = opts.manualRefs ?? [];
   const targets = [...(opts.existingTargets ?? [])];
   const tasksByStatus = opts.tasksByStatus ?? {};
 
@@ -53,6 +71,17 @@ function makeClient(opts: { posts?: FakePost[]; existingTargets?: FakeTargetRow[
               },
             };
             return builder;
+          },
+        };
+      }
+      if (table === "facebook_manual_content_references") {
+        return {
+          select(_cols: string) {
+            return {
+              in(_col: string, ids: string[]) {
+                return Promise.resolve({ data: manualRefs.filter((r) => ids.includes(r.id)), error: null });
+              },
+            };
           },
         };
       }
@@ -157,6 +186,76 @@ test("addTargetsToCampaign: an unknown facebook_page_post_id is rejected", async
   const client = makeClient({ posts: [] });
 
   await assert.rejects(() => addTargetsToCampaign("c1", ["does-not-exist"], "staff-1", client), /not found in cache/);
+});
+
+/**
+ * Phase 2J-D — manual-reference targets (Architecture B). The
+ * manualContentReferenceIds param is new and trailing; every test above
+ * this block never passes it, proving the Page-only path is byte-for-byte
+ * unaffected (confirmed passing, unchanged, above).
+ */
+
+test("addTargetsToCampaign: a manual-only campaign accepts a manual content reference target", async () => {
+  const { addTargetsToCampaign } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({
+    manualRefs: [{ id: "ref-1", source_type: "Group", source_label: "Nhóm bán vòng", facebook_object_id: "999" }],
+  });
+
+  const result = await addTargetsToCampaign("manual-campaign", [], "staff-1", client, ["ref-1"]);
+
+  assert.equal(result.added.length, 1);
+  assert.equal(result.added[0].manual_content_reference_id, "ref-1");
+  assert.equal(result.added[0].facebook_post_id, "999");
+  assert.deepEqual(result.alreadyTargeted, []);
+});
+
+test("addTargetsToCampaign: a mixed campaign accepts both a Page target and a manual reference target in one call", async () => {
+  const { addTargetsToCampaign } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({
+    posts: [{ id: "post-1", facebook_page_id: "page-1", facebook_post_id: "fb-1" }],
+    manualRefs: [{ id: "ref-1", source_type: "Personal", source_label: null, facebook_object_id: "999" }],
+  });
+
+  const result = await addTargetsToCampaign("c1", ["post-1"], "staff-1", client, ["ref-1"]);
+
+  assert.equal(result.added.length, 2);
+  const byPage = result.added.find((t) => t.facebook_page_post_id === "post-1");
+  const byManual = result.added.find((t) => t.manual_content_reference_id === "ref-1");
+  assert.ok(byPage, "Page target must be added");
+  assert.ok(byManual, "manual reference target must be added");
+});
+
+test("addTargetsToCampaign: an already-targeted manual reference is silently skipped, reported in alreadyTargeted", async () => {
+  const { addTargetsToCampaign } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({
+    manualRefs: [{ id: "ref-1", source_type: "Group", source_label: null, facebook_object_id: "999" }],
+    existingTargets: [{ id: "tg-existing", campaign_id: "manual-campaign", manual_content_reference_id: "ref-1", facebook_post_id: "999" }],
+  });
+
+  const result = await addTargetsToCampaign("manual-campaign", [], "staff-1", client, ["ref-1"]);
+
+  assert.equal(result.added.length, 0);
+  assert.deepEqual(result.alreadyTargeted, ["ref-1"]);
+});
+
+test("addTargetsToCampaign: an unknown manual_content_reference_id is rejected, no insert attempted", async () => {
+  const { addTargetsToCampaign } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({ manualRefs: [] });
+
+  await assert.rejects(
+    () => addTargetsToCampaign("manual-campaign", [], "staff-1", client, ["does-not-exist"]),
+    /Manual content reference\(s\) not found/
+  );
+});
+
+test("addTargetsToCampaign: a Page target cannot be added to a manual-only campaign (no connected Page)", async () => {
+  const { addTargetsToCampaign } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({ posts: [{ id: "post-1", facebook_page_id: "page-1", facebook_post_id: "fb-1" }] });
+
+  await assert.rejects(
+    () => addTargetsToCampaign("manual-campaign", ["post-1"], "staff-1", client),
+    /không gắn với Facebook Page/
+  );
 });
 
 test("getCampaignProgress: aggregates every task status across all targets, Failed never folded into Done", async () => {

@@ -23,7 +23,13 @@ export async function GET(request: NextRequest) {
  * call. Not atomic across the two tables (Supabase JS has no multi-table
  * transaction) — if target-adding fails after the campaign insert
  * succeeds, the result is a Draft campaign with 0 targets, which is
- * already a valid state (PO decision), not corruption. */
+ * already a valid state (PO decision), not corruption.
+ *
+ * Phase 2J-D — targetManualContentReferenceIds (Personal/Group manually-
+ * imported content) may be sent alongside or instead of
+ * targetFacebookPagePostIds, producing a mixed or manual-only campaign
+ * respectively (facebook_page_id is simply omitted from the body for a
+ * manual-only campaign — createCampaign already treats it as optional). */
 export async function POST(request: NextRequest) {
   const auth = await requirePermission(request, "seeding.manage");
   if ("error" in auth) return auth.error;
@@ -36,8 +42,11 @@ export async function POST(request: NextRequest) {
     const targetIds = Array.isArray(input.targetFacebookPagePostIds)
       ? (input.targetFacebookPagePostIds as unknown[]).filter((id): id is string => typeof id === "string" && id.length > 0)
       : [];
-    if (targetIds.length > 0) {
-      await addTargetsToCampaign(campaign.id, targetIds, auth.staff.id, client);
+    const manualTargetIds = Array.isArray(input.targetManualContentReferenceIds)
+      ? (input.targetManualContentReferenceIds as unknown[]).filter((id): id is string => typeof id === "string" && id.length > 0)
+      : [];
+    if (targetIds.length > 0 || manualTargetIds.length > 0) {
+      await addTargetsToCampaign(campaign.id, targetIds, auth.staff.id, client, manualTargetIds);
     }
 
     return NextResponse.json(campaign, { status: 201 });

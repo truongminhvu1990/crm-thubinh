@@ -46,7 +46,10 @@ mock.module("@/lib/facebookTools/facebookPage.service", {
 
 mock.module("./seedingCampaign.service", {
   namedExports: {
-    getCampaignById: async (id: string) => ({ id, facebook_page_id: "fb-page-1" }),
+    // Phase 2J-D — a campaign id starting with "manual-" simulates a
+    // manual-only campaign (facebook_page_id null, Architecture B);
+    // every other id keeps the exact pre-existing Page-backed shape.
+    getCampaignById: async (id: string) => ({ id, facebook_page_id: id.startsWith("manual-") ? null : "fb-page-1" }),
   },
 });
 
@@ -352,6 +355,63 @@ test("reconcileNextBatch: multiple tasks targeting the same post share one Faceb
 
   await reconcileNextBatch("campaign-1", 10, "staff-1", client, aiMatchFn);
   assert.equal(getPostCommentsBoundedSampleMock.mock.calls.length, 1, "one shared target post must be fetched only once per batch round");
+});
+
+/**
+ * Phase 2J-D — manual-source (Personal/Group) targets have no connected
+ * Page/token and must never reach getPageByFacebookPageId/
+ * getDecryptedPageAccessToken (which would throw on a null/absent token).
+ * They're reported honestly via skippedNoConnectedSource, never given a
+ * fabricated evidence_result.
+ */
+
+test("reconcileNextBatch: a manual-source task is skipped honestly — never fetched, never marked with any evidence_result", async () => {
+  const { reconcileNextBatch } = await loadModule();
+  const client = makeClient({
+    seeding_tasks: [{ id: "t1", campaign_target_id: "target-manual", comment_text: "sản phẩm đẹp quá" }],
+    seeding_campaign_targets: [{ id: "target-manual", facebook_post_id: "obj-1", manual_content_reference_id: "ref-1" }],
+    seeding_task_evidence_results: [],
+  });
+  const aiMatchFn = mock.fn(async () => ({ bestMatchIndex: 0, confidence: "high" as const, reasoning: "x" }));
+
+  const result = await reconcileNextBatch("manual-campaign-1", 10, "staff-1", client, aiMatchFn);
+
+  assert.equal(result.processed, 0);
+  assert.equal(result.results.length, 0);
+  assert.equal(result.skippedNoConnectedSource.length, 1);
+  assert.equal(result.skippedNoConnectedSource[0].taskId, "t1");
+  assert.equal(getPostCommentsBoundedSampleMock.mock.calls.length, 0, "a manual-source task must never trigger a Graph fetch");
+  assert.equal(
+    (client as never as { __upserts: unknown[]; __inserts: unknown[] }).__inserts.length +
+      (client as never as { __upserts: unknown[]; __inserts: unknown[] }).__upserts.length,
+    0,
+    "no evidence_result row may ever be written for a manual-source task"
+  );
+});
+
+test("reconcileNextBatch: a mixed batch processes the Page-backed task normally and skips the manual-source task honestly, in the same round", async () => {
+  const { reconcileNextBatch } = await loadModule();
+  commentsToReturn = [{ id: "c1", message: "sản phẩm đẹp quá" }];
+  const client = makeClient({
+    seeding_tasks: [
+      { id: "t-page", campaign_target_id: "target-page", comment_text: "sản phẩm đẹp quá" },
+      { id: "t-manual", campaign_target_id: "target-manual", comment_text: "hàng còn không ạ" },
+    ],
+    seeding_campaign_targets: [
+      { id: "target-page", facebook_post_id: "post-1" },
+      { id: "target-manual", facebook_post_id: "obj-1", manual_content_reference_id: "ref-1" },
+    ],
+    seeding_task_evidence_results: [],
+  });
+  const aiMatchFn = mock.fn(async () => ({ bestMatchIndex: 0, confidence: "high" as const, reasoning: "x" }));
+
+  const result = await reconcileNextBatch("campaign-1", 10, "staff-1", client, aiMatchFn);
+
+  assert.equal(result.processed, 1);
+  assert.equal(result.results[0].taskId, "t-page");
+  assert.equal(result.results[0].result, "Exact Match");
+  assert.equal(result.skippedNoConnectedSource.length, 1);
+  assert.equal(result.skippedNoConnectedSource[0].taskId, "t-manual");
 });
 
 test("getEvidenceQueueForCampaign: enriches tasks with current evidence, null when never checked", async () => {

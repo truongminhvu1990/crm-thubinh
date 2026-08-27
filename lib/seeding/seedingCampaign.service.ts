@@ -64,9 +64,21 @@ async function tryFetchPostContentSnapshotFromGraph(
  * the facebook_page_posts cache (no Graph API call, per the "không gọi
  * Graph API khi tạo campaign" requirement). Only used when the campaign is
  * created with at least one target; a Draft created with 0 targets simply
- * has no snapshot yet. */
-async function snapshotFromCache(facebookPagePostId: string, client: SupabaseClient): Promise<string | null> {
-  const { data, error } = await client.from("facebook_page_posts").select("message").eq("id", facebookPagePostId).maybeSingle();
+ * has no snapshot yet.
+ *
+ * Phase 2J-D — a manual-reference target reads the same way from
+ * facebook_manual_content_references instead. Its `message` is always null
+ * in this phase (no token can read Personal/Group content) — this
+ * correctly, honestly propagates that null rather than fabricating a
+ * snapshot; never a code change from what "no message available" already
+ * meant here. */
+async function snapshotFromCache(
+  target: { pagePostId: string } | { manualRefId: string },
+  client: SupabaseClient
+): Promise<string | null> {
+  const table = "pagePostId" in target ? "facebook_page_posts" : "facebook_manual_content_references";
+  const id = "pagePostId" in target ? target.pagePostId : target.manualRefId;
+  const { data, error } = await client.from(table).select("message").eq("id", id).maybeSingle();
   if (error || !data) return null;
   return (data as { message: string | null }).message;
 }
@@ -76,14 +88,22 @@ export async function createCampaign(
   actorStaffId: string | null,
   client: SupabaseClient = supabase
 ): Promise<SeedingCampaign> {
-  const firstTargetId = input.targetFacebookPagePostIds?.[0];
-  const post_content_snapshot = firstTargetId ? await snapshotFromCache(firstTargetId, client) : null;
+  const firstPageTargetId = input.targetFacebookPagePostIds?.[0];
+  const firstManualTargetId = input.targetManualContentReferenceIds?.[0];
+  const post_content_snapshot = firstPageTargetId
+    ? await snapshotFromCache({ pagePostId: firstPageTargetId }, client)
+    : firstManualTargetId
+      ? await snapshotFromCache({ manualRefId: firstManualTargetId }, client)
+      : null;
 
   const { data, error } = await client
     .from("seeding_campaigns")
     .insert({
       name: input.name,
-      facebook_page_id: input.facebook_page_id,
+      // Phase 2J-D — null for a manual-only campaign (Architecture B: no
+      // synthetic/fake Page row is ever created). Every existing caller
+      // that always sent a real facebook_page_id is unaffected.
+      facebook_page_id: input.facebook_page_id ?? null,
       objective: input.objective,
       product_id: input.product_id ?? null,
       status: input.status ?? "Draft",
@@ -145,6 +165,12 @@ export async function refreshPostContentSnapshot(id: string, client: SupabaseCli
   const campaign = await getCampaignById(id, client);
   if (!campaign) throw new Error("Seeding campaign not found");
   if (!campaign.facebook_post_id) throw new Error("Campaign has no single facebook_post_id to refresh (multi-target campaign)");
+  // Structurally unreachable: facebook_post_id is only ever set by the
+  // legacy pre-Phase-2C single-post creation path, which always supplies a
+  // real facebook_page_id — no manual-only campaign can have a
+  // facebook_post_id. Guarded anyway for the type checker, not an unsafe
+  // non-null assertion.
+  if (!campaign.facebook_page_id) throw new Error("Campaign has a facebook_post_id but no facebook_page_id");
 
   const post_content_snapshot = await tryFetchPostContentSnapshotFromGraph(campaign.facebook_page_id, campaign.facebook_post_id, client);
 

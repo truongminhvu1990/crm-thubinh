@@ -15,12 +15,18 @@ import {
   Square,
   CheckCircle2,
   Sparkles,
+  Link2,
+  User,
+  Users,
 } from "lucide-react";
 import {
   FacebookPageSummary,
   FacebookPagePost,
   FacebookPagePostSyncResult,
   FacebookPageContentDiscoveryStatus,
+  FacebookContentIndexRow,
+  FacebookManualContentSourceType,
+  ImportManualContentUrlsResult,
 } from "@/types/facebookTools";
 import { CreateSeedingCampaignInput, SeedingCampaign } from "@/types/seeding";
 import { BusinessTime } from "@/lib/businessTime";
@@ -58,6 +64,24 @@ function discoveryStatusBadge(status: FacebookPageContentDiscoveryStatus) {
 
 function formatPublishedAt(value: string | null | undefined): string {
   return value ? BusinessTime.formatDateTime(value) : "—";
+}
+
+/** Phase 2J-D — manual content has no Page/discovery-status concept (always
+ * "Active" in the view); the honest thing to show instead is its real
+ * source type. */
+function manualSourceBadge(sourceType: "Personal" | FacebookManualContentSourceType) {
+  if (sourceType === "Personal") {
+    return (
+      <Badge variant="muted">
+        <User className="w-3 h-3 inline -mt-0.5 mr-1" /> Cá nhân
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="muted">
+      <Users className="w-3 h-3 inline -mt-0.5 mr-1" /> Nhóm
+    </Badge>
+  );
 }
 
 interface Filters {
@@ -102,6 +126,19 @@ export default function ContentRepositoryPage() {
   const [isCreatingCampaign, setIsCreatingCampaign] = useState(false);
   const [createCampaignError, setCreateCampaignError] = useState<string | null>(null);
 
+  // Phase 2J-D — manually-imported Personal/Group content, unified into the
+  // same repository and the same multi-select -> campaign flow above.
+  const [manualContent, setManualContent] = useState<FacebookContentIndexRow[]>([]);
+  const [isLoadingManualContent, setIsLoadingManualContent] = useState(false);
+  const [selectedManualIds, setSelectedManualIds] = useState<Set<string>>(new Set());
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importUrlsText, setImportUrlsText] = useState("");
+  const [importSourceType, setImportSourceType] = useState<FacebookManualContentSourceType>("Personal");
+  const [importSourceLabel, setImportSourceLabel] = useState("");
+  const [isImporting, setIsImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<ImportManualContentUrlsResult | null>(null);
+
   const loadPages = useCallback(async () => {
     try {
       const res = await fetch("/api/facebook-tools/pages");
@@ -125,6 +162,24 @@ export default function ContentRepositoryPage() {
   useEffect(() => {
     loadPages();
   }, [loadPages]);
+
+  const loadManualContent = useCallback(async () => {
+    setIsLoadingManualContent(true);
+    try {
+      const res = await fetch("/api/facebook-tools/manual-content");
+      if (res.status === 403) return;
+      if (!res.ok) throw new Error(await res.text());
+      setManualContent(await res.json());
+    } catch (error) {
+      console.error("Failed to load manual content references:", error);
+    } finally {
+      setIsLoadingManualContent(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadManualContent();
+  }, [loadManualContent]);
 
   const loadStatusTypeOptions = useCallback(async (pageId: string) => {
     try {
@@ -229,6 +284,7 @@ export default function ContentRepositoryPage() {
   function toggleSelectionMode() {
     setSelectionMode((prev) => !prev);
     setSelectedPostIds(new Set());
+    setSelectedManualIds(new Set());
   }
 
   function toggleSelectPost(postId: string) {
@@ -240,9 +296,22 @@ export default function ContentRepositoryPage() {
     });
   }
 
+  function toggleSelectManual(id: string) {
+    setSelectedManualIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   function handleCardClick(post: FacebookPagePost) {
     if (selectionMode) toggleSelectPost(post.id);
     else handleOpenDetail(post);
+  }
+
+  function handleManualCardClick(row: FacebookContentIndexRow) {
+    if (selectionMode) toggleSelectManual(row.id);
   }
 
   function openCreateCampaign() {
@@ -252,17 +321,59 @@ export default function ContentRepositoryPage() {
     setShowCreateCampaign(true);
   }
 
+  function openImportModal() {
+    setImportUrlsText("");
+    setImportSourceType("Personal");
+    setImportSourceLabel("");
+    setImportError(null);
+    setImportResult(null);
+    setShowImportModal(true);
+  }
+
+  async function handleImportSubmit() {
+    const urls = importUrlsText
+      .split("\n")
+      .map((u) => u.trim())
+      .filter(Boolean);
+    if (urls.length === 0) {
+      setImportError("Vui lòng nhập ít nhất một URL");
+      return;
+    }
+    setIsImporting(true);
+    setImportError(null);
+    try {
+      const res = await fetch("/api/facebook-tools/manual-content", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls, source_type: importSourceType, source_label: importSourceLabel || undefined }),
+      });
+      if (res.status === 403) {
+        throw new Error("Bạn chưa được cấp quyền facebook_tools.manage để nhập nội dung.");
+      }
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Không thể nhập URL");
+      const result: ImportManualContentUrlsResult = await res.json();
+      setImportResult(result);
+      if (result.created.length > 0) await loadManualContent();
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Không thể nhập URL");
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
   async function handleCreateCampaign() {
-    const page = pages.find((p) => p.id === selectedPageId);
-    if (!page) return;
+    const hasPageTargets = selectedPostIds.size > 0;
+    const page = hasPageTargets ? pages.find((p) => p.id === selectedPageId) : undefined;
+    if (hasPageTargets && !page) return;
     setIsCreatingCampaign(true);
     setCreateCampaignError(null);
     try {
       const input: CreateSeedingCampaignInput = {
         name: campaignName,
-        facebook_page_id: page.facebook_page_id,
         objective: campaignObjective,
         targetFacebookPagePostIds: [...selectedPostIds],
+        targetManualContentReferenceIds: [...selectedManualIds],
+        ...(page ? { facebook_page_id: page.facebook_page_id } : {}),
       };
       const res = await fetch("/api/seeding/campaigns", {
         method: "POST",
@@ -277,6 +388,7 @@ export default function ContentRepositoryPage() {
       setShowCreateCampaign(false);
       setSelectionMode(false);
       setSelectedPostIds(new Set());
+      setSelectedManualIds(new Set());
       router.push(`/facebook-tools/semi-seeding/${campaign.id}`);
     } catch (error) {
       setCreateCampaignError(error instanceof Error ? error.message : "Không thể tạo campaign");
@@ -330,25 +442,28 @@ export default function ContentRepositoryPage() {
             )}
           </div>
           <div className="flex gap-2">
-            <Button
-              variant={selectionMode ? "primary" : "secondary"}
-              size="sm"
-              onClick={toggleSelectionMode}
-              disabled={!selectedPageId}
-            >
+            <Button variant={selectionMode ? "primary" : "secondary"} size="sm" onClick={toggleSelectionMode}>
               {selectionMode ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />} Chọn nhiều bài
             </Button>
             <Button variant="secondary" size="sm" onClick={handleSync} isLoading={isSyncing} disabled={!selectedPageId}>
               <RefreshCw className="w-4 h-4" /> Làm mới
+            </Button>
+            <Button variant="secondary" size="sm" onClick={openImportModal}>
+              <Link2 className="w-4 h-4" /> Nhập link
             </Button>
           </div>
         </div>
 
         {selectionMode && (
           <div className="mt-3 flex items-center justify-between flex-wrap gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3">
-            <p className="text-sm text-foreground">Đã chọn {selectedPostIds.size} bài</p>
-            <Button size="sm" onClick={openCreateCampaign} disabled={selectedPostIds.size === 0}>
-              <Sparkles className="w-4 h-4" /> Tạo Seeding Campaign ({selectedPostIds.size})
+            <p className="text-sm text-foreground">
+              Đã chọn {selectedPostIds.size + selectedManualIds.size} nội dung
+              {selectedPostIds.size > 0 && selectedManualIds.size > 0
+                ? ` (${selectedPostIds.size} từ Page, ${selectedManualIds.size} nhập thủ công)`
+                : ""}
+            </p>
+            <Button size="sm" onClick={openCreateCampaign} disabled={selectedPostIds.size + selectedManualIds.size === 0}>
+              <Sparkles className="w-4 h-4" /> Tạo Seeding Campaign ({selectedPostIds.size + selectedManualIds.size})
             </Button>
           </div>
         )}
@@ -495,6 +610,74 @@ export default function ContentRepositoryPage() {
         </Card>
       )}
 
+      <Card>
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">Nội dung nhập thủ công (Cá nhân / Nhóm)</h2>
+            <p className="text-xs text-muted-foreground">
+              Facebook không cho phép ứng dụng liệt kê bài viết Cá nhân/Nhóm — nội dung này được nhập bằng link.
+            </p>
+          </div>
+        </div>
+
+        {isLoadingManualContent ? (
+          <div className="flex justify-center py-10">
+            <div className="animate-spin text-2xl">⟳</div>
+          </div>
+        ) : manualContent.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-10">
+            Chưa có nội dung nào được nhập. Dùng nút &quot;Nhập link&quot; ở trên để thêm.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {manualContent.map((row) => (
+              <div
+                key={row.id}
+                role={selectionMode ? "button" : undefined}
+                tabIndex={selectionMode ? 0 : undefined}
+                onClick={() => handleManualCardClick(row)}
+                className={cn(
+                  "relative text-left flex flex-col rounded-lg border transition-colors overflow-hidden",
+                  selectionMode && selectedManualIds.has(row.id)
+                    ? "border-primary ring-2 ring-primary/40 cursor-pointer"
+                    : selectionMode
+                      ? "border-border hover:border-primary/40 hover:bg-primary/5 cursor-pointer"
+                      : "border-border"
+                )}
+              >
+                {selectionMode && selectedManualIds.has(row.id) && (
+                  <CheckCircle2 className="absolute top-2 right-2 w-6 h-6 text-primary bg-white rounded-full z-10" />
+                )}
+                <div className="w-full h-24 bg-muted flex items-center justify-center">
+                  <ImageOff className="w-6 h-6 text-muted-foreground" />
+                </div>
+                <div className="p-3 flex-1 flex flex-col gap-1.5">
+                  <p className="text-sm text-foreground line-clamp-2 min-h-[2.5rem] italic text-muted-foreground">
+                    (Không có nội dung xem trước — nhập thủ công)
+                  </p>
+                  <p className="text-xs text-muted-foreground">{formatPublishedAt(row.discovered_at)}</p>
+                  <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                    {manualSourceBadge(row.source_type as "Personal" | FacebookManualContentSourceType)}
+                    {row.source_label && <Badge variant="muted">{row.source_label}</Badge>}
+                  </div>
+                  {row.permalink_url && (
+                    <a
+                      href={row.permalink_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline mt-1"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" /> Mở trên Facebook
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
       {detailPost && (
         <Modal open={!!detailPost} title="Chi tiết bài viết" onClose={() => setDetailPost(null)} size="xl">
           {isLoadingDetail ? (
@@ -548,11 +731,83 @@ export default function ContentRepositoryPage() {
         </Modal>
       )}
 
+      {showImportModal && (
+        <Modal open={showImportModal} title="Nhập link nội dung Cá nhân / Nhóm" onClose={() => setShowImportModal(false)}>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Dán mỗi link Facebook (dạng .../posts/&#123;id&#125;, .../videos/&#123;id&#125;, .../reel/&#123;id&#125;, hoặc với Nhóm:
+              .../groups/&#123;id&#125;/posts/&#123;id&#125;, .../groups/&#123;id&#125;/permalink/&#123;id&#125;) trên một dòng.
+              Facebook không cho phép ứng dụng tự lấy nội dung/ảnh — chỉ liên kết được lưu lại.
+            </p>
+            <Select
+              label="Loại nguồn"
+              options={[
+                { value: "Personal", label: "Cá nhân" },
+                { value: "Group", label: "Nhóm" },
+              ]}
+              value={importSourceType}
+              onChange={(e) => setImportSourceType(e.target.value as FacebookManualContentSourceType)}
+            />
+            <Input
+              label="Nhãn nguồn (tuỳ chọn)"
+              value={importSourceLabel}
+              onChange={(e) => setImportSourceLabel(e.target.value)}
+              placeholder="VD: Nhóm Mua Bán Đá Quý"
+            />
+            <div>
+              <label className="text-sm text-muted-foreground mb-1 block">Danh sách link</label>
+              <textarea
+                className="w-full min-h-[120px] rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                value={importUrlsText}
+                onChange={(e) => setImportUrlsText(e.target.value)}
+                placeholder={"https://www.facebook.com/100000000000000/posts/123456789\nhttps://www.facebook.com/watch/videos/987654321"}
+              />
+            </div>
+            {importError && <p className="text-destructive text-sm">{importError}</p>}
+            {importResult && (
+              <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-foreground space-y-1">
+                <p>
+                  Đã tạo {importResult.created.length} · bỏ qua (trùng) {importResult.skipped.length} · lỗi{" "}
+                  {importResult.failed.length}
+                </p>
+                {importResult.failed.length > 0 && (
+                  <ul className="text-xs text-destructive list-disc pl-4">
+                    {importResult.failed.map((f, i) => (
+                      <li key={i}>
+                        {f.url}: {f.reason}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {importResult.skipped.length > 0 && (
+                  <ul className="text-xs text-amber-700 list-disc pl-4">
+                    {importResult.skipped.map((s, i) => (
+                      <li key={i}>
+                        {s.url}: {s.reason}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="secondary" onClick={() => setShowImportModal(false)}>
+                Đóng
+              </Button>
+              <Button onClick={handleImportSubmit} isLoading={isImporting} disabled={!importUrlsText.trim()}>
+                Nhập
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {showCreateCampaign && (
         <Modal open={showCreateCampaign} title="Tạo Seeding Campaign" onClose={() => setShowCreateCampaign(false)}>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              {selectedPostIds.size} bài viết đã chọn sẽ trở thành Target Posts của campaign này.
+              {selectedPostIds.size + selectedManualIds.size} nội dung đã chọn sẽ trở thành Target của campaign này
+              {selectedPostIds.size > 0 && selectedManualIds.size > 0 ? " (cả Page lẫn nhập thủ công)" : ""}.
             </p>
             <Input label="Tên campaign" value={campaignName} onChange={(e) => setCampaignName(e.target.value)} placeholder="VD: Seeding livestream 20/08" />
             <Select label="Mục tiêu" options={SEEDING_CAMPAIGN_OBJECTIVE_OPTIONS} value={campaignObjective} onChange={(e) => setCampaignObjective(e.target.value)} />

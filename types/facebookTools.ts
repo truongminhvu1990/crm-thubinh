@@ -192,3 +192,65 @@ export interface FacebookPagePostSyncResult {
   unavailabilityCheckPerformed: boolean;
   unavailableCount: number;
 }
+
+/** Phase 2J-D — Personal/Group Facebook content the CRM has no API access
+ * to discover (Meta's Groups API was removed for third-party apps in
+ * 2024; Personal-account post listing is not an approved use case for
+ * this product — see the Phase 2J-A/2J-B research). Captured instead by a
+ * manager pasting a permalink URL. Deliberately independent of
+ * FacebookPage/FacebookPagePost (Architecture B, Phase 2J-C) — this is
+ * never stored as a fake Page. */
+export type FacebookManualContentSourceType = "Personal" | "Group";
+
+export interface FacebookManualContentReference {
+  id: string;
+  source_type: FacebookManualContentSourceType;
+  source_label?: string | null;
+  facebook_object_id: string;
+  permalink_url: string;
+  /** NULL unless genuinely retrieved — never fabricated. In this phase
+   * always null (no token can read Personal/Group content). */
+  message?: string | null;
+  full_picture_url?: string | null;
+  discovery_method: string;
+  imported_by_staff_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** Read-only row shape from the facebook_content_index view (Phase 2J-D) —
+ * the unified Content Repository browsing source, combining Page-synced
+ * posts and manual Personal/Group references. Never a write path: nothing
+ * in the application ever INSERTs/UPDATEs/DELETEs against this view. */
+export interface FacebookContentIndexRow {
+  id: string;
+  source_type: "Page" | FacebookManualContentSourceType;
+  source_label: string | null;
+  message: string | null;
+  permalink_url: string | null;
+  full_picture_url: string | null;
+  discovery_status: string;
+  published_at: string | null;
+  discovered_at: string;
+  discovery_method: string;
+  /** Facebook's own Page id — populated only for a "Page" row, null for a
+   * manual reference (which has no Page relationship). */
+  owning_page_id: string | null;
+}
+
+export interface ImportManualContentUrlsInput {
+  urls: string[];
+  source_type: FacebookManualContentSourceType;
+  source_label?: string;
+}
+
+/** Honest, non-fabricated per-URL outcome — same established convention as
+ * BulkCommentTaskResult (types/seeding.ts, Phase 2I). `skipped` is a URL
+ * that parsed fine but is a duplicate (within this batch or against an
+ * existing reference) — distinct from `failed`, which is a genuine
+ * validation/parse failure. */
+export interface ImportManualContentUrlsResult {
+  created: { url: string; referenceId: string }[];
+  skipped: { url: string; reason: string }[];
+  failed: { url: string; reason: string }[];
+}

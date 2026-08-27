@@ -34,6 +34,13 @@ interface CandidateTask {
   campaign_target_id: string;
   comment_text: string;
   facebook_post_id: string;
+  /** Phase 2J-D — true when this task's target is a manual Personal/Group
+   * reference (facebook_manual_content_references), not a Page-synced
+   * post. No token exists that can read such content, so this task can
+   * never be Graph-verified — reconcileNextBatch skips it honestly rather
+   * than attempting a fetch that would either crash or require faking a
+   * result. */
+  isManualSource: boolean;
 }
 
 /** Pure, exported for direct unit testing. A task is eligible for the next
@@ -71,10 +78,12 @@ async function loadCandidateTasks(campaignId: string, client: SupabaseClient): P
   const targetIds = [...new Set(commentTasks.map((t) => t.campaign_target_id))];
   const { data: targetRows, error: targetsError } = await client
     .from("seeding_campaign_targets")
-    .select("id, facebook_post_id")
+    .select("id, facebook_post_id, manual_content_reference_id")
     .in("id", targetIds);
   if (targetsError) throw targetsError;
-  const postIdByTarget = new Map(((targetRows ?? []) as { id: string; facebook_post_id: string }[]).map((t) => [t.id, t.facebook_post_id]));
+  const targetRowsTyped = (targetRows ?? []) as { id: string; facebook_post_id: string; manual_content_reference_id: string | null }[];
+  const postIdByTarget = new Map(targetRowsTyped.map((t) => [t.id, t.facebook_post_id]));
+  const isManualByTarget = new Map(targetRowsTyped.map((t) => [t.id, !!t.manual_content_reference_id]));
 
   const { data: existingRows, error: existingError } = await client
     .from("seeding_task_evidence_results")
@@ -96,6 +105,7 @@ async function loadCandidateTasks(campaignId: string, client: SupabaseClient): P
       campaign_target_id: t.campaign_target_id,
       comment_text: t.comment_text,
       facebook_post_id: postIdByTarget.get(t.campaign_target_id)!,
+      isManualSource: isManualByTarget.get(t.campaign_target_id) ?? false,
     }));
 }
 
@@ -227,25 +237,56 @@ export async function reconcileNextBatch(
 
   const allCandidates = await loadCandidateTasks(campaignId, client);
   if (allCandidates.length === 0) {
-    return { processed: 0, hasMoreCandidates: false, results: [] };
+    return { processed: 0, hasMoreCandidates: false, results: [], skippedNoConnectedSource: [] };
   }
 
   const batch = allCandidates.slice(0, batchSize);
   const hasMoreCandidates = allCandidates.length > batch.length;
 
+  // Phase 2J-D — a manual-source task's target (Personal/Group content, no
+  // connected Page/token) is structurally impossible to Graph-verify. It
+  // must never reach getPageByFacebookPageId/getDecryptedPageAccessToken
+  // at all (that path assumes a real, usable token and would throw on a
+  // null/absent one) — nor may it be marked with any evidence_result,
+  // which would either misrepresent an attempt that never happened or
+  // require inventing a new persisted state (see the Phase 2J-D
+  // reconciliation report for why no existing state honestly fits).
+  // Its evidence_result simply stays at the existing, honest "never
+  // checked" null; the skip is reported only in this batch's own response.
+  const pageBackedBatch = batch.filter((t) => !t.isManualSource);
+  const skippedNoConnectedSource = batch
+    .filter((t) => t.isManualSource)
+    .map((t) => ({ taskId: t.id, reason: "Nội dung này không có Facebook Page kết nối để tự động đối soát" }));
+
+  const results: { taskId: string; result: SeedingTaskEvidenceResult }[] = [];
+  let reconnectMarked = false;
+
+  if (pageBackedBatch.length === 0) {
+    await logActivity(
+      { staff_id: actorStaffId, action: "seeding_evidence_reconciliation_batch_run", entity: "seeding_campaign", entity_id: campaignId },
+      client
+    );
+    return { processed: 0, hasMoreCandidates, results: [], skippedNoConnectedSource };
+  }
+
+  if (!campaign.facebook_page_id) {
+    // Structurally unreachable: a Page-backed target can only exist when
+    // its campaign has a real facebook_page_id (DB trigger
+    // seeding_campaign_targets_check_page enforces this on write) — so
+    // pageBackedBatch.length > 0 guarantees this is non-null. Guarded
+    // explicitly anyway rather than asserted, for defense in depth.
+    throw new Error("Seeding campaign has Page-backed candidates but no facebook_page_id");
+  }
   const page = await getPageByFacebookPageId(campaign.facebook_page_id, client);
   if (!page) throw new Error("Facebook page not found for this campaign");
   const token = await getDecryptedPageAccessToken(page.id, client);
 
   const byPost = new Map<string, CandidateTask[]>();
-  for (const task of batch) {
+  for (const task of pageBackedBatch) {
     const list = byPost.get(task.facebook_post_id) ?? [];
     list.push(task);
     byPost.set(task.facebook_post_id, list);
   }
-
-  const results: { taskId: string; result: SeedingTaskEvidenceResult }[] = [];
-  let reconnectMarked = false;
 
   for (const [postId, tasksForPost] of byPost) {
     let fetched: { comments: FacebookLivePostCommentData[]; hasMore: boolean } | null = null;
@@ -295,7 +336,7 @@ export async function reconcileNextBatch(
     client
   );
 
-  return { processed: results.length, hasMoreCandidates, results };
+  return { processed: results.length, hasMoreCandidates, results, skippedNoConnectedSource };
 }
 
 /** Read-only: every Comment task in a campaign, enriched with its current
