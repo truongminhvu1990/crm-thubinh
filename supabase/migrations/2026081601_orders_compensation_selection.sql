@@ -1,0 +1,92 @@
+-- 2026081601_orders_compensation_selection.sql
+--
+-- ============================================================
+-- RECONCILIATION / PROVENANCE NOTE — read before touching this file
+-- ============================================================
+-- Production's supabase_migrations.schema_migrations records version
+-- 2026081601, name "orders_compensation_selection", as applied. No
+-- corresponding migration file has ever existed anywhere in this
+-- repository's history (searched every reachable branch/tag) or among
+-- its 41 currently-dangling/unreachable commit objects (searched by
+-- both commit message and full content). A real, separate diff for this
+-- feature is known to have existed — commit c8c735b11e6c88b18ad16c58b50
+-- 4364368dd1a5a ("feat(compensation): production release", 2026-08-16)
+-- states it copied two Order interface fields "verbatim from the
+-- existing (separately authored, not-yet-authorized) Orders
+-- compensation selection diff" — but that diff itself is not
+-- recoverable from this repository's object database.
+--
+-- THIS FILE IS NOT, AND DOES NOT CLAIM TO BE, THE ORIGINAL HISTORICAL
+-- MIGRATION. The exact original SQL is UNKNOWN. This file documents the
+-- currently verified Production schema only, so that repository history
+-- reflects reality — the same reconciliation pattern already used for
+-- 2026082501, 2026082302, and 2026082312.
+--
+-- ============================================================
+-- B. VERIFIED CURRENT PRODUCTION SCHEMA (read-only inspection, 2026-08-27)
+-- ============================================================
+-- public.orders.compensation_value
+--   data type:  numeric
+--   nullable:   YES
+--   default:    none
+--
+-- public.orders.compensation_method
+--   data type:  text
+--   nullable:   YES
+--   default:    none
+--
+-- Verified CHECK constraints (exact names and definitions, via
+-- pg_get_constraintdef against public.orders):
+--
+--   orders_compensation_method_check:
+--     CHECK (((compensation_method IS NULL) OR (compensation_method = ANY
+--     (ARRAY['Percentage'::text, 'Fixed Amount'::text]))))
+--
+--   orders_compensation_value_check:
+--     CHECK (((compensation_value IS NULL) OR (compensation_value >
+--     (0)::numeric)))
+--
+-- No index on either column. The only other column these interact with
+-- is orders.partner_id (uuid) — application logic gates on its presence
+-- before ever inspecting compensation_method/compensation_value.
+--
+-- ============================================================
+-- C. CURRENT APPLICATION USAGE (proven only, nothing speculative)
+-- ============================================================
+-- lib/compensation/compensation.service.ts's createCompensationsForOrder()
+-- reads order.compensation_method / order.compensation_value directly off
+-- the already-fetched Order object and defensively early-returns if
+-- either is null/undefined. types/order.ts declares both fields as
+-- optional/nullable on the Order interface.
+--
+-- An exhaustive search of lib/orders/** and app/** found no current
+-- application code path that ever SETS either column — no live write
+-- path exists today.
+--
+-- A live, read-only Production check (2026-08-27) found 69 total rows in
+-- public.orders, with 0 rows having a non-null compensation_method and 0
+-- rows having a non-null compensation_value.
+--
+-- ============================================================
+-- D. HISTORICAL CERTAINTY BOUNDARY
+-- ============================================================
+-- PROVEN:
+--   - the current Production schema documented in Section B above
+--   - supabase_migrations.schema_migrations records version 2026081601
+--   - no current application write path sets these two columns
+--
+-- UNKNOWN:
+--   - the original migration's exact SQL text
+--   - the original migration's exact statement ordering
+--   - whether the original migration touched anything beyond the two
+--     columns and two constraints verified in Section B
+--
+-- ============================================================
+-- E. NO-OP / NON-EXECUTABLE SAFETY
+-- ============================================================
+-- This artifact intentionally contains ZERO executable SQL statements.
+-- It does not modify Production or Dev in any way. It is not intended to
+-- recreate the original historical migration. No Production action is
+-- required or attempted here, because the schema documented above
+-- already exists and was independently verified live before this file
+-- was authored.
