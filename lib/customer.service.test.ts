@@ -63,12 +63,22 @@ function makeUpdateCustomerClient(marker: string, previousAssignedStaffId: strin
 
 // Wire the mocked module-level `supabase` default to the same chain shapes,
 // so the "no client supplied" tests below exercise the real default path
-// without throwing.
+// without throwing. `select` here is deliberately versatile - it's reused
+// by updateCustomer's assigned_staff_id lookup (.eq().maybeSingle()),
+// getCustomerById (.eq().single()), and getCustomers (.or()/.eq()/.order()
+// called directly, no .eq() first when no filters are given).
 Object.assign(defaultSupabase as Record<string, unknown>, {
   from() {
+    const selectBuilder = {
+      eq: () => selectBuilder,
+      or: () => selectBuilder,
+      order: () => Promise.resolve({ data: [], error: null }),
+      maybeSingle: () => Promise.resolve({ data: { assigned_staff_id: null }, error: null }),
+      single: () => Promise.resolve({ data: { id: "customer-1" }, error: null }),
+    };
     return {
       insert: () => ({ select: () => ({ single: () => Promise.resolve({ data: { id: "customer-1" }, error: null }) }) }),
-      select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: { assigned_staff_id: null }, error: null }) }) }),
+      select: () => selectBuilder,
       update: () => ({ eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: { id: "customer-1" }, error: null }) }) }) }),
     };
   },
@@ -102,4 +112,65 @@ test("updateCustomer: with no client argument, logActivity falls back to the mod
   await assert.doesNotReject(() => customerService.updateCustomer("customer-1", { assigned_staff_id: "staff-3" }));
   assert.equal(logActivityCalls.length, 1);
   assert.equal(logActivityCalls[0].client, defaultSupabase, "no client argument means updateCustomer's own default (module-level supabase) is used, unchanged");
+});
+
+/**
+ * getCustomerById/getCustomers client propagation. Both previously had no
+ * client parameter at all, always using the module-level anon-fallback
+ * `supabase` singleton. Confirmed via Dev E2E/UAT investigation: real
+ * server-side callers exist (app/api/commissions/** -> getCommissionList/
+ * getCommissionDetail -> withCustomerNames -> getCustomers()), so this is
+ * not merely a hypothetical future-caller concern. Added the same optional
+ * trailing client parameter already established across this codebase -
+ * getCustomers' existing `vipLevel` parameter is preserved in its original
+ * position, client is appended after it.
+ */
+function makeGetCustomerByIdClient(marker: string, row: unknown) {
+  return {
+    marker,
+    from() {
+      return { select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: row, error: null }) }) }) };
+    },
+  };
+}
+
+function makeGetCustomersClient(marker: string, rows: unknown[]) {
+  return {
+    marker,
+    from() {
+      const builder = {
+        or: () => builder,
+        eq: () => builder,
+        order: () => Promise.resolve({ data: rows, error: null }),
+      };
+      return { select: () => builder };
+    },
+  };
+}
+
+test("getCustomerById: forwards its own client into the query, not the anon-defaulting default", async () => {
+  const row = { id: "customer-1", full_name: "A" };
+  const fakeClient = makeGetCustomerByIdClient("client-C", row);
+
+  const result = await customerService.getCustomerById("customer-1", fakeClient as never);
+
+  assert.deepEqual(result, row);
+});
+
+test("getCustomerById: with no client argument, falls back to the module's own default (backward compatible)", async () => {
+  await assert.doesNotReject(() => customerService.getCustomerById("customer-1"));
+});
+
+test("getCustomers: forwards its own client into the query, not the anon-defaulting default", async () => {
+  const rows = [{ id: "customer-1", full_name: "A" }];
+  const fakeClient = makeGetCustomersClient("client-D", rows);
+
+  const result = await customerService.getCustomers(undefined, undefined, fakeClient as never);
+
+  assert.deepEqual(result, rows);
+});
+
+test("getCustomers: with no client argument, falls back to the module's own default (backward compatible), vipLevel still honored positionally", async () => {
+  const result = await customerService.getCustomers(undefined, "VIP1");
+  assert.deepEqual(result, []);
 });

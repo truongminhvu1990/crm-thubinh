@@ -76,9 +76,10 @@ function pickWritableFields(
  * there is no admin setting that can violate it. */
 export async function getCustomers(
   searchTerm?: string,
-  vipLevel?: string
+  vipLevel?: string,
+  client: SupabaseClient = supabase
 ): Promise<Customer[]> {
-  let query = supabase.from("customers").select("*");
+  let query = client.from("customers").select("*");
 
   if (searchTerm) {
     query = query.or(
@@ -104,8 +105,8 @@ export async function getCustomers(
 
 /** See getCustomers() above - Customer Profile is always fully shared,
  * never Data-Scope-restricted (Package 4B). */
-export async function getCustomerById(id: string): Promise<Customer | null> {
-  const { data, error } = await supabase.from("customers").select("*").eq("id", id).single();
+export async function getCustomerById(id: string, client: SupabaseClient = supabase): Promise<Customer | null> {
+  const { data, error } = await client.from("customers").select("*").eq("id", id).single();
 
   if (error) {
     console.error("Error fetching customer:", error);
