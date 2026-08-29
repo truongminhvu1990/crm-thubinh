@@ -143,9 +143,21 @@ export const SEEDING_COMMENT_CATEGORY_LABELS: Record<SeedingCommentCategory, str
   phan_hoi_tu_nhien: "Phản hồi tự nhiên",
 };
 
+/** Phase 2K-AW — request-time only, never persisted (seeding_comment_
+ * suggestions carries no intent column). Purely steers the ANGLE of a
+ * single Generate/Regenerate call; never a source of factual product
+ * information — see buildSystemPrompt's per-intent anti-fabrication
+ * reinforcement in lib/seeding/seedingComment.ai.service.ts. */
+export type SeedingCommentIntent = "ALL" | "PRICE_INQUIRY" | "SIZE_INQUIRY" | "PRODUCT_INTEREST" | "SOCIAL_PROOF";
+
 export interface SeedingCommentSuggestion {
   id: string;
   campaign_id: string;
+  /** Phase 2K-AR — nullable, additive. Null for every suggestion generated
+   * before this field existed, or generated with no target selected (the
+   * campaign-level fallback) — never backfilled/guessed after the fact,
+   * same convention as seeding_tasks' own legacy-nullable FKs. */
+  campaign_target_id: string | null;
   category: SeedingCommentCategory;
   content: string;
   generation_batch: number;
@@ -196,6 +208,21 @@ export interface SeedingTask {
    * free-text field, no separate failure_reason column (an existing field
    * already served this purpose). */
   result_note?: string | null;
+  /** Phase 2K-E — nullable, additive. Both null for every pre-existing
+   * task and for the ongoing engagement-task shape (Like/Comment on an
+   * already-existing post); populated together only for a distribution-
+   * generated task (always action_type "Share"). Frozen at creation, a
+   * direct FK reference — never a live read of the account/destination's
+   * own current display fields. */
+  execution_account_id?: string | null;
+  destination_id?: string | null;
+  /** Phase 2K-BK — Facebook's own comment id, set only when this Comment
+   * task was published directly from the CRM via the official Graph API
+   * (Page-sourced targets only). Null for every task completed through
+   * the existing manual/assisted workflow, and for every legacy task —
+   * never backfilled/guessed, same convention as every other nullable
+   * FK/id on this table. */
+  external_comment_id?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -212,6 +239,13 @@ export interface CreateSeedingTaskInput {
   comment_text?: string;
   assigned_staff_id?: string;
   scheduled_at?: string;
+  /** Phase 2K-E — optional, trailing, additive (same convention as
+   * targetManualContentReferenceIds in Phase 2J-D): every existing caller
+   * that never sets these keeps its exact current behavior, including the
+   * existing dedup key's behavior (destination_id null on both sides of a
+   * comparison is unchanged from before this field existed). */
+  execution_account_id?: string;
+  destination_id?: string;
 }
 
 export interface UpdateSeedingTaskStatusInput {
@@ -240,6 +274,15 @@ export interface SeedingTaskWithContext extends SeedingTask {
    * Unavailable/Refresh Failed), null for a legacy task with no target.
    * Warn-only: never blocks a task action. */
   target_discovery_status: string | null;
+  /** Phase 2K-E — which of the two exclusive-arc content sources this
+   * task's target actually resolved from. Mirrors
+   * SeedingCampaignTargetWithPost.source_type exactly (getTargetsByCampaign's
+   * already-proven pattern) — null only for a legacy task with no
+   * resolvable target. Fixes a real Phase 2J-era gap: before this field
+   * existed, getTasksAssignedToStaff only ever joined
+   * facebook_page_posts, so a manual-content-backed task silently
+   * rendered with no context at all. */
+  target_source_type: "Page" | "Personal" | "Group" | null;
 }
 
 /** Phase 2I (I2) — bulk Comment task creation across many selected targets
@@ -353,4 +396,145 @@ export interface SeedingEvidenceReconciliationBatchResult {
    * existing, honest "never checked" null — and reported here instead, in
    * the batch's own response, not the DB. */
   skippedNoConnectedSource: { taskId: string; reason: string }[];
+}
+
+/** Phase 2K-E — a real Facebook identity staff manually operate. Never
+ * stores credentials of any kind (see the module's own migration
+ * comment). assigned_staff_id is a mutable DEFAULT-operator suggestion
+ * only, never an exclusivity lock or a live source of truth for who
+ * actually performed any given task — a generated task freezes its own
+ * assigned_staff_id independently. */
+export type SeedingExecutionAccountStatus = "Active" | "Inactive";
+
+export interface SeedingExecutionAccount {
+  id: string;
+  display_name: string;
+  status: SeedingExecutionAccountStatus;
+  assigned_staff_id: string | null;
+  notes: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CreateSeedingExecutionAccountInput {
+  display_name: string;
+  assigned_staff_id?: string | null;
+  notes?: string | null;
+}
+
+export type UpdateSeedingExecutionAccountInput = Partial<
+  Pick<SeedingExecutionAccount, "display_name" | "status" | "assigned_staff_id" | "notes">
+>;
+
+/** Phase 2K-E — a place (Facebook Group today) work can be distributed
+ * into. Deliberately not content: no message/full_picture_url — a
+ * destination is where to post, never what already exists there. Never
+ * confused with facebook_manual_content_references (Phase 2J), which
+ * represents a specific existing post already discovered inside a Group
+ * for evidence/tracking purposes, not a reusable destination directory
+ * entry. */
+export type SeedingDestinationStatus = "Active" | "Inactive";
+
+export interface SeedingDestination {
+  id: string;
+  label: string;
+  platform: string;
+  destination_type: string;
+  permalink_url: string;
+  /** The normalized, stable Group id — never a post id. Dedup identity
+   * (unique index), not permalink_url — mirrors
+   * facebook_manual_content_references.facebook_object_id. */
+  external_group_id: string;
+  status: SeedingDestinationStatus;
+  notes: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CreateSeedingDestinationInput {
+  label: string;
+  /** The raw Facebook Group URL, exactly as pasted — parsed server-side by
+   * parseFacebookGroupDestinationUrl (lib/facebookTools/facebookUrlParser.ts)
+   * into external_group_id. Never accepted pre-parsed from the client. */
+  permalink_url: string;
+  notes?: string | null;
+}
+
+/** Phase 2K-AA — permalink_url is now editable (PO decision, 2026-08-28,
+ * reversing the original immutable-identity lock): re-parsed server-side
+ * through parseFacebookGroupDestinationUrl exactly like create, and
+ * external_group_id's dedup check re-runs on update (excluding the record
+ * being edited) — never accepted pre-parsed from the client. */
+export type UpdateSeedingDestinationInput = Partial<Pick<SeedingDestination, "label" | "status" | "notes" | "permalink_url">>;
+
+/** Phase 2K-E — the stateless compute -> preview -> confirm distribution
+ * flow (Architecture C, locked 2K-B/C/D). Preview and confirm share this
+ * exact same input shape deliberately: the client never sends a computed
+ * assignment, only the selection it wants distributed — the server always
+ * recomputes the actual assignment itself, on both calls. */
+export interface SeedingDistributionInput {
+  campaign_target_id: string;
+  destination_ids: string[];
+  execution_account_ids: string[];
+  scheduled_at?: string;
+}
+
+export interface SeedingDistributionAssignmentRow {
+  destination_id: string;
+  destination_label: string;
+  execution_account_id: string;
+  execution_account_label: string;
+  campaign_target_id: string;
+  source_type: "Page" | "Personal" | "Group";
+  content_message: string | null;
+  content_permalink_url: string | null;
+  /** Preview only — true when a non-terminal task for this exact
+   * (campaign_target_id, destination_id) pair already exists. Confirm
+   * never fabricates this field; it simply skips such rows via the same
+   * existing duplicate-protection check createTaskInternal already
+   * performs. */
+  already_exists?: boolean;
+}
+
+/** Preview response — read-only, zero database writes. */
+export interface SeedingDistributionPreviewResult {
+  totalCandidates: number;
+  assignableCandidates: number;
+  proposedAssignments: SeedingDistributionAssignmentRow[];
+  skipped: { destination_id: string; reason: string }[];
+  unavailableAccounts: { execution_account_id: string; reason: string }[];
+  unavailableDestinations: { destination_id: string; reason: string }[];
+  duplicates: { destination_id: string; existing_task_id: string }[];
+  warnings: string[];
+  confirmAllowed: boolean;
+}
+
+/** Confirm response — the only two persisted outputs of a distribution
+ * operation are the created seeding_tasks rows (their ids returned here)
+ * and one logActivity entry (not represented in this type — it carries no
+ * queryable return value). No transaction: partial success is reported
+ * honestly, never silently rolled back or silently claimed complete. */
+export interface SeedingDistributionConfirmResult {
+  created: { destination_id: string; task_id: string }[];
+  skipped: { destination_id: string; reason: string }[];
+  failed: { destination_id: string; reason: string }[];
+}
+
+/** Phase 2K-BK — Direct Facebook Comment Publish. Campaign-level (not
+ * per-task): capability depends only on whether the campaign's own
+ * connected Page is healthy in this CRM (facebook_pages.status), which
+ * every Page-sourced task in the campaign shares. A Personal/Group-
+ * sourced task is NOT_SUPPORTED regardless of this result — determined
+ * per-task from the target's own source_type, not by this type.
+ * AVAILABLE means "the Page is connected in this CRM" — it does NOT
+ * guarantee Meta has actually granted the `pages_manage_posts`
+ * permission this feature needs (a separate App Review step, tracked in
+ * docs/FACEBOOK_COMMENT_SHIELD_META_APP_SETUP.md); an attempt can still
+ * fail with a real Graph API permission error, surfaced honestly as a
+ * Failed task, never silently ignored. */
+export type SeedingDirectCommentAvailability = "AVAILABLE" | "UNAVAILABLE" | "NOT_SUPPORTED";
+
+export interface SeedingDirectCommentCapability {
+  availability: SeedingDirectCommentAvailability;
+  reason?: string;
 }

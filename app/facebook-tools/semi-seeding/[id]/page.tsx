@@ -1,22 +1,30 @@
 "use client";
 
 import { useCallback, useEffect, useState, use } from "react";
-import { Sparkles, RefreshCw, AlertTriangle, ImageOff, ExternalLink, Plus, ThumbsUp, MessageCircle, Share2, SearchCheck } from "lucide-react";
+import { Sparkles, RefreshCw, AlertTriangle, ImageOff, ExternalLink, Link2, Plus, ThumbsUp, MessageCircle, Share2, SearchCheck, Send } from "lucide-react";
 import {
   SeedingCampaign,
   SeedingCommentSuggestion,
+  SeedingCommentIntent,
   SeedingTask,
   SeedingTaskStatus,
   SeedingCampaignTargetWithPost,
   SeedingCampaignProgress,
   SeedingTaskWithEvidence,
   SeedingEvidenceReconciliationBatchResult,
+  SeedingDirectCommentCapability,
   SEEDING_COMMENT_CATEGORY_LABELS,
   SEEDING_TASK_ALLOWED_TRANSITIONS,
   SEEDING_TASK_EVIDENCE_EXCEPTION_RESULTS,
   SEEDING_CAMPAIGN_ALLOWED_TRANSITIONS,
 } from "@/types/seeding";
-import { seedingCampaignStatusLabel, seedingTaskStatusLabel, seedingTaskActionTypeLabel } from "@/lib/seeding/seeding.constants";
+import {
+  seedingCampaignStatusLabel,
+  seedingTaskStatusLabel,
+  seedingTaskActionTypeLabel,
+  SEEDING_COMMENT_INTENT_OPTIONS,
+} from "@/lib/seeding/seeding.constants";
+import { handleFacebookLinkClick, isMobileUserAgent } from "@/lib/utils";
 import { useStaffOptions } from "@/lib/hooks/useStaffOptions";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
@@ -24,6 +32,7 @@ import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
 import Modal from "@/components/ui/Modal";
+import CampaignDistributionModal from "@/components/seeding/CampaignDistributionModal";
 
 function taskStatusBadge(status: SeedingTaskStatus) {
   const label = seedingTaskStatusLabel(status);
@@ -103,6 +112,13 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
   const [reconcileError, setReconcileError] = useState<string | null>(null);
 
   const [productDescription, setProductDescription] = useState("");
+  // Phase 2K-AI — optional: which single target's own content the AI
+  // should use instead of the campaign-level snapshot. Empty = unchanged
+  // prior behavior (campaign-level context, same as every existing call).
+  const [generateTargetId, setGenerateTargetId] = useState("");
+  // Phase 2K-AW — request-time only, never persisted; "ALL" preserves the
+  // exact pre-2K-AW mixed-intent default behavior.
+  const [commentIntent, setCommentIntent] = useState<SeedingCommentIntent>("ALL");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
@@ -128,6 +144,23 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
   // for ("Đang tạo...") so a manager never has a reason to click again.
   const [isSubmittingTask, setIsSubmittingTask] = useState(false);
 
+  // Mobile-first fallback (real iPhone UAT, 2026-08-26) — same guaranteed
+  // manual "Copy link" path as My Tasks/the runner, offered here too at
+  // the target level for whoever previews a post from this page on
+  // mobile. Independent of every task-level flow above.
+  const [copiedLinkTargetId, setCopiedLinkTargetId] = useState<string | null>(null);
+
+  // Mobile-open fix rev.2 (real iPhone UAT, 2026-08-27) — client-side
+  // only, after mount (see the runner page's identical comment for why
+  // this can't be computed at render time without a hydration mismatch).
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      setIsMobile(isMobileUserAgent());
+    })();
+  }, []);
+
   // Phase 2I (I2/I3) — bulk Comment task creation across many selected
   // targets with one shared comment. Independent of the single-target
   // assigning/creatingSimpleTask flows above — reuses the same
@@ -149,19 +182,39 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
   const [pendingTaskChange, setPendingTaskChange] = useState<{ taskId: string; status: SeedingTaskStatus } | null>(null);
   const [taskReasonInput, setTaskReasonInput] = useState("");
 
+  // Phase 2K-S — distribution modal, scoped to one target at a time (a
+  // distribution operates on exactly one campaign_target_id, same
+  // per-target granularity as the existing Task Like/Share/Comment
+  // buttons above). Owns no distribution logic itself — see
+  // components/seeding/CampaignDistributionModal.tsx.
+  const [distributingTarget, setDistributingTarget] = useState<SeedingCampaignTargetWithPost | null>(null);
+
+  // Phase 2K-BK — Direct Facebook Comment Publish (Page-only; see
+  // lib/seeding/seedingDirectComment.service.ts's own doc comment for the
+  // feasibility rationale). Campaign-level: shared by every Page-sourced
+  // Comment task on this page, since it depends only on the campaign's
+  // one connected Page. null while loading/unknown — rendered as
+  // unavailable, never as available-by-default.
+  const [directCommentCapability, setDirectCommentCapability] = useState<SeedingDirectCommentCapability | null>(null);
+  // Which task is currently mid-publish — disables its own button and
+  // shows a loading state; a task not in this set is never blocked from
+  // being clicked by another task's in-flight request.
+  const [postingTaskId, setPostingTaskId] = useState<string | null>(null);
+
   const staffOptions = useStaffOptions();
 
   const loadAll = useCallback(async () => {
     setIsLoading(true);
     setForbidden(false);
     try {
-      const [campaignRes, targetsRes, suggestionsRes, tasksRes, progressRes, evidenceRes] = await Promise.all([
+      const [campaignRes, targetsRes, suggestionsRes, tasksRes, progressRes, evidenceRes, directCommentRes] = await Promise.all([
         fetch(`/api/seeding/campaigns/${id}`),
         fetch(`/api/seeding/campaigns/${id}/targets`),
         fetch(`/api/seeding/campaigns/${id}/generate-comments`),
         fetch(`/api/seeding/tasks?campaignId=${id}`),
         fetch(`/api/seeding/campaigns/${id}/progress`),
         fetch(`/api/seeding/campaigns/${id}/evidence-reconciliation`),
+        fetch(`/api/seeding/campaigns/${id}/direct-comment-capability`),
       ]);
       if (campaignRes.status === 403) {
         setForbidden(true);
@@ -177,6 +230,7 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
         const queue: SeedingTaskWithEvidence[] = await evidenceRes.json();
         setEvidenceByTaskId(new Map(queue.map((t) => [t.id, t])));
       }
+      setDirectCommentCapability(directCommentRes.ok ? await directCommentRes.json() : { availability: "UNAVAILABLE" });
     } catch (error) {
       console.error("Failed to load seeding campaign detail:", error);
     } finally {
@@ -188,6 +242,21 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
     loadAll();
   }, [loadAll]);
 
+  /** Phase 2K-AR — display isolation: switching the target selector loads
+   * exactly that target's persisted suggestions (via the new
+   * ?campaign_target_id= scoped GET), never a mix of every target ever
+   * generated for. An empty targetId reloads the unchanged campaign-level
+   * list (the existing "no target selected" fallback). */
+  async function loadSuggestionsForTarget(targetId: string) {
+    try {
+      const query = targetId ? `?campaign_target_id=${targetId}` : "";
+      const res = await fetch(`/api/seeding/campaigns/${id}/generate-comments${query}`);
+      if (res.ok) setSuggestions(await res.json());
+    } catch (error) {
+      console.error("Failed to load target-scoped suggestions:", error);
+    }
+  }
+
   async function handleGenerate() {
     setIsGenerating(true);
     setGenerateError(null);
@@ -195,11 +264,21 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       const res = await fetch(`/api/seeding/campaigns/${id}/generate-comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productDescription: productDescription || undefined }),
+        body: JSON.stringify({
+          productDescription: productDescription || undefined,
+          campaign_target_id: generateTargetId || undefined,
+          intent: commentIntent,
+        }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Không thể tạo gợi ý");
       const newSuggestions: SeedingCommentSuggestion[] = await res.json();
-      setSuggestions((prev) => [...prev, ...newSuggestions]);
+      // Phase 2K-AN — replace, not accumulate: seeding_comment_suggestions
+      // rows carry no target reference, so an ever-growing list silently
+      // mixes a fresh, correctly-grounded batch with older suggestions
+      // from a different target generated earlier in this same session.
+      // A full fix (tagging each batch with the target it was generated
+      // for) needs a schema change — flagged, not made, this phase.
+      setSuggestions(newSuggestions);
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Không thể tạo gợi ý");
     } finally {
@@ -310,6 +389,20 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       assigned_staff_id: assigneeId || undefined,
       scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
     });
+  }
+
+  /** Mobile-first fallback (real iPhone UAT, 2026-08-26) — see the state
+   * declaration above. Copies the raw, untransformed canonical permalink
+   * so it can be opened manually if the automatic Facebook-app handoff
+   * doesn't land on the right post. */
+  async function handleCopyTargetLink(targetId: string, permalinkUrl: string) {
+    try {
+      await navigator.clipboard.writeText(permalinkUrl);
+      setCopiedLinkTargetId(targetId);
+      setTimeout(() => setCopiedLinkTargetId((id) => (id === targetId ? null : id)), 2000);
+    } catch (error) {
+      console.error("Clipboard copy failed:", error);
+    }
   }
 
   // Phase 2I (I2) — bulk target selection, independent of any single-target
@@ -424,6 +517,30 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       if (progressRes.ok) setProgress(await progressRes.json());
     } catch (error) {
       console.error("Failed to update seeding task status:", error);
+    }
+  }
+
+  /** Phase 2K-BK — human-initiated, one task at a time (no autonomous/
+   * batch publishing). Whether this call succeeds or fails, the task's
+   * true status was already persisted server-side (Done or Failed) — so
+   * on failure this resyncs the whole task list from the server rather
+   * than guessing a shape, the same "trust the server, don't fabricate"
+   * principle the publish endpoint itself follows. */
+  async function handleDirectPublish(taskId: string) {
+    setPostingTaskId(taskId);
+    try {
+      const res = await fetch(`/api/seeding/tasks/${taskId}/publish-comment`, { method: "POST" });
+      if (res.ok) {
+        const updated: SeedingTask = await res.json();
+        setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
+      } else {
+        const tasksRes = await fetch(`/api/seeding/tasks?campaignId=${id}`);
+        if (tasksRes.ok) setTasks(await tasksRes.json());
+      }
+    } catch (error) {
+      console.error("Failed to publish direct comment:", error);
+    } finally {
+      setPostingTaskId(null);
     }
   }
 
@@ -599,9 +716,39 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
 
       <Card>
         <div className="flex items-end gap-3 mb-4 flex-wrap">
-          <h2 className="font-medium text-foreground">Gợi ý comment (AI) — dùng chung cho cả campaign</h2>
+          <h2 className="font-medium text-foreground">Gợi ý comment (AI)</h2>
         </div>
         <div className="flex items-end gap-3 mb-4 flex-wrap">
+          <div className="flex-1 min-w-[220px]">
+            <Select
+              label="Tạo theo bài viết (tùy chọn)"
+              placeholder="Toàn bộ campaign (mặc định)"
+              options={targets.map((t) => ({ value: t.id, label: t.message?.slice(0, 60) || t.id }))}
+              value={generateTargetId}
+              onChange={(e) => {
+                const newTargetId = e.target.value;
+                setGenerateTargetId(newTargetId);
+                // Phase 2K-AN — root-cause fix: "Sản phẩm liên quan" is a
+                // free-text field with no target scoping of its own; left
+                // uncleared it silently carries one target's specific facts
+                // (size/price/etc.) into a completely different target's
+                // generation. Switching targets must not carry it over.
+                setProductDescription("");
+                // Phase 2K-AR — show that target's own persisted
+                // suggestions, not whatever the previously selected
+                // target (or the campaign-level list) last displayed.
+                loadSuggestionsForTarget(newTargetId);
+              }}
+            />
+          </div>
+          <div className="flex-1 min-w-[220px]">
+            <Select
+              label="Mục đích tạo bình luận"
+              options={SEEDING_COMMENT_INTENT_OPTIONS}
+              value={commentIntent}
+              onChange={(e) => setCommentIntent(e.target.value as SeedingCommentIntent)}
+            />
+          </div>
           <div className="flex-1 min-w-[220px]">
             <Input
               label="Sản phẩm liên quan (tùy chọn)"
@@ -614,6 +761,9 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
             <RefreshCw className="w-4 h-4" /> {suggestions.length === 0 ? "Generate" : "Regenerate"}
           </Button>
         </div>
+        <p className="text-xs text-muted-foreground mb-3">
+          Chọn một bài viết để AI dùng đúng nội dung bài đó; để trống sẽ dùng ngữ cảnh chung của campaign (như trước đây).
+        </p>
         {generateError && <p className="text-destructive text-sm mb-3">{generateError}</p>}
 
         {suggestions.length === 0 ? (
@@ -691,14 +841,24 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                       </Badge>
                     )}
                     {target.permalink_url && (
-                      <a
-                        href={target.permalink_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" /> Mở trên Facebook
-                      </a>
+                      <>
+                        <a
+                          href={target.permalink_url}
+                          target={isMobile ? undefined : "_blank"}
+                          rel={isMobile ? undefined : "noopener noreferrer"}
+                          onClick={(e) => handleFacebookLinkClick(e, target.permalink_url!)}
+                          className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" /> Mở trên Facebook
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyTargetLink(target.id, target.permalink_url!)}
+                          className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                        >
+                          <Link2 className="w-3.5 h-3.5" /> {copiedLinkTargetId === target.id ? "Đã copy!" : "Copy link"}
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -711,6 +871,9 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                   </Button>
                   <Button size="sm" variant="secondary" onClick={() => openSimpleTask(target, "Comment")}>
                     <MessageCircle className="w-4 h-4" /> Task Comment (tự nhập)
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => setDistributingTarget(target)}>
+                    <Send className="w-4 h-4" /> Phân phối task
                   </Button>
                 </div>
               </div>
@@ -738,7 +901,9 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                       <tr className="text-left text-muted-foreground border-b border-border">
                         <th className="py-2 pr-4">Hành động</th>
                         <th className="py-2 pr-4">Nội dung</th>
+                        <th className="py-2 pr-4">Nhân viên được giao</th>
                         <th className="py-2 pr-4">Người thực hiện</th>
+                        <th className="py-2 pr-4">Thời gian thực hiện</th>
                         <th className="py-2 pr-4">Trạng thái</th>
                         <th className="py-2 pr-4">Bằng chứng (nội dung)</th>
                         <th className="py-2 pr-4"></th>
@@ -758,6 +923,14 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                             <td className="py-3 pr-4 text-muted-foreground">
                               {staffOptions.find((s) => s.value === t.assigned_staff_id)?.label ?? "Chưa gán"}
                             </td>
+                            <td className="py-3 pr-4 text-muted-foreground">
+                              {t.executed_by_staff_id ? staffOptions.find((s) => s.value === t.executed_by_staff_id)?.label ?? "—" : "—"}
+                            </td>
+                            <td className="py-3 pr-4 text-muted-foreground whitespace-nowrap">
+                              {t.executed_at
+                                ? new Date(t.executed_at).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric" })
+                                : "—"}
+                            </td>
                             <td className="py-3 pr-4">
                               {taskStatusBadge(t.status)}
                               {t.result_note && <p className="text-xs text-muted-foreground mt-1">{t.result_note}</p>}
@@ -770,6 +943,32 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                               )}
                             </td>
                             <td className="py-3 pr-4 whitespace-nowrap">
+                              {/* Phase 2K-BK — Direct Facebook Comment Publish. Page-only
+                                 (see the 2K-BK feasibility audit: no officially supported
+                                 API path exists for Personal/Group). Never shown as an
+                                 available action for a source it isn't supported for. */}
+                              {t.action_type === "Comment" && t.status === "Pending" && (
+                                <div className="mb-1.5">
+                                  {target.source_type !== "Page" ? (
+                                    <span className="text-xs text-muted-foreground">
+                                      Không hỗ trợ đăng trực tiếp cho nguồn {target.source_type} — dùng quy trình thủ công bên dưới.
+                                    </span>
+                                  ) : directCommentCapability?.availability === "AVAILABLE" ? (
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleDirectPublish(t.id)}
+                                      isLoading={postingTaskId === t.id}
+                                      disabled={postingTaskId !== null && postingTaskId !== t.id}
+                                    >
+                                      <Send className="w-3.5 h-3.5" /> Đăng comment
+                                    </Button>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">
+                                      Đăng trực tiếp: {directCommentCapability?.reason ?? "chưa khả dụng"} — dùng quy trình thủ công bên dưới.
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                               <div className="flex gap-1.5 flex-wrap">
                                 {nextActions.map((next) => (
                                   <Button key={next} size="sm" variant="secondary" onClick={() => handleTaskStatusClick(t.id, next)}>
@@ -955,6 +1154,22 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
             </div>
           </div>
         </Modal>
+      )}
+
+      {distributingTarget && (
+        <CampaignDistributionModal
+          campaignId={id}
+          target={distributingTarget}
+          onClose={() => setDistributingTarget(null)}
+          onConfirmed={async () => {
+            const [tasksRes, progressRes] = await Promise.all([
+              fetch(`/api/seeding/tasks?campaignId=${id}`),
+              fetch(`/api/seeding/campaigns/${id}/progress`),
+            ]);
+            if (tasksRes.ok) setTasks(await tasksRes.json());
+            if (progressRes.ok) setProgress(await progressRes.json());
+          }}
+        />
       )}
     </div>
   );

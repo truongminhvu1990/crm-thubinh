@@ -473,3 +473,28 @@ export async function getCommentHiddenStatus(commentId: string, pageAccessToken:
     return null;
   }
 }
+
+export interface CreatedComment {
+  id: string;
+}
+
+/** POST /{object-id}/comments — publishes a comment as the Page (Phase
+ * 2K-BK, Semi Seeding's direct-publish feature). Requires
+ * `pages_manage_posts` (Advanced Access, App Review) on the Page Access
+ * Token — this project's Meta App is currently only approved for
+ * `pages_show_list` / `pages_read_engagement` / `pages_manage_engagement`
+ * (see docs/FACEBOOK_COMMENT_SHIELD_META_APP_SETUP.md); calling this
+ * before that separate approval exists will surface as a genuine
+ * FacebookGraphError (permission denied), which the caller MUST treat as
+ * a real failure — never caught-and-ignored the way
+ * getCommentHiddenStatus above does for its own read-only, best-effort
+ * use case. Page-only by design: no equivalent exists for Personal or
+ * Group content (see the 2K-BK feasibility audit — no Graph API path is
+ * officially supported for either). */
+export async function createComment(objectId: string, message: string, pageAccessToken: string): Promise<CreatedComment> {
+  const result = await graphFetch<{ id?: string }>(`/${objectId}/comments`, { access_token: pageAccessToken, message }, { method: "POST" });
+  if (!result.id) {
+    throw new Error("Graph API did not return a comment id");
+  }
+  return { id: result.id };
+}
