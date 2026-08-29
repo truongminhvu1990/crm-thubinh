@@ -269,3 +269,46 @@ test("importManualContentUrls: rejects an invalid source_type before any write",
     /source_type không hợp lệ/
   );
 });
+
+/** Phase 2K-BU — Personal Post Quick Capture's single-URL get-or-create,
+ * used by the campaign-target orchestration in
+ * seedingCampaignTarget.service.ts. Same identity (facebook_object_id) as
+ * the batch importer above, just a single-row read-then-maybe-insert
+ * instead of a whole-batch pass. */
+
+test("getOrCreateManualContentReference: no existing row -> creates a new one, tagged 'Quick Capture'", async () => {
+  const { getOrCreateManualContentReference } = await import("./facebookManualContent.service");
+  const inserted = { id: "ref-new", source_type: "Personal", facebook_object_id: "pfbid02abc", permalink_url: "https://www.facebook.com/x/posts/pfbid02abc" };
+  const client = makeClient({
+    facebook_manual_content_references: [{ data: null }, { data: inserted }],
+  });
+
+  const result = await getOrCreateManualContentReference(
+    { facebookObjectId: "pfbid02abc", sourceType: "Personal", permalinkUrl: "https://www.facebook.com/x/posts/pfbid02abc" },
+    "staff-1",
+    client
+  );
+
+  assert.equal(result.created, true);
+  assert.equal(result.reference.id, "ref-new");
+});
+
+test("getOrCreateManualContentReference: an existing row with the same facebook_object_id is reused, never re-inserted", async () => {
+  const { getOrCreateManualContentReference } = await import("./facebookManualContent.service");
+  const existing = { id: "ref-existing", source_type: "Group", facebook_object_id: "pfbid02abc", permalink_url: "https://www.facebook.com/original-url" };
+  const client = makeClient({
+    facebook_manual_content_references: [{ data: existing }],
+  });
+
+  const result = await getOrCreateManualContentReference(
+    { facebookObjectId: "pfbid02abc", sourceType: "Personal", permalinkUrl: "https://www.facebook.com/a-different-share-link" },
+    "staff-1",
+    client
+  );
+
+  assert.equal(result.created, false);
+  assert.equal(result.reference.id, "ref-existing");
+  // The already-persisted source_type wins — a caller's new "Personal"
+  // guess never silently overwrites an existing "Group" reference.
+  assert.equal(result.reference.source_type, "Group");
+});

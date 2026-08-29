@@ -2,6 +2,7 @@ import { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import {
   FacebookManualContentReference,
+  FacebookManualContentSourceType,
   FacebookContentIndexRow,
   ImportManualContentUrlsInput,
   ImportManualContentUrlsResult,
@@ -46,6 +47,62 @@ export async function getManualContentIndex(client: SupabaseClient = supabase): 
     return [];
   }
   return data as FacebookContentIndexRow[];
+}
+
+export interface GetOrCreateManualContentReferenceInput {
+  facebookObjectId: string;
+  sourceType: FacebookManualContentSourceType;
+  permalinkUrl: string;
+}
+
+export interface GetOrCreateManualContentReferenceResult {
+  reference: FacebookManualContentReference;
+  created: boolean;
+}
+
+/** Phase 2K-BU — Personal Post Quick Capture's single-URL counterpart to
+ * importManualContentUrls' batch dedup logic (same identity: unique on
+ * facebook_object_id). Idempotent by construction: pasting the same URL
+ * (or any URL that resolves to the same facebook_object_id) twice always
+ * returns the SAME reference row (`created: false` the second time),
+ * never a duplicate. Deliberately does NOT overwrite an existing
+ * reference's source_type/permalink_url if the caller's new detection
+ * differs from what was already stored — the first-imported value wins,
+ * consistent with this module's "never silently mutate existing data
+ * from a new guess" convention; the caller should read back
+ * `reference.source_type`, not assume its own `input.sourceType` was
+ * applied. */
+export async function getOrCreateManualContentReference(
+  input: GetOrCreateManualContentReferenceInput,
+  actorStaffId: string | null,
+  client: SupabaseClient = supabase
+): Promise<GetOrCreateManualContentReferenceResult> {
+  const { data: existing, error: existingError } = await client
+    .from("facebook_manual_content_references")
+    .select("*")
+    .eq("facebook_object_id", input.facebookObjectId)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing) {
+    return { reference: existing as FacebookManualContentReference, created: false };
+  }
+
+  const { data, error } = await client
+    .from("facebook_manual_content_references")
+    .insert({
+      source_type: input.sourceType,
+      source_label: null,
+      facebook_object_id: input.facebookObjectId,
+      permalink_url: input.permalinkUrl,
+      message: null,
+      full_picture_url: null,
+      discovery_method: "Quick Capture",
+      imported_by_staff_id: actorStaffId,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return { reference: data as FacebookManualContentReference, created: true };
 }
 
 /** Batch URL import — the Level 3 fallback (Phase 2J-A) for content no

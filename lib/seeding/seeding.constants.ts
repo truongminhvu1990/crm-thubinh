@@ -2,6 +2,7 @@ import {
   SeedingCampaignObjective,
   SeedingCampaignStatus,
   SeedingCommentCategory,
+  SeedingCommentIntent,
   SeedingTaskActionType,
   SeedingTaskStatus,
 } from "@/types/seeding";
@@ -25,6 +26,17 @@ export const SEEDING_COMMENT_CATEGORIES: SeedingCommentCategory[] = [
   "tao_thao_luan",
   "kien_thuc",
   "phan_hoi_tu_nhien",
+];
+
+/** Phase 2K-AW — Comment Intent, request-time only (never persisted).
+ * "ALL" is the recommended/default option, matching current (pre-2K-AW)
+ * behavior byte-for-byte when omitted. */
+export const SEEDING_COMMENT_INTENT_OPTIONS: { value: SeedingCommentIntent; label: string }[] = [
+  { value: "ALL", label: "Đa dạng / Tổng hợp" },
+  { value: "PRICE_INQUIRY", label: "Hỏi giá" },
+  { value: "SIZE_INQUIRY", label: "Hỏi size / kích thước" },
+  { value: "PRODUCT_INTEREST", label: "Quan tâm sản phẩm" },
+  { value: "SOCIAL_PROOF", label: "Tạo tương tác / social proof" },
 ];
 
 export function seedingCampaignStatusLabel(status: string): string {

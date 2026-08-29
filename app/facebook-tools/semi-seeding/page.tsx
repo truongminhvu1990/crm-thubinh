@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Sparkles, AlertTriangle } from "lucide-react";
+import { Plus, Sparkles, AlertTriangle, Settings } from "lucide-react";
 import { SeedingCampaign, CreateSeedingCampaignInput } from "@/types/seeding";
 import { FacebookPageSummary, FacebookPagePost, FacebookPagePostSyncResult } from "@/types/facebookTools";
 import { SEEDING_CAMPAIGN_OBJECTIVE_OPTIONS, seedingCampaignStatusLabel } from "@/lib/seeding/seeding.constants";
@@ -151,9 +151,14 @@ export default function SemiSeedingPage() {
             <p className="text-sm text-muted-foreground">Campaign nhiều bài viết — nhân viên tự thực hiện, CRM theo dõi tiến độ</p>
           </div>
         </div>
-        <Button onClick={openCreate} disabled={pages.length === 0}>
-          <Plus className="w-4 h-4" /> Tạo campaign
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => router.push("/facebook-tools/semi-seeding/execution-setup")}>
+            <Settings className="w-4 h-4" /> Thiết lập thực hiện
+          </Button>
+          <Button onClick={openCreate} disabled={pages.length === 0}>
+            <Plus className="w-4 h-4" /> Tạo campaign
+          </Button>
+        </div>
       </div>
 
       {pages.length === 0 && !isLoading && (

@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ImageOff, ExternalLink, ThumbsUp, MessageCircle, Share2, ClipboardList, Lock, PlayCircle } from "lucide-react";
+import { AlertTriangle, ImageOff, ExternalLink, ThumbsUp, MessageCircle, Share2, ClipboardList, Lock, PlayCircle, Copy, Link2, Maximize2 } from "lucide-react";
 import { SeedingTaskWithContext, SeedingTaskStatus, SEEDING_TASK_ALLOWED_TRANSITIONS } from "@/types/seeding";
 import { seedingTaskStatusLabel, seedingTaskActionTypeLabel } from "@/lib/seeding/seeding.constants";
+import { handleFacebookLinkClick, isMobileUserAgent } from "@/lib/utils";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -17,7 +18,22 @@ import Input from "@/components/ui/Input";
  * alone (not `seeding.manage`). No Facebook write action anywhere on this
  * page: the only Facebook-facing control is an external permalink link the
  * staff member opens to act on themselves; every status update here just
- * writes back to the CRM via the existing PATCH /api/seeding/tasks/[id]. */
+ * writes back to the CRM via the existing PATCH /api/seeding/tasks/[id].
+ *
+ * Mobile-first fallback (real iPhone UAT, 2026-08-26) — Safari's Universal
+ * Link handoff into the native Facebook app is OS-controlled and not
+ * something the CRM can force or verify; "Copy link bài viết" gives the
+ * employee a guaranteed manual path to the exact post independent of
+ * whether that handoff succeeds. Still no Facebook write anywhere here —
+ * clipboard-only, same as Copy comment.
+ *
+ * Mobile-open fix rev.2 (real iPhone UAT, 2026-08-27) — a same-tab
+ * window.location.assign() call (rev.1) still failed to open a Page Post
+ * correctly on a real device; only the browser's own genuine, unmodified
+ * anchor default navigation worked. "Mở Facebook" below is a real
+ * <a href> and, on mobile, its click is left completely untouched — no
+ * preventDefault, no JS navigation — see lib/utils.ts
+ * isMobileUserAgent/handleFacebookLinkClick. */
 
 /** Statuses that ask for a reason before committing — reused, not a new
  * business rule: same result_note field/API every other status already
@@ -70,9 +86,21 @@ export default function MySeedingTasksPage() {
   const [forbidden, setForbidden] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [copiedCommentTaskId, setCopiedCommentTaskId] = useState<string | null>(null);
+  const [copiedLinkTaskId, setCopiedLinkTaskId] = useState<string | null>(null);
 
   const [pendingChange, setPendingChange] = useState<{ taskId: string; status: SeedingTaskStatus } | null>(null);
   const [reasonInput, setReasonInput] = useState("");
+  // Mobile-open fix rev.2 — client-side only, after mount (see the
+  // runner page's identical comment for why this can't be computed at
+  // render time without risking a hydration mismatch).
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      setIsMobile(isMobileUserAgent());
+    })();
+  }, []);
 
   const loadTasks = useCallback(async () => {
     setIsLoading(true);
@@ -121,6 +149,28 @@ export default function MySeedingTasksPage() {
       return;
     }
     submitStatus(taskId, status);
+  }
+
+  async function handleCopyComment(taskId: string, commentText: string) {
+    try {
+      await navigator.clipboard.writeText(commentText);
+      setCopiedCommentTaskId(taskId);
+      setTimeout(() => setCopiedCommentTaskId((id) => (id === taskId ? null : id)), 2000);
+    } catch (error) {
+      console.error("Clipboard copy failed:", error);
+    }
+  }
+
+  /** See the file-level note above — the guaranteed manual fallback for
+   * when the native Facebook app handoff doesn't land on the right post. */
+  async function handleCopyLink(taskId: string, permalinkUrl: string) {
+    try {
+      await navigator.clipboard.writeText(permalinkUrl);
+      setCopiedLinkTaskId(taskId);
+      setTimeout(() => setCopiedLinkTaskId((id) => (id === taskId ? null : id)), 2000);
+    } catch (error) {
+      console.error("Clipboard copy failed:", error);
+    }
   }
 
   async function confirmPendingChange() {
@@ -223,18 +273,42 @@ export default function MySeedingTasksPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between flex-wrap gap-2 mt-3 pt-3 border-t border-border">
-                  {task.target_permalink_url ? (
-                    <a
-                      href={task.target_permalink_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+                <div className="mt-3 pt-3 border-t border-border space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href={`/facebook-tools/semi-seeding/my-tasks/run?taskId=${task.id}`}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-input bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/70 transition-colors"
                     >
-                      <ExternalLink className="w-4 h-4" /> Mở Facebook
-                    </a>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">Không có permalink</span>
+                      <Maximize2 className="w-3.5 h-3.5" /> Mở task
+                    </Link>
+                    {task.action_type === "Comment" && task.comment_text && (
+                      <Button size="sm" variant="secondary" onClick={() => handleCopyComment(task.id, task.comment_text!)}>
+                        <Copy className="w-3.5 h-3.5" /> {copiedCommentTaskId === task.id ? "Đã copy!" : "Copy comment"}
+                      </Button>
+                    )}
+                    {task.target_permalink_url && (
+                      <Button size="sm" variant="secondary" onClick={() => handleCopyLink(task.id, task.target_permalink_url!)}>
+                        <Link2 className="w-3.5 h-3.5" /> {copiedLinkTaskId === task.id ? "Đã copy link!" : "Copy link bài viết"}
+                      </Button>
+                    )}
+                    {task.target_permalink_url ? (
+                      <a
+                        href={task.target_permalink_url}
+                        target={isMobile ? undefined : "_blank"}
+                        rel={isMobile ? undefined : "noopener noreferrer"}
+                        onClick={(e) => handleFacebookLinkClick(e, task.target_permalink_url!)}
+                        className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+                      >
+                        <ExternalLink className="w-4 h-4" /> Mở Facebook
+                      </a>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Không có permalink</span>
+                    )}
+                  </div>
+                  {task.target_permalink_url && (
+                    <p className="text-xs text-muted-foreground">
+                      Không mở được đúng bài viết trong app? Hãy dùng &quot;Copy link bài viết&quot; và mở trực tiếp trong Facebook.
+                    </p>
                   )}
                   <div className="flex gap-2 flex-wrap">
                     {nextActions.map((next) => (

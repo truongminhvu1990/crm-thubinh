@@ -10,6 +10,9 @@ import {
 import { logActivity } from "@/lib/activityLog.service";
 import { getCampaignById } from "./seedingCampaign.service";
 import { SeedingValidationError } from "./seeding.errors";
+import { parseFacebookContentUrl, FacebookUrlIdConfidence } from "@/lib/facebookTools/facebookUrlParser";
+import { getOrCreateManualContentReference } from "@/lib/facebookTools/facebookManualContent.service";
+import { FacebookManualContentSourceType } from "@/types/facebookTools";
 
 /** Seeding Campaign Management (Phase 2C) — the Campaign <-> Target Post
  * junction. Kept in its own file, sibling to seedingCampaign.service.ts,
@@ -257,4 +260,139 @@ export async function getCampaignProgress(
   progress.total = total ?? 0;
 
   return progress;
+}
+
+export interface QuickCaptureTargetResult {
+  outcome: "page_target_added" | "page_target_already_targeted" | "manual_target_added" | "manual_target_already_targeted";
+  detectedSourceType: "Page" | FacebookManualContentSourceType;
+  idConfidence: FacebookUrlIdConfidence;
+  target: SeedingCampaignTarget | null;
+}
+
+async function findExistingTarget(
+  campaignId: string,
+  column: "facebook_page_post_id" | "manual_content_reference_id",
+  value: string,
+  client: SupabaseClient
+): Promise<SeedingCampaignTarget | null> {
+  const { data, error } = await client
+    .from("seeding_campaign_targets")
+    .select("*")
+    .eq("campaign_id", campaignId)
+    .eq(column, value)
+    .maybeSingle();
+  if (error) throw error;
+  return data as SeedingCampaignTarget | null;
+}
+
+/** Phase 2K-BU — Personal Post Quick Capture. ONE operation: paste a URL,
+ * get a campaign target — reusing every existing piece (parseFacebookContentUrl,
+ * facebook_page_posts lookup, getOrCreateManualContentReference,
+ * addTargetsToCampaign) rather than inventing a parallel path. No new
+ * table, no schema change.
+ *
+ * Source detection order, "resolve through what we actually already
+ * know, never guess":
+ * 1. A real Group permalink (parser-detected, unambiguous) -> Group.
+ * 2. The resolved object id matches an ALREADY-KNOWN facebook_page_posts
+ *    row (any Connected Page, cross-checked against the Graph API's own
+ *    {page-id}_{post-id} composite id format, confirmed real via live Dev
+ *    data) -> Page. Delegates to addTargetsToCampaign for the existing
+ *    cross-Page validation (a post belonging to a different Page than
+ *    this campaign's own is rejected there, unchanged).
+ * 3. Otherwise -> Personal (or the caller's explicit sourceTypeOverride)
+ *    via getOrCreateManualContentReference.
+ *
+ * Idempotent end-to-end: pasting the same URL twice reuses the same
+ * reference (getOrCreateManualContentReference) and reports
+ * "already_targeted" via addTargetsToCampaign's own existing dedup check
+ * — never a duplicate reference, never a duplicate target. */
+export async function quickCaptureTargetFromUrl(
+  campaignId: string,
+  rawUrl: string,
+  actorStaffId: string | null,
+  client: SupabaseClient = supabase,
+  sourceTypeOverride?: FacebookManualContentSourceType
+): Promise<QuickCaptureTargetResult> {
+  const campaign = await getCampaignById(campaignId, client);
+  if (!campaign) throw new SeedingValidationError("Không tìm thấy campaign");
+
+  const parsed = parseFacebookContentUrl(rawUrl);
+  if (!parsed.ok) {
+    throw new SeedingValidationError(parsed.reason);
+  }
+
+  if (parsed.isGroupUrl) {
+    if (sourceTypeOverride && sourceTypeOverride !== "Group") {
+      throw new SeedingValidationError('Đây là link bài viết trong Nhóm — vui lòng chọn nguồn "Nhóm" để nhập link này');
+    }
+    return captureAsManualTarget(campaignId, rawUrl, parsed.facebookObjectId, parsed.idConfidence, "Group", actorStaffId, client);
+  }
+
+  // Cross-check against already-known Page posts. Suffix-match handles
+  // the Graph API's composite id format ({page-id}_{post-id}) against the
+  // bare post id parsed from a permalink URL — same fetch-all-then-check
+  // convention already used by importManualContentUrls' own dedup check,
+  // safe at this project's real data scale.
+  const { data: pagePostRows, error: pagePostError } = await client
+    .from("facebook_page_posts")
+    .select("id, facebook_post_id");
+  if (pagePostError) throw pagePostError;
+  const matchedPagePost = ((pagePostRows ?? []) as { id: string; facebook_post_id: string }[]).find(
+    (p) => p.facebook_post_id === parsed.facebookObjectId || p.facebook_post_id.endsWith(`_${parsed.facebookObjectId}`)
+  );
+
+  if (matchedPagePost) {
+    if (sourceTypeOverride) {
+      throw new SeedingValidationError(
+        "Bài viết này đã được nhận diện là bài của một Facebook Page đã kết nối — không thể chọn nguồn Personal/Group"
+      );
+    }
+    const result = await addTargetsToCampaign(campaignId, [matchedPagePost.id], actorStaffId, client);
+    const target = result.added[0] ?? (await findExistingTarget(campaignId, "facebook_page_post_id", matchedPagePost.id, client));
+    return {
+      outcome: result.added.length > 0 ? "page_target_added" : "page_target_already_targeted",
+      detectedSourceType: "Page",
+      idConfidence: parsed.idConfidence,
+      target,
+    };
+  }
+
+  return captureAsManualTarget(
+    campaignId,
+    rawUrl,
+    parsed.facebookObjectId,
+    parsed.idConfidence,
+    sourceTypeOverride ?? "Personal",
+    actorStaffId,
+    client
+  );
+}
+
+async function captureAsManualTarget(
+  campaignId: string,
+  rawUrl: string,
+  facebookObjectId: string,
+  idConfidence: FacebookUrlIdConfidence,
+  sourceType: FacebookManualContentSourceType,
+  actorStaffId: string | null,
+  client: SupabaseClient
+): Promise<QuickCaptureTargetResult> {
+  const { reference } = await getOrCreateManualContentReference(
+    { facebookObjectId, sourceType, permalinkUrl: rawUrl },
+    actorStaffId,
+    client
+  );
+  const result = await addTargetsToCampaign(campaignId, [], actorStaffId, client, [reference.id]);
+  const target = result.added[0] ?? (await findExistingTarget(campaignId, "manual_content_reference_id", reference.id, client));
+  return {
+    outcome: result.added.length > 0 ? "manual_target_added" : "manual_target_already_targeted",
+    // Reflects what's ACTUALLY persisted on the reference — never the
+    // locally-computed `sourceType` above, since an already-existing
+    // reference keeps whatever source_type it was first imported under
+    // (see getOrCreateManualContentReference's own doc comment).
+    detectedSourceType: reference.source_type,
+    idConfidence,
+    target,
+  };
 }

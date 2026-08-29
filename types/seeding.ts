@@ -538,3 +538,105 @@ export interface SeedingDirectCommentCapability {
   availability: SeedingDirectCommentAvailability;
   reason?: string;
 }
+
+/** Phase 2K-BO — Seeding Account Center. Task counts, by the existing
+ * SeedingTaskStatus values — shared shape for both account "types"
+ * (Execution Account and connected Page) so the UI renders both through
+ * one component. */
+export interface SeedingTaskCounts {
+  pending: number;
+  inProgress: number;
+  done: number;
+  failed: number;
+  skipped: number;
+  cancelled: number;
+  total: number;
+}
+
+/** A Seeding Execution Account is ALWAYS NOT_SUPPORTED for Direct
+ * Comment — a structural fact (no credential is ever stored for it, see
+ * seedingAccountCenter.service.ts's own doc comment), not a per-account
+ * computation. */
+export interface SeedingExecutionAccountWithStats extends SeedingExecutionAccount {
+  direct_comment_capability: SeedingDirectCommentCapability;
+  task_counts: SeedingTaskCounts;
+}
+
+export interface SeedingExecutionAccountDetail extends SeedingExecutionAccountWithStats {
+  tasks: SeedingTask[];
+}
+
+/** The connected-Page side — capability mirrors seedingDirectComment.
+ * service.ts's derivePageCapability exactly (single source of truth);
+ * task_counts here means "Comment tasks across every campaign backed by
+ * this Page." facebookTools.ts's FacebookPageSummary is reused as-is
+ * (never the encrypted-token-bearing FacebookPage — this type is
+ * UI-facing). */
+export interface SeedingPageAccountWithStats {
+  page: import("./facebookTools").FacebookPageSummary;
+  direct_comment_capability: SeedingDirectCommentCapability;
+  task_counts: SeedingTaskCounts;
+}
+
+export interface SeedingAccountCenterOverview {
+  executionAccounts: SeedingExecutionAccountWithStats[];
+  pages: SeedingPageAccountWithStats[];
+}
+
+/** Phase 2K-BP — Campaign Detail's "Connected Facebook Page" panel.
+ * facebook_page_id/page_name/status are all null together only when the
+ * campaign has no Page at all (a manual-only campaign, Architecture B) —
+ * never a partial/guessed state. capability mirrors
+ * seedingDirectComment.service.ts's derivePageCapability exactly. */
+export interface SeedingCampaignPageInfo {
+  facebook_page_id: string | null;
+  page_name: string | null;
+  status: import("./facebookTools").FacebookPageStatus | null;
+  capability: SeedingDirectCommentCapability;
+}
+
+/** Phase 2K-BQ — Page/Target Compatibility Safety.
+ *
+ * A 4-state model, each with a distinct, precise meaning — never
+ * collapsed into a simple boolean:
+ * - COMPATIBLE: the target's real owning Page (facebook_page_posts.
+ *   facebook_page_id, a persisted FK-backed column) matches the
+ *   campaign's current facebook_page_id exactly. Server-proven, not
+ *   assumed.
+ * - INCOMPATIBLE: both values are known and DIFFERENT — a real,
+ *   data-proven risk (phrased as risk, not certainty: Meta's own
+ *   token/object relationship is the final authority, this is a
+ *   pre-flight signal, not a guarantee of failure).
+ * - UNKNOWN: the ownership data needed for the comparison is genuinely
+ *   missing (e.g. the campaign has no Page assigned yet, or the
+ *   target's owning Page can't be resolved) — never treated as
+ *   compatible, never treated as incompatible.
+ * - NOT_SUPPORTED: the target's source type itself has no supported
+ *   Direct Comment API path at all (Personal/Group, per the 2K-BK
+ *   feasibility audit) — independent of any Page comparison, and never
+ *   assigned merely because ownership data happens to be missing. */
+export type SeedingTargetCompatibility = "COMPATIBLE" | "INCOMPATIBLE" | "UNKNOWN" | "NOT_SUPPORTED";
+
+export interface SeedingTargetCompatibilityResult {
+  compatibility: SeedingTargetCompatibility;
+  reason?: string;
+}
+
+export interface SeedingTargetCompatibilityMap {
+  [campaignTargetId: string]: SeedingTargetCompatibilityResult;
+}
+
+/** Phase 2K-BS — server-side acknowledgment protocol. Returned by
+ * publishDirectComment (and the publish-comment route) INSTEAD OF a
+ * SeedingTask when a fresh, server-side compatibility recomputation finds
+ * the target INCOMPATIBLE and the caller has not yet sent an explicit
+ * acknowledgment. The task is untouched (still Pending) when this shape
+ * is returned — it is a decision request, not an error and not a
+ * publish attempt. */
+export interface SeedingDirectCommentAcknowledgmentRequired {
+  needsAcknowledgment: true;
+  compatibility: "INCOMPATIBLE";
+  reason: string;
+}
+
+export type SeedingDirectCommentPublishResult = SeedingTask | SeedingDirectCommentAcknowledgmentRequired;

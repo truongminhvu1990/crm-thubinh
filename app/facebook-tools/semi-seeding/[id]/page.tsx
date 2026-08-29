@@ -13,6 +13,9 @@ import {
   SeedingTaskWithEvidence,
   SeedingEvidenceReconciliationBatchResult,
   SeedingDirectCommentCapability,
+  SeedingCampaignPageInfo,
+  SeedingPageAccountWithStats,
+  SeedingTargetCompatibilityMap,
   SEEDING_COMMENT_CATEGORY_LABELS,
   SEEDING_TASK_ALLOWED_TRANSITIONS,
   SEEDING_TASK_EVIDENCE_EXCEPTION_RESULTS,
@@ -104,6 +107,10 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
   const [progress, setProgress] = useState<SeedingCampaignProgress | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  // Phase 2K-BO — so a Share task's row can show WHICH execution account
+  // it's assigned to (previously invisible on this page — only
+  // assigned_staff_id was shown). Read-only lookup, id -> display_name.
+  const [executionAccountNameById, setExecutionAccountNameById] = useState<Map<string, string>>(new Map());
 
   // Phase 2F — AI-Powered Evidence Reconciliation. Content-only: never
   // implies staff identity is verified.
@@ -201,13 +208,55 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
   // being clicked by another task's in-flight request.
   const [postingTaskId, setPostingTaskId] = useState<string | null>(null);
 
+  // Phase 2K-BP — Reassign Connected Page. campaignPageInfo mirrors
+  // exactly what the server resolves for THIS campaign's own Page (name/
+  // status/capability) — never a client-side guess. reassignCandidates
+  // is fetched fresh, on demand, only when the picker is opened (not
+  // preloaded), from the same Account Center overview 2K-BO already
+  // built — no duplicate "list connected pages" logic.
+  const [campaignPageInfo, setCampaignPageInfo] = useState<SeedingCampaignPageInfo | null>(null);
+  const [showReassignPageModal, setShowReassignPageModal] = useState(false);
+  const [reassignCandidates, setReassignCandidates] = useState<SeedingPageAccountWithStats[]>([]);
+  const [isLoadingReassignCandidates, setIsLoadingReassignCandidates] = useState(false);
+  const [selectedReassignPageId, setSelectedReassignPageId] = useState("");
+  const [isReassigningPage, setIsReassigningPage] = useState(false);
+  const [reassignPageError, setReassignPageError] = useState<string | null>(null);
+
+  // Phase 2K-BQ — Page/Target Compatibility Safety. Server-computed only
+  // (getTargetCompatibilityForCampaign); the client never submits a
+  // compatibility status or override. Empty map while loading/unknown —
+  // a target absent from the map renders as no badge, never as
+  // implicitly compatible.
+  const [targetCompatibility, setTargetCompatibility] = useState<SeedingTargetCompatibilityMap>({});
+
+  // Phase 2K-BU — Personal Post Quick Capture. sourceTypeOverride is only
+  // ever "Personal" | "Group" | "" (auto) — the client can never assert
+  // "Page" (that's only ever server-detected from a real
+  // facebook_page_posts match). Modal stays open after a successful
+  // capture (input cleared) so staff can paste the next link right away —
+  // the common case is several links in a row, not just one.
+  const [showQuickCaptureModal, setShowQuickCaptureModal] = useState(false);
+  const [quickCaptureUrl, setQuickCaptureUrl] = useState("");
+  const [quickCaptureSourceOverride, setQuickCaptureSourceOverride] = useState<"Personal" | "Group" | "">("");
+  const [isQuickCapturing, setIsQuickCapturing] = useState(false);
+  const [quickCaptureError, setQuickCaptureError] = useState<string | null>(null);
+  const [quickCaptureLastResult, setQuickCaptureLastResult] = useState<{
+    outcome: string;
+    detectedSourceType: string;
+    idConfidence: string;
+  } | null>(null);
+  // Phase 2K-BS — server returned needsAcknowledgment for this task; the
+  // reason shown is whatever the server just recomputed fresh (never the
+  // possibly-stale targetCompatibility map fetched at page load).
+  const [acknowledgmentModal, setAcknowledgmentModal] = useState<{ taskId: string; reason: string } | null>(null);
+
   const staffOptions = useStaffOptions();
 
   const loadAll = useCallback(async () => {
     setIsLoading(true);
     setForbidden(false);
     try {
-      const [campaignRes, targetsRes, suggestionsRes, tasksRes, progressRes, evidenceRes, directCommentRes] = await Promise.all([
+      const [campaignRes, targetsRes, suggestionsRes, tasksRes, progressRes, evidenceRes, directCommentRes, executionAccountsRes, pageInfoRes, targetCompatibilityRes] = await Promise.all([
         fetch(`/api/seeding/campaigns/${id}`),
         fetch(`/api/seeding/campaigns/${id}/targets`),
         fetch(`/api/seeding/campaigns/${id}/generate-comments`),
@@ -215,6 +264,9 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
         fetch(`/api/seeding/campaigns/${id}/progress`),
         fetch(`/api/seeding/campaigns/${id}/evidence-reconciliation`),
         fetch(`/api/seeding/campaigns/${id}/direct-comment-capability`),
+        fetch(`/api/seeding/execution-accounts`),
+        fetch(`/api/seeding/campaigns/${id}/page-info`),
+        fetch(`/api/seeding/campaigns/${id}/target-compatibility`),
       ]);
       if (campaignRes.status === 403) {
         setForbidden(true);
@@ -231,6 +283,12 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
         setEvidenceByTaskId(new Map(queue.map((t) => [t.id, t])));
       }
       setDirectCommentCapability(directCommentRes.ok ? await directCommentRes.json() : { availability: "UNAVAILABLE" });
+      if (executionAccountsRes.ok) {
+        const accountsList: { id: string; display_name: string }[] = await executionAccountsRes.json();
+        setExecutionAccountNameById(new Map(accountsList.map((a) => [a.id, a.display_name])));
+      }
+      if (pageInfoRes.ok) setCampaignPageInfo(await pageInfoRes.json());
+      setTargetCompatibility(targetCompatibilityRes.ok ? await targetCompatibilityRes.json() : {});
     } catch (error) {
       console.error("Failed to load seeding campaign detail:", error);
     } finally {
@@ -526,14 +584,32 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
    * on failure this resyncs the whole task list from the server rather
    * than guessing a shape, the same "trust the server, don't fabricate"
    * principle the publish endpoint itself follows. */
-  async function handleDirectPublish(taskId: string) {
+  // Phase 2K-BS — acknowledged=true is sent ONLY from the modal's "Vẫn
+  // đăng comment" button, after the server has already told us (via a
+  // needsAcknowledgment response to the first, unacknowledged attempt)
+  // that this specific target is INCOMPATIBLE. The server re-checks
+  // compatibility fresh on every call regardless of this flag — this
+  // flag never carries a compatibility value, only "the staff saw the
+  // warning and chose to proceed."
+  async function handleDirectPublish(taskId: string, acknowledged = false) {
     setPostingTaskId(taskId);
     try {
-      const res = await fetch(`/api/seeding/tasks/${taskId}/publish-comment`, { method: "POST" });
+      const res = await fetch(`/api/seeding/tasks/${taskId}/publish-comment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ acknowledged }),
+      });
       if (res.ok) {
-        const updated: SeedingTask = await res.json();
+        const result = await res.json();
+        if (result?.needsAcknowledgment) {
+          setAcknowledgmentModal({ taskId, reason: result.reason ?? "Target này có thể thuộc một Facebook Page khác." });
+          return;
+        }
+        setAcknowledgmentModal(null);
+        const updated: SeedingTask = result;
         setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
       } else {
+        setAcknowledgmentModal(null);
         const tasksRes = await fetch(`/api/seeding/tasks?campaignId=${id}`);
         if (tasksRes.ok) setTasks(await tasksRes.json());
       }
@@ -541,6 +617,104 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       console.error("Failed to publish direct comment:", error);
     } finally {
       setPostingTaskId(null);
+    }
+  }
+
+  function handleCancelAcknowledgment() {
+    // No fetch, no state change beyond closing the modal — matches the
+    // "cancel produces zero DB write / zero Graph API call / zero
+    // activity log" requirement exactly, since nothing was ever sent.
+    setAcknowledgmentModal(null);
+  }
+
+  /** Phase 2K-BU — one click: paste -> parse -> detect Page/Personal/
+   * Group -> create-or-reuse reference -> create-or-reuse target, all
+   * server-side (quickCaptureTargetFromUrl). Never sends a claimed
+   * source_type for a URL the server can resolve to a known Page post —
+   * sourceTypeOverride is only ever a hint for the Personal/Group case. */
+  async function handleQuickCapture() {
+    if (!quickCaptureUrl.trim()) return;
+    setIsQuickCapturing(true);
+    setQuickCaptureError(null);
+    try {
+      const res = await fetch(`/api/seeding/campaigns/${id}/quick-capture`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: quickCaptureUrl.trim(), source_type_override: quickCaptureSourceOverride || undefined }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body?.error ?? "Không thể thêm bài viết này");
+      }
+      setQuickCaptureLastResult({
+        outcome: body.outcome,
+        detectedSourceType: body.detectedSourceType,
+        idConfidence: body.idConfidence,
+      });
+      setQuickCaptureUrl("");
+      await loadAll();
+    } catch (error) {
+      setQuickCaptureError(error instanceof Error ? error.message : "Không thể thêm bài viết này");
+    } finally {
+      setIsQuickCapturing(false);
+    }
+  }
+
+  function quickCaptureResultLabel(): string {
+    if (!quickCaptureLastResult) return "";
+    const sourceLabel =
+      quickCaptureLastResult.detectedSourceType === "Page"
+        ? "Facebook Page đã kết nối"
+        : quickCaptureLastResult.detectedSourceType === "Group"
+          ? "Nhóm (Manual Reference)"
+          : "Cá nhân (Manual Reference)";
+    const dup = quickCaptureLastResult.outcome.includes("already_targeted") ? " — bài viết này đã có trong campaign" : "";
+    return `Đã lưu — nguồn: ${sourceLabel}${dup}`;
+  }
+
+  /** Phase 2K-BP — opens the picker and fetches the candidate list fresh
+   * (the same Account Center overview 2K-BO already built) — never
+   * preloaded/stale, and never filtered down to AVAILABLE-only: an admin
+   * may deliberately reassign to a currently-UNAVAILABLE Page (e.g. one
+   * they're about to reconnect), per this phase's own "prioritize
+   * business correctness over forcing AVAILABLE-only" instruction. */
+  async function openReassignPageModal() {
+    setReassignPageError(null);
+    setSelectedReassignPageId(campaignPageInfo?.facebook_page_id ?? "");
+    setShowReassignPageModal(true);
+    setIsLoadingReassignCandidates(true);
+    try {
+      const res = await fetch("/api/seeding/account-center");
+      if (!res.ok) throw new Error(await res.text());
+      const overview = await res.json();
+      setReassignCandidates(overview.pages);
+    } catch (error) {
+      console.error("Failed to load connected Page candidates:", error);
+    } finally {
+      setIsLoadingReassignCandidates(false);
+    }
+  }
+
+  async function handleConfirmReassignPage() {
+    if (!selectedReassignPageId) return;
+    setIsReassigningPage(true);
+    setReassignPageError(null);
+    try {
+      const res = await fetch(`/api/seeding/campaigns/${id}/reassign-page`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ facebook_page_id: selectedReassignPageId }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Không thể đổi Connected Page");
+      setShowReassignPageModal(false);
+      // Full reload — page-info AND direct-comment-capability both
+      // re-resolve live from the server against the campaign's new
+      // facebook_page_id; nothing here is cached client-side.
+      await loadAll();
+    } catch (error) {
+      setReassignPageError(error instanceof Error ? error.message : "Không thể đổi Connected Page");
+    } finally {
+      setIsReassigningPage(false);
     }
   }
 
@@ -668,6 +842,44 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
         </div>
       </div>
 
+      {/* Phase 2K-BP — Connected Facebook Page. Renders exactly what the
+         server resolved (campaignPageInfo) — never a client-side guess.
+         Explicit "no Page" state when the campaign is manual-only,
+         never assumed. */}
+      <Card>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Link2 className="w-5 h-5 text-primary" />
+            <div>
+              <h2 className="font-medium text-foreground">Connected Facebook Page</h2>
+              {campaignPageInfo === null ? (
+                <p className="text-sm text-muted-foreground">Đang tải...</p>
+              ) : !campaignPageInfo.facebook_page_id ? (
+                <p className="text-sm text-muted-foreground">Campaign này chưa gắn với Facebook Page nào (chỉ dùng nguồn thủ công).</p>
+              ) : (
+                <div className="flex items-center gap-2 flex-wrap mt-1">
+                  <span className="text-sm text-foreground">{campaignPageInfo.page_name ?? campaignPageInfo.facebook_page_id}</span>
+                  {campaignPageInfo.status === "Connected" && <Badge variant="success">Đã kết nối</Badge>}
+                  {campaignPageInfo.status === "Reconnect Required" && <Badge variant="warning">Cần kết nối lại</Badge>}
+                  {campaignPageInfo.status === "Disconnected" && <Badge variant="muted">Đã ngắt kết nối</Badge>}
+                  {campaignPageInfo.capability.availability === "AVAILABLE" ? (
+                    <Badge variant="success">Đăng trực tiếp: Khả dụng</Badge>
+                  ) : (
+                    <Badge variant="muted">Đăng trực tiếp: {campaignPageInfo.capability.availability === "NOT_SUPPORTED" ? "Không hỗ trợ" : "Chưa khả dụng"}</Badge>
+                  )}
+                </div>
+              )}
+              {campaignPageInfo?.capability.reason && (
+                <p className="text-xs text-muted-foreground mt-1 max-w-md">{campaignPageInfo.capability.reason}</p>
+              )}
+            </div>
+          </div>
+          <Button size="sm" variant="secondary" onClick={openReassignPageModal}>
+            Đổi Connected Page
+          </Button>
+        </div>
+      </Card>
+
       {progress && (
         <Card>
           <h2 className="font-medium text-foreground mb-3">Tiến độ campaign</h2>
@@ -789,6 +1001,23 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
         )}
       </Card>
 
+      {/* Phase 2K-BU — Personal Post Quick Capture. Always visible,
+         whether or not the campaign already has targets — paste any
+         Facebook post/video/reel/photo/share link, one click, no manual
+         source-type form required for the common case. */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <Button
+          size="sm"
+          onClick={() => {
+            setQuickCaptureError(null);
+            setQuickCaptureLastResult(null);
+            setShowQuickCaptureModal(true);
+          }}
+        >
+          <Plus className="w-4 h-4" /> Thêm bài viết Facebook
+        </Button>
+      </div>
+
       {targets.length === 0 ? (
         <Card className="text-sm text-muted-foreground">Campaign này chưa có bài viết (target) nào.</Card>
       ) : (
@@ -835,6 +1064,16 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                 <div className="min-w-0 flex-1">
                   <p className="text-sm text-foreground line-clamp-2">{target.message || "(không có nội dung)"}</p>
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    {targetCompatibility[target.id]?.compatibility === "INCOMPATIBLE" && (
+                      <Badge variant="destructive" title={targetCompatibility[target.id]?.reason}>
+                        Có thể không tương thích với Page hiện tại
+                      </Badge>
+                    )}
+                    {targetCompatibility[target.id]?.compatibility === "UNKNOWN" && (
+                      <Badge variant="muted" title={targetCompatibility[target.id]?.reason}>
+                        Chưa xác định được Page sở hữu
+                      </Badge>
+                    )}
                     {target.discovery_status !== "Active" && (
                       <Badge variant={target.discovery_status === "Unavailable" ? "destructive" : "warning"}>
                         {target.discovery_status === "Unavailable" ? "Bài không còn truy cập" : "Đồng bộ lỗi gần nhất"}
@@ -902,6 +1141,9 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                         <th className="py-2 pr-4">Hành động</th>
                         <th className="py-2 pr-4">Nội dung</th>
                         <th className="py-2 pr-4">Nhân viên được giao</th>
+                        {/* Phase 2K-BO — only Share (distribution) tasks ever set
+                           execution_account_id; every other row shows "—". */}
+                        <th className="py-2 pr-4">Account thực hiện</th>
                         <th className="py-2 pr-4">Người thực hiện</th>
                         <th className="py-2 pr-4">Thời gian thực hiện</th>
                         <th className="py-2 pr-4">Trạng thái</th>
@@ -922,6 +1164,9 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                             <td className="py-3 pr-4 text-foreground max-w-xs">{t.comment_text || "—"}</td>
                             <td className="py-3 pr-4 text-muted-foreground">
                               {staffOptions.find((s) => s.value === t.assigned_staff_id)?.label ?? "Chưa gán"}
+                            </td>
+                            <td className="py-3 pr-4 text-muted-foreground">
+                              {t.execution_account_id ? executionAccountNameById.get(t.execution_account_id) ?? "—" : "—"}
                             </td>
                             <td className="py-3 pr-4 text-muted-foreground">
                               {t.executed_by_staff_id ? staffOptions.find((s) => s.value === t.executed_by_staff_id)?.label ?? "—" : "—"}
@@ -1171,6 +1416,164 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
           }}
         />
       )}
+
+      {/* Phase 2K-BP — Reassign Connected Page. Every candidate is shown,
+         AVAILABLE or not — an admin may deliberately pick an UNAVAILABLE
+         Page (e.g. one about to be reconnected); this UI never hides
+         that option or silently downgrades it to "not selectable". The
+         reason a Page is UNAVAILABLE is always shown, never suppressed. */}
+      <Modal open={showReassignPageModal} title="Đổi Connected Page" onClose={() => setShowReassignPageModal(false)}>
+        <div className="space-y-4">
+          {isLoadingReassignCandidates ? (
+            <p className="text-sm text-muted-foreground">Đang tải danh sách Page...</p>
+          ) : reassignCandidates.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Chưa có Facebook Page nào được kết nối trong CRM.</p>
+          ) : (
+            <div className="space-y-2 max-h-80 overflow-y-auto">
+              {reassignCandidates.map((c) => {
+                const isCurrent = c.page.facebook_page_id === campaignPageInfo?.facebook_page_id;
+                const isSelected = c.page.facebook_page_id === selectedReassignPageId;
+                return (
+                  <label
+                    key={c.page.id}
+                    className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer ${isSelected ? "border-primary bg-primary/5" : "border-border"}`}
+                  >
+                    <input
+                      type="radio"
+                      name="reassign-page"
+                      className="mt-1"
+                      checked={isSelected}
+                      onChange={() => setSelectedReassignPageId(c.page.facebook_page_id)}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium text-foreground">{c.page.page_name}</span>
+                        {isCurrent && <Badge variant="default">Đang dùng</Badge>}
+                        {c.page.status === "Connected" && <Badge variant="success">Đã kết nối</Badge>}
+                        {c.page.status === "Reconnect Required" && <Badge variant="warning">Cần kết nối lại</Badge>}
+                        {c.page.status === "Disconnected" && <Badge variant="muted">Đã ngắt kết nối</Badge>}
+                        {c.direct_comment_capability.availability === "AVAILABLE" ? (
+                          <Badge variant="success">Đăng trực tiếp: Khả dụng</Badge>
+                        ) : (
+                          <Badge variant="muted">Đăng trực tiếp: Chưa khả dụng</Badge>
+                        )}
+                      </div>
+                      {c.direct_comment_capability.reason && (
+                        <p className="text-xs text-muted-foreground mt-1">{c.direct_comment_capability.reason}</p>
+                      )}
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          {reassignPageError && <p className="text-destructive text-sm">{reassignPageError}</p>}
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" onClick={() => setShowReassignPageModal(false)}>
+              Hủy
+            </Button>
+            <Button onClick={handleConfirmReassignPage} isLoading={isReassigningPage} disabled={!selectedReassignPageId}>
+              Xác nhận đổi Page
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Phase 2K-BS — server-side acknowledgment protocol. Opened only
+         by a needsAcknowledgment response to a real publish attempt
+         (never speculatively from the target-card badge) — the reason
+         shown here is whatever the server just freshly computed, not the
+         page-load-time targetCompatibility map. "Vẫn đăng comment" re-
+         sends the exact same request with acknowledged:true; the server
+         recomputes compatibility again from scratch before deciding
+         anything — this modal never tells the server what the
+         compatibility is. */}
+      <Modal open={!!acknowledgmentModal} title="Target có thể không tương thích" onClose={handleCancelAcknowledgment}>
+        {acknowledgmentModal && (
+          <div className="space-y-4">
+            <p className="text-sm text-foreground">
+              {campaignPageInfo?.page_name
+                ? `Connected Page hiện tại của campaign là "${campaignPageInfo.page_name}".`
+                : "Campaign đang có một Connected Page."}
+            </p>
+            <p className="text-sm text-foreground">{acknowledgmentModal.reason}</p>
+            <p className="text-sm text-muted-foreground">
+              Comment có thể không đăng được lên bài viết này bằng Page hiện tại. Facebook (Graph API) vẫn là bên quyết định cuối
+              cùng — hệ thống chỉ cảnh báo trước, không tự chặn.
+            </p>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="secondary" onClick={handleCancelAcknowledgment} disabled={postingTaskId === acknowledgmentModal.taskId}>
+                Hủy
+              </Button>
+              <Button
+                onClick={() => handleDirectPublish(acknowledgmentModal.taskId, true)}
+                isLoading={postingTaskId === acknowledgmentModal.taskId}
+                disabled={postingTaskId !== null && postingTaskId !== acknowledgmentModal.taskId}
+              >
+                Vẫn đăng comment
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Phase 2K-BU — Personal Post Quick Capture. Default flow is
+         literally paste + one click: URL input, one primary button,
+         nothing else required. "Nguồn (tùy chọn)" only matters for a URL
+         the server can't already recognize as a known Page post — a
+         Group permalink is auto-detected regardless of this selector, and
+         a recognized Page post ignores it entirely (server-side, not
+         silently — quickCaptureTargetFromUrl rejects an override in that
+         case, surfaced honestly if it somehow gets sent). Stays open
+         after a successful capture so pasting several links in a row
+         needs no re-opening. */}
+      <Modal
+        open={showQuickCaptureModal}
+        title="Thêm bài viết Facebook"
+        onClose={() => setShowQuickCaptureModal(false)}
+      >
+        <div className="space-y-3">
+          <Input
+            label="Link bài viết Facebook"
+            value={quickCaptureUrl}
+            onChange={(e) => setQuickCaptureUrl(e.target.value)}
+            placeholder="https://www.facebook.com/.../posts/..."
+          />
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Nguồn (tùy chọn — để trống nếu không chắc)</label>
+            <div className="flex gap-2">
+              {(["", "Personal", "Group"] as const).map((opt) => (
+                <button
+                  key={opt || "auto"}
+                  type="button"
+                  onClick={() => setQuickCaptureSourceOverride(opt)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                    quickCaptureSourceOverride === opt
+                      ? "border-primary bg-primary/5 text-foreground"
+                      : "border-border text-muted-foreground hover:bg-muted/70"
+                  }`}
+                >
+                  {opt === "" ? "Tự động" : opt === "Personal" ? "Cá nhân" : "Nhóm"}
+                </button>
+              ))}
+            </div>
+          </div>
+          {quickCaptureError && <p className="text-destructive text-sm">{quickCaptureError}</p>}
+          {quickCaptureLastResult && !quickCaptureError && (
+            <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1.5">
+              {quickCaptureResultLabel()}
+            </p>
+          )}
+          <div className="flex justify-end gap-3 pt-1">
+            <Button variant="secondary" onClick={() => setShowQuickCaptureModal(false)}>
+              Đóng
+            </Button>
+            <Button onClick={handleQuickCapture} isLoading={isQuickCapturing} disabled={!quickCaptureUrl.trim()}>
+              Lưu
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

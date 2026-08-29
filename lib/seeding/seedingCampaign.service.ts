@@ -156,6 +156,71 @@ export async function updateCampaign(
   return data as SeedingCampaign;
 }
 
+/** Phase 2K-BP — Reassign Connected Page. Deliberately a SEPARATE
+ * function from updateCampaign/WRITABLE_FIELDS, not a fourth field
+ * folded into the generic update path: this one needs its own
+ * validation (the target Page must actually exist as a connected
+ * facebook_pages row — never trust a client-supplied facebook_page_id
+ * directly, per this phase's own hard requirement) that no other
+ * campaign field needs.
+ *
+ * Idempotent by design: reassigning to the campaign's own current Page
+ * is a no-op (no write, no activity-log entry) — matches this phase's
+ * "same Page reassignment must be handled honestly, no unnecessary side
+ * effect" requirement.
+ *
+ * Does NOT touch seeding_campaign_targets, seeding_tasks, or any
+ * existing task's execution_account_id/assigned_staff_id/
+ * external_comment_id — this changes exactly one thing: which Page a
+ * campaign's future Direct Comment attempts authenticate as. Every
+ * existing target's facebook_post_id (Facebook's own composite id,
+ * inherently tied to whichever Page actually created that post) is left
+ * completely untouched — if the newly assigned Page is genuinely a
+ * different real Facebook identity than the one those posts were
+ * created on, a future Direct Comment attempt on an EXISTING target may
+ * legitimately fail at the Graph API with a permission error; that is
+ * the existing, correct "never fake success" behavior
+ * (seedingDirectComment.service.ts), not something this function needs
+ * to special-case. */
+export async function reassignCampaignPage(
+  campaignId: string,
+  facebookPageId: string,
+  actorStaffId: string | null,
+  client: SupabaseClient = supabase
+): Promise<SeedingCampaign> {
+  if (!facebookPageId?.trim()) {
+    throw new SeedingValidationError("Vui lòng chọn một Facebook Page");
+  }
+
+  const campaign = await getCampaignById(campaignId, client);
+  if (!campaign) throw new SeedingValidationError("Không tìm thấy campaign");
+
+  if (campaign.facebook_page_id === facebookPageId) {
+    return campaign;
+  }
+
+  // Never trust the client-supplied id directly — the target Page must
+  // resolve to a real connected facebook_pages row.
+  const page = await getPageByFacebookPageId(facebookPageId, client);
+  if (!page) {
+    throw new SeedingValidationError("Facebook Page được chọn không tồn tại hoặc chưa được kết nối trong CRM");
+  }
+
+  const { data, error } = await client
+    .from("seeding_campaigns")
+    .update({ facebook_page_id: facebookPageId })
+    .eq("id", campaignId)
+    .select()
+    .single();
+  if (error) throw error;
+
+  await logActivity(
+    { staff_id: actorStaffId, action: "seeding_campaign_page_reassigned", entity: "seeding_campaign", entity_id: campaignId },
+    client
+  );
+  return data as SeedingCampaign;
+}
+
 /** "Làm mới nội dung bài post" — legacy (pre-Phase-2C, single-post)
  * campaigns only; re-fetches via Graph API on demand (manual, not
  * scheduled). A multi-target campaign has no single canonical post to

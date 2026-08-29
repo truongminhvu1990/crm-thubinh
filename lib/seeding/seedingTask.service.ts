@@ -43,22 +43,41 @@ interface TaskWithEmbeds {
       full_picture_url: string | null;
       discovery_status: string | null;
     } | null;
+    /** Phase 2K-E — the missing half of the exclusive-arc join: before
+     * this, a manual-content-backed task's target context silently
+     * resolved to all-null (facebook_page_posts is null for such a
+     * target, and nothing else was joined). Mirrors
+     * getTargetsByCampaign's already-proven dual-join pattern exactly. */
+    facebook_manual_content_references: {
+      source_type: string;
+      message: string | null;
+      permalink_url: string | null;
+      full_picture_url: string | null;
+    } | null;
   } | null;
   [key: string]: unknown;
 }
 
 /** My Tasks (Phase 2D) — a staff member's own queue across every campaign,
  * the surface `seeding.execute` (rather than `seeding.manage`) needs.
- * Enriched with campaign name + target post context in this ONE query
+ * Enriched with campaign name + target content context in this ONE query
  * (Supabase's embedded-select over the existing FKs: seeding_tasks.
  * campaign_id -> seeding_campaigns, seeding_tasks.campaign_target_id ->
- * seeding_campaign_targets -> facebook_page_posts) — never a follow-up
- * request per task, no N+1. A legacy task (campaign_target_id null) or a
- * target whose post context can't resolve simply gets null context
- * fields, never a crash. Filtered server-side by assigned_staff_id — the
- * caller (the API route, via getCurrentStaffFromRequest) must always pass
- * the CALLING staff's own id, never a caller-supplied one, so one staff
- * member's tasks are never visible to another. */
+ * seeding_campaign_targets -> {facebook_page_posts,
+ * facebook_manual_content_references}) — never a follow-up request per
+ * task, no N+1. A legacy task (campaign_target_id null) or a target whose
+ * content context can't resolve simply gets null context fields, never a
+ * crash. Filtered server-side by assigned_staff_id — the caller (the API
+ * route, via getCurrentStaffFromRequest) must always pass the CALLING
+ * staff's own id, never a caller-supplied one, so one staff member's
+ * tasks are never visible to another.
+ *
+ * Phase 2K-E — the exclusive-arc guarantees exactly one of
+ * facebook_page_posts / facebook_manual_content_references resolves per
+ * row (same guarantee getTargetsByCampaign already relies on), so
+ * checking the manual-content embed first and falling back to the Page
+ * embed is safe and exhaustive — never both, never neither, for any
+ * target that actually has a campaign_target_id. */
 export async function getTasksAssignedToStaff(
   staffId: string,
   client: SupabaseClient = supabase
@@ -66,7 +85,7 @@ export async function getTasksAssignedToStaff(
   const { data, error } = await client
     .from("seeding_tasks")
     .select(
-      "*, seeding_campaigns(name, status), seeding_campaign_targets(facebook_page_posts(message, permalink_url, full_picture_url, discovery_status))"
+      "*, seeding_campaigns(name, status), seeding_campaign_targets(facebook_page_posts(message, permalink_url, full_picture_url, discovery_status), facebook_manual_content_references(source_type, message, permalink_url, full_picture_url))"
     )
     .eq("assigned_staff_id", staffId)
     .order("scheduled_at", { ascending: true, nullsFirst: false });
@@ -77,15 +96,32 @@ export async function getTasksAssignedToStaff(
 
   return (data as unknown as TaskWithEmbeds[]).map((row) => {
     const { seeding_campaigns, seeding_campaign_targets, ...task } = row;
+    const manual = seeding_campaign_targets?.facebook_manual_content_references ?? null;
     const post = seeding_campaign_targets?.facebook_page_posts ?? null;
-    return {
+    const base = {
       ...(task as unknown as SeedingTask),
       campaign_name: seeding_campaigns?.name ?? null,
       campaign_status: (seeding_campaigns?.status as SeedingTaskWithContext["campaign_status"]) ?? null,
+    };
+    if (manual) {
+      return {
+        ...base,
+        target_message: manual.message,
+        target_permalink_url: manual.permalink_url,
+        target_full_picture_url: manual.full_picture_url,
+        // A manual reference has no API-driven reachability signal — same
+        // convention as getTargetsByCampaign's own "Active" fallback.
+        target_discovery_status: "Active",
+        target_source_type: manual.source_type as "Personal" | "Group",
+      };
+    }
+    return {
+      ...base,
       target_message: post?.message ?? null,
       target_permalink_url: post?.permalink_url ?? null,
       target_full_picture_url: post?.full_picture_url ?? null,
       target_discovery_status: post?.discovery_status ?? null,
+      target_source_type: post ? ("Page" as const) : null,
     };
   });
 }
@@ -99,7 +135,7 @@ export async function getTaskById(id: string, client: SupabaseClient = supabase)
   return data as SeedingTask | null;
 }
 
-interface CreateTaskResult {
+export interface CreateTaskResult {
   task: SeedingTask;
   /** false when an existing non-terminal duplicate was returned instead of
    * inserting a new row — lets callers that need to know (bulk creation's
@@ -130,8 +166,25 @@ interface CreateTaskResult {
  * scheduled date is never a duplicate. scheduled_at is compared with the
  * same null-safe pattern as assigned_staff_id below (Phase 2I I7a) — two
  * unscheduled tasks match each other, but an unscheduled task never
- * matches a scheduled one and two different dates never match. */
-async function createTaskInternal(
+ * matches a scheduled one and two different dates never match.
+ *
+ * Phase 2K-E — destination_id joins the duplicate signature with the same
+ * null-safe pattern, deliberately NOT execution_account_id: a task
+ * represents one specific content/target action at one destination, and
+ * changing the proposed execution account for an already-covered
+ * (target, destination) pair must return the existing task unchanged,
+ * never insert a second one for the same destination. Every existing
+ * caller that never sets destination_id is completely unaffected — the
+ * new `.is("destination_id", null)` branch only ever matches other rows
+ * that also have no destination_id, which is every pre-2K-E row and every
+ * non-distribution task, so old dedup behavior is bit-for-bit preserved. */
+/** Exported (Phase 2K-E) so seedingDistribution.service.ts can reuse this
+ * exact validation/duplicate-protection/insert primitive per generated
+ * assignment and honestly report created vs skipped (wasCreated) —
+ * exactly the same need createBulkCommentTasks already has, just from a
+ * sibling file instead of this one. No behavior change to the function
+ * itself, only its visibility. */
+export async function createTaskInternal(
   input: CreateSeedingTaskInput,
   actorStaffId: string | null,
   client: SupabaseClient
@@ -163,6 +216,9 @@ async function createTaskInternal(
   duplicateQuery = input.scheduled_at
     ? duplicateQuery.eq("scheduled_at", input.scheduled_at)
     : duplicateQuery.is("scheduled_at", null);
+  duplicateQuery = input.destination_id
+    ? duplicateQuery.eq("destination_id", input.destination_id)
+    : duplicateQuery.is("destination_id", null);
   if (input.action_type === "Comment") {
     duplicateQuery = duplicateQuery.eq("comment_text", input.comment_text!.trim());
   }
@@ -183,6 +239,8 @@ async function createTaskInternal(
       suggested_comment_id: input.action_type === "Comment" ? (input.suggested_comment_id ?? null) : null,
       assigned_staff_id: input.assigned_staff_id ?? null,
       scheduled_at: input.scheduled_at ?? null,
+      execution_account_id: input.execution_account_id ?? null,
+      destination_id: input.destination_id ?? null,
     })
     .select()
     .single();

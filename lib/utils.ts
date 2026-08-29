@@ -1,3 +1,4 @@
+import type { MouseEvent } from "react";
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -43,6 +44,40 @@ export function formatRelativeTime(date: string | Date): string {
   const diffDay = Math.floor(diffHour / 24);
   if (diffDay < 30) return `${diffDay} ngày trước`;
   return formatDate(d);
+}
+
+/** Semi Seeding mobile Facebook-open fix, revision 2 (real iPhone UAT,
+ * 2026-08-26 then 2026-08-27) — revision 1 redirected mobile to a
+ * same-tab window.location.assign(url) call, on the theory that "same
+ * tab" was the differentiator. A second real-device test disproved that:
+ * the exact same Page Post URL still failed via location.assign() on
+ * mobile, while it succeeded ONLY when it was the browser's own genuine,
+ * unmodified anchor default navigation (pasted into Safari's address
+ * bar; a real <a href> tap with zero JS involvement). So on mobile this
+ * handler now does nothing at all — no preventDefault, no
+ * location.assign/href, no window.open — every Facebook-opening control
+ * must be a real <a href={exactCanonicalUrl}> and let the browser's own
+ * default action run completely untouched. Desktop is unaffected — it
+ * still intercepts and opens a new tab exactly as before.
+ *
+ * Must only ever be called from inside a click handler, never at render
+ * time — reading navigator.userAgent during render would differ between
+ * the server's HTML (no navigator) and the client's hydration pass,
+ * causing a hydration mismatch. The same applies to any conditional
+ * target="_blank" on these anchors: target="_blank" alone forces a new
+ * browsing context by the HTML spec regardless of JS, so it must not be
+ * present at the moment of a mobile tap either — each page computes its
+ * own isMobile boolean once, client-side only, after mount. */
+export function isMobileUserAgent(): boolean {
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+}
+
+export function handleFacebookLinkClick(event: MouseEvent<HTMLAnchorElement>, url: string): void {
+  if (isMobileUserAgent()) {
+    return; // absolutely no preventDefault, no JS navigation — genuine native anchor default action
+  }
+  event.preventDefault();
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 /** crypto.randomUUID() isn't available in every runtime (older browsers,

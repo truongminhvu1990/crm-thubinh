@@ -42,7 +42,15 @@ export async function GET(request: NextRequest) {
 
 /** Creating/assigning a Task is a seeding.manage action — picking which AI
  * suggestion (or custom text) to hand to which staff member is planning,
- * not execution. */
+ * not execution.
+ *
+ * Phase 2K-E — execution_account_id/destination_id (Batch distribution's
+ * own generated tasks normally go through seedingDistribution.service.ts
+ * instead, but this manual single-task path accepts the same two fields
+ * additively, for a manager creating one distribution-style task by hand)
+ * pass straight through to createTask unchanged; both are optional and
+ * every existing caller that never sends them keeps its exact current
+ * behavior. */
 export async function POST(request: NextRequest) {
   const auth = await requirePermission(request, "seeding.manage");
   if ("error" in auth) return auth.error;

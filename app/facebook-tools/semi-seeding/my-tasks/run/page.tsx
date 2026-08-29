@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState, type MouseEvent } from "react";
 import Link from "next/link";
-import { AlertTriangle, ImageOff, ExternalLink, Copy, CheckCircle2, ArrowLeft, ArrowRight, Lock } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { AlertTriangle, ImageOff, ExternalLink, Copy, Link2, CheckCircle2, ArrowLeft, ArrowRight, Lock } from "lucide-react";
 import { SeedingTaskWithContext, SeedingTaskStatus, SEEDING_TASK_ALLOWED_TRANSITIONS } from "@/types/seeding";
 import { seedingTaskStatusLabel, seedingTaskActionTypeLabel } from "@/lib/seeding/seeding.constants";
+import { cn, isMobileUserAgent } from "@/lib/utils";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -26,15 +28,53 @@ function isEligible(task: SeedingTaskWithContext): boolean {
   return task.campaign_status !== "Completed" && (task.status === "Pending" || task.status === "In Progress");
 }
 
+/** Phase 2K-AP — useSearchParams() requires a Suspense boundary in the App
+ * Router (Next.js build fails otherwise); the fallback matches this page's
+ * own existing loading skeleton so there's no visible flash/regression for
+ * the plain (no ?taskId) entry point. */
 export default function SeedingTaskRunnerPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="p-6 max-w-xl mx-auto space-y-3">
+          <div className="h-32 bg-muted rounded-lg animate-pulse" />
+        </div>
+      }
+    >
+      <SeedingTaskRunnerInner />
+    </Suspense>
+  );
+}
+
+function SeedingTaskRunnerInner() {
+  const searchParams = useSearchParams();
+  // Phase 2K-AP — optional direct-open entry point: My Tasks can deep-link
+  // straight into one specific task's full execution card via ?taskId=,
+  // independent of queue position/eligibility. Omitted, behavior is
+  // byte-for-byte unchanged from before this phase.
+  const requestedTaskId = searchParams.get("taskId");
   const [tasks, setTasks] = useState<SeedingTaskWithContext[]>([]);
   const [forbidden, setForbidden] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isUpdating, setIsUpdating] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
+  const [copyLinkFeedback, setCopyLinkFeedback] = useState(false);
   const [pendingChange, setPendingChange] = useState<{ taskId: string; status: SeedingTaskStatus } | null>(null);
   const [reasonInput, setReasonInput] = useState("");
+  // Mobile-open fix rev.2 (real iPhone UAT, 2026-08-27) — computed client-
+  // side only, after mount, never during the render itself: reading
+  // navigator.userAgent during render would differ between the server's
+  // HTML (no navigator, defaults false here) and the client's hydration
+  // pass, causing a hydration mismatch. Starts false to match the server;
+  // the effect below corrects it before a human could plausibly tap.
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      setIsMobile(isMobileUserAgent());
+    })();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -46,18 +86,29 @@ export default function SeedingTaskRunnerPage() {
         }
         if (!res.ok) throw new Error(await res.text());
         const all: SeedingTaskWithContext[] = await res.json();
-        // Fixed, stable order for this session — only the eligible
-        // (actionable) tasks, so "Task X / Total" stays meaningful and
-        // never counts already-resolved or closed-campaign tasks.
-        setTasks(all.filter(isEligible));
-        setCurrentIndex(0);
+        if (requestedTaskId) {
+          // Phase 2K-AP — direct open: show every one of the caller's own
+          // tasks (never eligibility-filtered here) so an already-
+          // resolved task can still be reviewed, and jump straight to the
+          // requested one. Falls back to index 0 if the id isn't found
+          // (e.g. a stale link) rather than crashing.
+          setTasks(all);
+          const idx = all.findIndex((t) => t.id === requestedTaskId);
+          setCurrentIndex(idx >= 0 ? idx : 0);
+        } else {
+          // Fixed, stable order for this session — only the eligible
+          // (actionable) tasks, so "Task X / Total" stays meaningful and
+          // never counts already-resolved or closed-campaign tasks.
+          setTasks(all.filter(isEligible));
+          setCurrentIndex(0);
+        }
       } catch (error) {
         console.error("Failed to load task runner queue:", error);
       } finally {
         setIsLoading(false);
       }
     })();
-  }, []);
+  }, [requestedTaskId]);
 
   const currentTask = tasks[currentIndex];
 
@@ -114,9 +165,59 @@ export default function SeedingTaskRunnerPage() {
     }
   }
 
-  async function handleCopyAndOpen() {
-    await handleCopyComment();
-    if (currentTask?.target_permalink_url) window.open(currentTask.target_permalink_url, "_blank", "noopener,noreferrer");
+  /** Mobile-open fix rev.2 (real iPhone UAT, 2026-08-27) — a real device
+   * proved that a same-tab window.location.assign() call still failed to
+   * open a Page Post correctly; only the browser's own genuine,
+   * unmodified anchor default navigation worked. So the Facebook-opening
+   * control below is a real <a href> and this handler must never call
+   * preventDefault() or navigate via JS on mobile — see
+   * lib/utils.ts handleFacebookLinkClick.
+   *
+   * For a Comment task this control is also the "copy comment" shortcut.
+   * On desktop the copy is awaited before opening (unchanged from
+   * before). On mobile, awaiting anything here is not an option — it
+   * would delay the click handler's return, and the native navigation
+   * must be left to proceed with zero JS interference. The copy is fired
+   * without waiting for it instead: a genuine best-effort, not
+   * guaranteed to complete before the tab navigates away. "Copy comment"
+   * remains its own separate, always-reliable button for when that
+   * matters more than the combined convenience. */
+  function handleOpenFacebookClick(event: MouseEvent<HTMLAnchorElement>) {
+    const url = currentTask?.target_permalink_url;
+    if (!url) return;
+
+    if (isMobile) {
+      if (currentTask?.action_type === "Comment") void handleCopyComment();
+      return; // no preventDefault — the anchor's own default navigation runs untouched
+    }
+
+    event.preventDefault();
+    if (currentTask?.action_type === "Comment") {
+      handleCopyComment().then(() => window.open(url, "_blank", "noopener,noreferrer"));
+    } else {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  }
+
+  /** Mobile-first fallback (real iPhone UAT, 2026-08-26) — iOS's Universal
+   * Link handoff from Safari into the native Facebook app is entirely
+   * OS-controlled; the CRM cannot force or verify it succeeds, and no
+   * documented facebook:// deep-link scheme exists for an arbitrary Page
+   * post/video permalink. The one guaranteed-reliable manual path is
+   * copying the exact, untransformed canonical URL so the employee can
+   * open it themselves (paste into the Facebook app's own search/address
+   * bar, or into a browser) if the automatic handoff doesn't land on the
+   * right content. No shortening, no tracking wrapper — the raw stored
+   * permalink, verbatim. */
+  async function handleCopyLink() {
+    if (!currentTask?.target_permalink_url) return;
+    try {
+      await navigator.clipboard.writeText(currentTask.target_permalink_url);
+      setCopyLinkFeedback(true);
+      setTimeout(() => setCopyLinkFeedback(false), 2000);
+    } catch (error) {
+      console.error("Clipboard copy failed:", error);
+    }
   }
 
   if (forbidden) {
@@ -155,7 +256,10 @@ export default function SeedingTaskRunnerPage() {
     );
   }
 
-  const allResolved = tasks.every((t) => !isEligible(t));
+  // A directly-requested task must always be shown, even if it (or every
+  // other task) is already resolved — the "all done" screen only applies
+  // to the plain sequential-queue entry point.
+  const allResolved = !requestedTaskId && tasks.every((t) => !isEligible(t));
   if (allResolved) {
     return (
       <div className="p-6 max-w-xl mx-auto space-y-3">
@@ -224,23 +328,40 @@ export default function SeedingTaskRunnerPage() {
 
         {task.result_note && <p className="text-xs text-muted-foreground mb-3">Ghi chú: {task.result_note}</p>}
 
-        <div className="grid grid-cols-2 gap-2 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
           {task.action_type === "Comment" && task.comment_text && (
             <Button variant="secondary" onClick={handleCopyComment}>
               <Copy className="w-4 h-4" /> {copyFeedback ? "Đã copy!" : "Copy comment"}
             </Button>
           )}
+          {task.target_permalink_url && (
+            <Button variant="secondary" onClick={handleCopyLink}>
+              <Link2 className="w-4 h-4" /> {copyLinkFeedback ? "Đã copy link!" : "Copy link bài viết"}
+            </Button>
+          )}
           {task.target_permalink_url ? (
-            <Button
-              variant="secondary"
-              onClick={() => (task.action_type === "Comment" ? handleCopyAndOpen() : window.open(task.target_permalink_url!, "_blank", "noopener,noreferrer"))}
+            <a
+              href={task.target_permalink_url}
+              target={isMobile ? undefined : "_blank"}
+              rel={isMobile ? undefined : "noopener noreferrer"}
+              onClick={handleOpenFacebookClick}
+              className={cn(
+                "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors duration-150",
+                "bg-muted text-foreground hover:bg-muted/70 border border-border px-4 py-2 text-sm"
+              )}
             >
               <ExternalLink className="w-4 h-4" /> {task.action_type === "Comment" ? "Copy & Mở Facebook" : "Mở Facebook"}
-            </Button>
+            </a>
           ) : (
             <span className="text-xs text-muted-foreground self-center">Không có permalink</span>
           )}
         </div>
+
+        {task.target_permalink_url && (
+          <p className="text-xs text-muted-foreground mb-2">
+            Không mở được đúng bài viết trong app? Hãy dùng &quot;Copy link bài viết&quot; và mở trực tiếp trong Facebook.
+          </p>
+        )}
 
         <p className="text-xs text-muted-foreground mb-3">
           Bạn tự thực hiện hành động này trên Facebook, sau đó cập nhật kết quả bên dưới — CRM không tự động đánh dấu hoàn thành.

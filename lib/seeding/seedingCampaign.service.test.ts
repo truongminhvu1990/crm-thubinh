@@ -12,6 +12,18 @@ import { mock } from "node:test";
 mock.module("@/lib/supabase", { namedExports: { supabase: {} } });
 mock.module("@/lib/activityLog.service", { namedExports: { logActivity: async () => {} } });
 
+/** Phase 2K-BP — reassignCampaignPage's own dependency: never trusts a
+ * client-supplied facebook_page_id directly, always resolves it through
+ * getPageByFacebookPageId first. Mocked here (not routed through the
+ * fake client above) the same way seedingDirectComment.service.test.ts
+ * already mocks this exact module. */
+const getPageByFacebookPageIdMock = mock.fn(async (facebookPageId: string) =>
+  facebookPageId === "fb-page-missing" ? null : { id: "page-row", facebook_page_id: facebookPageId, page_name: "Page mới", status: "Connected" }
+);
+mock.module("@/lib/facebookTools/facebookPage.service", {
+  namedExports: { getPageByFacebookPageId: getPageByFacebookPageIdMock },
+});
+
 async function loadModule() {
   return import("./seedingCampaign.service");
 }
@@ -199,4 +211,66 @@ test("createCampaign: a manual-only campaign (no facebook_page_id) is created wi
   // Honest — no token can read Personal/Group content, so message is null
   // and the snapshot must never be fabricated.
   assert.equal(inserted.post_content_snapshot, null);
+});
+
+/** Phase 2K-BP — Reassign Connected Page. */
+
+test("reassignCampaignPage: (B)(C) Page A -> Page B succeeds, the new facebook_page_id is persisted", async () => {
+  const { reassignCampaignPage } = await loadModule();
+  const client = makeClient(
+    { id: "camp-1", status: "Active", facebook_page_id: "fb-page-a" } as never,
+    { data: { id: "camp-1", status: "Active", facebook_page_id: "fb-page-b" }, error: null }
+  );
+
+  const result = await reassignCampaignPage("camp-1", "fb-page-b", "staff-1", client);
+
+  assert.equal(result.facebook_page_id, "fb-page-b");
+  assert.equal((client as never as { __updateCalls: { changes: unknown }[] }).__updateCalls.length, 1);
+  assert.deepEqual((client as never as { __updateCalls: { changes: unknown }[] }).__updateCalls[0].changes, { facebook_page_id: "fb-page-b" });
+});
+
+test("reassignCampaignPage: (D)(F) a nonexistent/unconnected Page is rejected server-side — never trusts the client-supplied id, no write happens", async () => {
+  const { reassignCampaignPage } = await loadModule();
+  const { SeedingValidationError } = await import("./seeding.errors");
+  const client = makeClient({ id: "camp-1", status: "Active", facebook_page_id: "fb-page-a" } as never);
+
+  await assert.rejects(() => reassignCampaignPage("camp-1", "fb-page-missing", "staff-1", client), SeedingValidationError);
+  assert.equal((client as never as { __updateCalls: unknown[] }).__updateCalls.length, 0, "no write must happen when the selected Page cannot be verified");
+});
+
+test("reassignCampaignPage: an empty/missing facebook_page_id is rejected before even reading the campaign", async () => {
+  const { reassignCampaignPage } = await loadModule();
+  const { SeedingValidationError } = await import("./seeding.errors");
+  const client = makeClient({ id: "camp-1", status: "Active", facebook_page_id: "fb-page-a" } as never);
+
+  await assert.rejects(() => reassignCampaignPage("camp-1", "", "staff-1", client), SeedingValidationError);
+  assert.equal((client as never as { __updateCalls: unknown[] }).__updateCalls.length, 0);
+});
+
+test("reassignCampaignPage: a nonexistent campaign is rejected", async () => {
+  const { reassignCampaignPage } = await loadModule();
+  const { SeedingValidationError } = await import("./seeding.errors");
+  const client = makeClient(null);
+
+  await assert.rejects(() => reassignCampaignPage("missing-campaign", "fb-page-b", "staff-1", client), SeedingValidationError);
+});
+
+test("reassignCampaignPage: (L) reassigning to the campaign's own current Page is idempotent — no write, no side effect", async () => {
+  const { reassignCampaignPage } = await loadModule();
+  const client = makeClient({ id: "camp-1", status: "Active", facebook_page_id: "fb-page-a" } as never);
+
+  const result = await reassignCampaignPage("camp-1", "fb-page-a", "staff-1", client);
+
+  assert.equal(result.facebook_page_id, "fb-page-a");
+  assert.equal((client as never as { __updateCalls: unknown[] }).__updateCalls.length, 0, "same-Page reassignment must not write");
+});
+
+test("reassignCampaignPage: (K) the campaign's Page is unchanged if the underlying DB update fails", async () => {
+  const { reassignCampaignPage } = await loadModule();
+  const client = makeClient(
+    { id: "camp-1", status: "Active", facebook_page_id: "fb-page-a" } as never,
+    { data: null, error: new Error("db write failed") }
+  );
+
+  await assert.rejects(() => reassignCampaignPage("camp-1", "fb-page-b", "staff-1", client));
 });

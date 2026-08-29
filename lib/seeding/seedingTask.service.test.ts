@@ -692,6 +692,12 @@ interface FakeEmbeddedRow {
       full_picture_url: string | null;
       discovery_status: string | null;
     } | null;
+    facebook_manual_content_references?: {
+      source_type: string;
+      message: string | null;
+      permalink_url: string | null;
+      full_picture_url: string | null;
+    } | null;
   } | null;
 }
 
@@ -1020,6 +1026,213 @@ test("getTasksAssignedToStaff: target_discovery_status surfaces 'Unavailable' �
   const [task] = await getTasksAssignedToStaff("staff-A", client);
   assert.equal(task.target_discovery_status, "Unavailable");
   assert.equal(task.status, "Pending", "a non-Active discovery_status must never itself change or block the task's own status");
+});
+
+/**
+ * Phase 2K-E — destination_id joins the dedup key (deliberately NOT
+ * execution_account_id), and getTasksAssignedToStaff gains the manual-
+ * content-context join (fixing the Phase 2J-era gap).
+ */
+
+test("createTask: same target/action/assignee but a DIFFERENT destination_id is never blocked as a duplicate", async () => {
+  const { createTask } = await import("./seedingTask.service");
+  const client = makeClient({
+    seeding_campaign_targets: [{ data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
+    seeding_tasks: [
+      { data: null }, // duplicate query scoped to destination_id "dest-2", finds nothing
+      {
+        data: {
+          id: "t-dest2",
+          campaign_id: "c1",
+          campaign_target_id: "tg1",
+          action_type: "Share",
+          assigned_staff_id: "staff-1",
+          destination_id: "dest-2",
+          execution_account_id: "acct-1",
+          status: "Pending",
+        },
+      },
+    ],
+  });
+
+  const result = await createTask(
+    { campaign_target_id: "tg1", action_type: "Share", assigned_staff_id: "staff-1", destination_id: "dest-2", execution_account_id: "acct-1" },
+    "staff-1",
+    client
+  );
+  assert.equal(result.id, "t-dest2");
+});
+
+test("createTask: same target/action/assignee/destination_id but a DIFFERENT execution_account_id is treated as a duplicate — returns the existing task, execution_account_id untouched", async () => {
+  const { createTask } = await import("./seedingTask.service");
+  const existingTask = {
+    id: "already-exists-dest",
+    campaign_id: "c1",
+    campaign_target_id: "tg1",
+    action_type: "Share",
+    assigned_staff_id: "staff-1",
+    destination_id: "dest-1",
+    execution_account_id: "acct-original",
+    status: "Pending",
+  };
+  const client = makeClient({
+    seeding_campaign_targets: [{ data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
+    // Only ONE seeding_tasks entry: the duplicate check must find this and
+    // return it directly, proving execution_account_id never participates
+    // in the dedup key — a different proposed account for the same
+    // (target, destination) pair is still the same duplicate.
+    seeding_tasks: [{ data: existingTask }],
+  });
+
+  const result = await createTask(
+    { campaign_target_id: "tg1", action_type: "Share", assigned_staff_id: "staff-1", destination_id: "dest-1", execution_account_id: "acct-different" },
+    "staff-1",
+    client
+  );
+  assert.equal(result.id, "already-exists-dest");
+  assert.equal(result.execution_account_id, "acct-original", "the original execution_account_id must never be silently overwritten");
+});
+
+test("createTask: an omitted destination_id is scoped to IS NULL — never matched by a task that has a real destination_id (existing non-distribution tasks unaffected)", async () => {
+  const { createTask } = await import("./seedingTask.service");
+  const client = makeClient({
+    seeding_campaign_targets: [{ data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
+    seeding_tasks: [
+      { data: null }, // duplicate query scoped to destination_id IS NULL, finds nothing
+      { data: { id: "t-no-dest", campaign_id: "c1", campaign_target_id: "tg1", action_type: "Like", assigned_staff_id: "staff-1", destination_id: null, status: "Pending" } },
+    ],
+  });
+
+  const result = await createTask({ campaign_target_id: "tg1", action_type: "Like", assigned_staff_id: "staff-1" }, "staff-1", client);
+  assert.equal(result.id, "t-no-dest");
+  assert.equal(result.destination_id, null);
+});
+
+test("createTask: two otherwise-identical tasks with no destination_id (both null) are treated as duplicates — null matches null, existing pre-2K-E dedup behavior preserved bit-for-bit", async () => {
+  const { createTask } = await import("./seedingTask.service");
+  const existingTask = {
+    id: "already-exists-no-dest",
+    campaign_id: "c1",
+    campaign_target_id: "tg1",
+    action_type: "Comment",
+    comment_text: "hàng sẵn sg nha",
+    assigned_staff_id: "staff-1",
+    destination_id: null,
+    status: "Pending",
+  };
+  const client = makeClient({
+    seeding_campaign_targets: [{ data: { id: "tg1", campaign_id: "c1", facebook_post_id: "post1" } }],
+    seeding_tasks: [{ data: existingTask }],
+  });
+
+  const result = await createTask(
+    { campaign_target_id: "tg1", action_type: "Comment", comment_text: "hàng sẵn sg nha", assigned_staff_id: "staff-1" },
+    "staff-1",
+    client
+  );
+  assert.equal(result.id, "already-exists-no-dest");
+});
+
+test("getTasksAssignedToStaff: a manual Personal-content-backed task now correctly returns target_message/target_permalink_url/target_source_type (fixes the Phase 2J-era gap)", async () => {
+  const { getTasksAssignedToStaff } = await import("./seedingTask.service");
+  const { client } = makeAssignedClient([
+    {
+      id: "t-personal",
+      campaign_id: "c1",
+      campaign_target_id: "tg1",
+      action_type: "Like",
+      comment_text: null,
+      status: "Pending",
+      assigned_staff_id: "staff-A",
+      seeding_campaigns: { name: "Campaign A" },
+      seeding_campaign_targets: {
+        facebook_page_posts: null,
+        facebook_manual_content_references: {
+          source_type: "Personal",
+          message: null,
+          permalink_url: "https://www.facebook.com/100000000000000/posts/111",
+          full_picture_url: null,
+        },
+      },
+    },
+  ]);
+
+  const [task] = await getTasksAssignedToStaff("staff-A", client);
+  assert.equal(task.target_permalink_url, "https://www.facebook.com/100000000000000/posts/111");
+  assert.equal(task.target_source_type, "Personal");
+  assert.equal(task.target_discovery_status, "Active");
+});
+
+test("getTasksAssignedToStaff: a manual Group-content-backed task correctly returns target_source_type 'Group'", async () => {
+  const { getTasksAssignedToStaff } = await import("./seedingTask.service");
+  const { client } = makeAssignedClient([
+    {
+      id: "t-group",
+      campaign_id: "c1",
+      campaign_target_id: "tg1",
+      action_type: "Share",
+      comment_text: null,
+      status: "Pending",
+      assigned_staff_id: "staff-A",
+      seeding_campaigns: { name: "Campaign A" },
+      seeding_campaign_targets: {
+        facebook_page_posts: null,
+        facebook_manual_content_references: {
+          source_type: "Group",
+          message: null,
+          permalink_url: "https://www.facebook.com/groups/555/posts/999/",
+          full_picture_url: null,
+        },
+      },
+    },
+  ]);
+
+  const [task] = await getTasksAssignedToStaff("staff-A", client);
+  assert.equal(task.target_source_type, "Group");
+  assert.equal(task.target_permalink_url, "https://www.facebook.com/groups/555/posts/999/");
+});
+
+test("getTasksAssignedToStaff: a Page-backed task's target_source_type is 'Page' (unchanged behavior, now explicit)", async () => {
+  const { getTasksAssignedToStaff } = await import("./seedingTask.service");
+  const { client } = makeAssignedClient([
+    {
+      id: "t-page",
+      campaign_id: "c1",
+      campaign_target_id: "tg1",
+      action_type: "Like",
+      comment_text: null,
+      status: "Pending",
+      assigned_staff_id: "staff-A",
+      seeding_campaigns: { name: "Campaign A" },
+      seeding_campaign_targets: {
+        facebook_page_posts: { message: "m", permalink_url: "p", full_picture_url: null, discovery_status: "Active" },
+        facebook_manual_content_references: null,
+      },
+    },
+  ]);
+
+  const [task] = await getTasksAssignedToStaff("staff-A", client);
+  assert.equal(task.target_source_type, "Page");
+});
+
+test("getTasksAssignedToStaff: a legacy task with no campaign_target_id still has target_source_type null, never crashes", async () => {
+  const { getTasksAssignedToStaff } = await import("./seedingTask.service");
+  const { client } = makeAssignedClient([
+    {
+      id: "t-legacy2",
+      campaign_id: "c1",
+      campaign_target_id: null,
+      action_type: "Comment",
+      comment_text: "Bài cũ",
+      status: "Pending",
+      assigned_staff_id: "staff-A",
+      seeding_campaigns: { name: "Campaign A" },
+      seeding_campaign_targets: null,
+    },
+  ]);
+
+  const [task] = await getTasksAssignedToStaff("staff-A", client);
+  assert.equal(task.target_source_type, null);
 });
 
 test("getTasksAssignedToStaff: target_discovery_status surfaces 'Refresh Failed'", async () => {

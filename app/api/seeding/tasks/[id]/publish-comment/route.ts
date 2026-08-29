@@ -31,8 +31,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const updated = await publishDirectComment(id, staff.id, client);
-    return NextResponse.json(updated);
+    // Phase 2K-BS — the only client-supplied input this route ever
+    // accepts is a boolean "I saw the warning" acknowledgment; it never
+    // accepts a compatibility value, target owner Page, or any other
+    // override — publishDirectComment always recomputes compatibility
+    // itself from live DB data.
+    const body = await request.json().catch(() => ({}));
+    const acknowledged = body?.acknowledged === true;
+
+    const result = await publishDirectComment(id, staff.id, client, acknowledged);
+    return NextResponse.json(result);
   } catch (error) {
     return handleSeedingError(error);
   }
