@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Users, Gem, Package, TrendingUp, Calendar, Wallet, Coins } from "lucide-react";
+import { Users, Gem, Package, TrendingUp, Calendar, Wallet, Coins, ClipboardList, PiggyBank } from "lucide-react";
 import { FollowUpSummaryCounts } from "@/lib/customer.service";
 import { ProductReportData, BatchStaticReportData, PurchaseReportData } from "@/lib/reports/reports.service";
+import { OrderValueSummary } from "@/lib/orders/orderValueSummary.service";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
 import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
 import { TopSalesStaffEntry } from "@/lib/staff.service";
@@ -17,6 +18,7 @@ import ReportsIntegration from "@/components/dashboard/ReportsIntegration";
 import FollowUpSummaryCard from "@/components/dashboard/FollowUpSummaryCard";
 import CommissionSummaryCard from "@/components/dashboard/CommissionSummaryCard";
 import TopSalesStaffCard from "@/components/dashboard/TopSalesStaffCard";
+import UnrecognizedOrderValueBreakdown from "@/components/dashboard/UnrecognizedOrderValueBreakdown";
 import ScopeIndicator from "@/components/shared/ScopeIndicator";
 
 export default function Dashboard() {
@@ -31,6 +33,8 @@ export default function Dashboard() {
   const [productTotal, setProductTotal] = useState(0);
   const [batchTotal, setBatchTotal] = useState(0);
   const [purchaseData, setPurchaseData] = useState<PurchaseReportData | null>(null);
+  const [orderValue, setOrderValue] = useState<OrderValueSummary | null>(null);
+  const [unrecognizedOrderValue, setUnrecognizedOrderValue] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [followUpCounts, setFollowUpCounts] = useState<FollowUpSummaryCounts>({
     overdue: 0,
@@ -59,6 +63,8 @@ export default function Dashboard() {
               products: ProductReportData;
               batches: BatchStaticReportData;
               purchases: PurchaseReportData;
+              orderValue: OrderValueSummary;
+              unrecognizedOrderValue: number;
             }>)
           : null
       )
@@ -68,6 +74,8 @@ export default function Dashboard() {
         setProductTotal(overview.products.total);
         setBatchTotal(overview.batches.totalBatches);
         setPurchaseData(overview.purchases);
+        setOrderValue(overview.orderValue);
+        setUnrecognizedOrderValue(overview.unrecognizedOrderValue);
       })
       .catch((error) => console.error("Failed to load dashboard stats:", error))
       .finally(() => {
@@ -127,10 +135,15 @@ export default function Dashboard() {
 
   // Revenue label now follows the Global Date Filter (Sprint v1.0.2)
   // instead of always saying "this month".
-  const revenueLabel = `Doanh thu (${label})`;
+  const revenueLabel = `Doanh thu đã ghi nhận (${label})`;
   // Single source of truth: customer_purchases (via getPurchaseReportData) -
-  // no Orders dependency for Dashboard revenue.
+  // no Orders dependency for Dashboard revenue. Revenue Management
+  // Visibility (2026-08-29) - relabeled from the ambiguous "Doanh thu" to
+  // "Doanh thu đã ghi nhận" now that Total Order Value / Unrecognized
+  // Order Value sit next to it - the underlying BR-001 formula (Completed
+  // + Paid) is unchanged.
   const monthRevenue = purchaseData?.totalRevenue ?? 0;
+  const totalOrderValue = orderValue?.totalOrderValue ?? 0;
 
   const currency = new Intl.NumberFormat("vi-VN", {
     style: "currency",
@@ -162,39 +175,79 @@ export default function Dashboard() {
         <GlobalDateFilter />
       </div>
 
-      {/* Revenue - unchanged for every role. Simple Profit Calculation
-          Package, Final Revision: Owner/Manager additionally see Giá vốn/
-          Lãi / Lỗ alongside it, in the same row - nothing is hidden or
-          replaced for Sales. */}
-      <div className={`mb-4 grid grid-cols-1 gap-4 ${canViewCostAndProfit ? "sm:grid-cols-3" : ""}`}>
+      {/* Revenue Management Visibility (2026-08-29) - three distinct
+          management metrics, deliberately never merged into one "Doanh
+          thu" figure (Production read-only audit, 2026-08-29, confirmed
+          management was comparing Orders' total order value against
+          Recognized Revenue as if they were the same number).
+          Order Revenue Visibility Semantic Gap fix (2026-08-29 follow-up):
+          Giá trị đơn chưa ghi nhận is NOT "Tổng giá trị đơn hàng minus
+          Doanh thu đã ghi nhận" - Doanh thu đã ghi nhận (B2) can include
+          BR-002 legacy customer_purchases revenue with no linked Order at
+          all (confirmed present on Dev), outside the Orders population
+          Tổng giá trị đơn hàng/Giá trị đơn chưa ghi nhận describe. Giá trị
+          đơn chưa ghi nhận is computed entirely from Orders instead
+          (getOrderValueSummary's own Completed+Paid complement) - each
+          card's hint below says so explicitly so the two numbers are never
+          read as directly subtractable. */}
+      <div className="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard
+          testId="dashboard-total-order-value-card"
+          title="Tổng giá trị đơn hàng"
+          value={currency.format(totalOrderValue)}
+          hint="Tổng giá trị các đơn phát sinh trong kỳ (Đơn hàng)"
+          icon={<ClipboardList className="w-8 h-8 text-blue-600" />}
+          color="bg-blue-100"
+          badge={<ScopeIndicator resource="orders" />}
+        />
         <Link href="/reports">
           <StatCard
             testId="dashboard-revenue-card"
             title={revenueLabel}
             value={currency.format(monthRevenue)}
+            hint="Completed + Paid — có thể gồm doanh thu ghi nhận ngoài Đơn hàng"
             icon={<Wallet className="w-8 h-8 text-emerald-600" />}
             color="bg-emerald-100"
             badge={<ScopeIndicator resource="revenue" />}
           />
         </Link>
-        {canViewCostAndProfit && (
-          <>
-            <StatCard
-              testId="dashboard-cost-card"
-              title="Giá vốn"
-              value={currency.format(purchaseData?.totalCost ?? 0)}
-              icon={<Coins className="w-8 h-8 text-amber-600" />}
-              color="bg-amber-100"
-            />
-            <StatCard
-              testId="dashboard-profit-card"
-              title="Lãi / Lỗ"
-              value={currency.format(purchaseData?.totalProfit ?? 0)}
-              icon={<TrendingUp className="w-8 h-8 text-primary" />}
-              color="bg-primary/10"
-            />
-          </>
-        )}
+        <StatCard
+          testId="dashboard-unrecognized-order-value-card"
+          title="Giá trị đơn chưa ghi nhận"
+          value={currency.format(unrecognizedOrderValue)}
+          hint="Tính riêng từ Đơn hàng — không phải hiệu số của hai chỉ số trên"
+          icon={<PiggyBank className="w-8 h-8 text-amber-600" />}
+          color="bg-amber-100"
+        />
+      </div>
+
+      {/* Simple Profit Calculation Package, Final Revision: Owner/Manager
+          additionally see Giá vốn/Lãi / Lỗ - nothing is hidden or replaced
+          for Sales, unchanged by this task. */}
+      {canViewCostAndProfit && (
+        <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <StatCard
+            testId="dashboard-cost-card"
+            title="Giá vốn"
+            value={currency.format(purchaseData?.totalCost ?? 0)}
+            icon={<Coins className="w-8 h-8 text-amber-600" />}
+            color="bg-amber-100"
+          />
+          <StatCard
+            testId="dashboard-profit-card"
+            title="Lãi / Lỗ"
+            value={currency.format(purchaseData?.totalProfit ?? 0)}
+            icon={<TrendingUp className="w-8 h-8 text-primary" />}
+            color="bg-primary/10"
+          />
+        </div>
+      )}
+
+      {/* Giá trị đơn chưa ghi nhận - drill-down (Revenue Management
+          Visibility, 2026-08-29). Same visibility as the cards above (no
+          new permission - data-scoped by "orders", same as /orders). */}
+      <div className="mb-6">
+        <UnrecognizedOrderValueBreakdown rows={orderValue?.breakdown ?? []} />
       </div>
 
       {/* Overview - customer stats (existing) + product/batch totals (Reports) */}
