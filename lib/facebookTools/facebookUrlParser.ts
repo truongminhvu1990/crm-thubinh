@@ -57,7 +57,14 @@
  * duplicate of a share-token-identified row. This is a known, honestly
  * reported limitation, not a bug: inventing a way to unify the two would
  * require resolving the share link (a network fetch this parser
- * deliberately never performs — see facebookManualContent.service.ts). */
+ * deliberately never performs — see facebookManualContent.service.ts).
+ *
+ * Phase 2K-CB (Issue 1) — a second real, confirmed share-link sub-type,
+ * https://www.facebook.com/share/r/{share-token}/, reported live by a
+ * real Preview UAT tester. Same SHARE_TOKEN_PATTERN, same "share-token"
+ * identity/confidence as /share/p/ above. Only "p" and "r" are accepted:
+ * both have real observed evidence; no other /share/{x}/ sub-type is
+ * added speculatively. */
 
 const SUPPORTED_HOSTS = new Set(["facebook.com", "www.facebook.com", "m.facebook.com", "web.facebook.com"]);
 
@@ -172,7 +179,7 @@ export function parseFacebookContentUrl(rawUrl: string): ParseFacebookUrlResult 
     return { ok: true, facebookObjectId: objectId, urlShape: "photo", isGroupUrl: false, idConfidence: confidence };
   }
 
-  if (segments.length === 3 && segments[0] === "share" && segments[1] === "p") {
+  if (segments.length === 3 && segments[0] === "share" && (segments[1] === "p" || segments[1] === "r")) {
     const shareToken = segments[2];
     if (!SHARE_TOKEN_PATTERN.test(shareToken)) {
       return { ok: false, reason: "Không xác định được ID bài viết một cách chắc chắn" };
@@ -183,7 +190,7 @@ export function parseFacebookContentUrl(rawUrl: string): ParseFacebookUrlResult 
   return {
     ok: false,
     reason:
-      "Dạng URL này chưa được hỗ trợ (chỉ hỗ trợ /posts/{id}, /videos/{id}, /reel/{id}, /groups/{id}/posts/{id}, /groups/{id}/permalink/{id}, /photo?fbid={id}, /share/p/{id})",
+      "Dạng URL này chưa được hỗ trợ (chỉ hỗ trợ /posts/{id}, /videos/{id}, /reel/{id}, /groups/{id}/posts/{id}, /groups/{id}/permalink/{id}, /photo?fbid={id}, /share/p/{id}, /share/r/{id})",
   };
 }
 

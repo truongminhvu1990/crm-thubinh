@@ -338,9 +338,24 @@ export default function SeedingExecutionSetupPage() {
 
       <div>
         <h1 className="text-xl font-semibold text-foreground">Thiết lập thực hiện Seeding</h1>
+        {/* Phase 2K-CB (Issue 5) — the previous wording ("tài khoản Facebook
+           thực hiện") implied both sections below are Facebook-connected,
+           which is backwards for "Tài khoản thực hiện": it has no OAuth, no
+           token, no Facebook API capability at all — pure task-assignment
+           identity. Only "Facebook Page đã kết nối" is a real connection. */}
         <p className="text-sm text-muted-foreground">
-          Quản lý tài khoản Facebook thực hiện và điểm đến (Nhóm) — dùng cho phân phối task tự động
+          Quản lý 2 loại tài khoản và điểm đến (Nhóm) — dùng cho phân phối task thủ công:
         </p>
+        <ul className="text-sm text-muted-foreground list-disc list-inside">
+          <li>
+            <strong className="text-foreground">Tài khoản thực hiện</strong> — định danh để giao việc thủ công, không
+            kết nối Facebook, không có access token hay khả năng gọi API.
+          </li>
+          <li>
+            <strong className="text-foreground">Facebook Page đã kết nối</strong> — Page thật đã xác thực (OAuth), có
+            token thật, có thể đăng comment trực tiếp khi Meta cho phép.
+          </li>
+        </ul>
       </div>
 
       <Card>

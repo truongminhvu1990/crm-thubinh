@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, use } from "react";
+import Link from "next/link";
 import { Sparkles, RefreshCw, AlertTriangle, ImageOff, ExternalLink, Link2, Plus, ThumbsUp, MessageCircle, Share2, SearchCheck, Send, Pencil, Trash2 } from "lucide-react";
 import {
   SeedingCampaign,
@@ -1272,10 +1273,14 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                         <Pencil className="w-3.5 h-3.5" /> {target.source_label ? "Chỉnh sửa mô tả" : "Thêm mô tả"}
                       </button>
                     )}
+                    {/* Phase 2K-CB (Issue 3) — plain text, not a Badge: sitting
+                       next to the real "Thêm mô tả"/"Chỉnh sửa mô tả" button in
+                       the same row, a pill-shaped Badge here read as clickable
+                       when it is purely informational. */}
                     {target.discovery_method && (
-                      <Badge variant="muted">
-                        {target.discovery_method === "Quick Capture" ? "Nhập qua Quick Capture" : target.discovery_method}
-                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        Nguồn: {target.discovery_method === "Quick Capture" ? "Nhập qua Quick Capture" : target.discovery_method}
+                      </span>
                     )}
                     {targetCompatibility[target.id]?.compatibility === "INCOMPATIBLE" && (
                       <Badge variant="destructive" title={targetCompatibility[target.id]?.reason}>
@@ -1418,9 +1423,23 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                               {t.action_type === "Comment" && t.status === "Pending" && (
                                 <div className="mb-1.5">
                                   {target.source_type !== "Page" ? (
-                                    <span className="text-xs text-muted-foreground">
-                                      Không hỗ trợ đăng trực tiếp cho nguồn {target.source_type} — dùng quy trình thủ công bên dưới.
-                                    </span>
+                                    <div className="space-y-1">
+                                      <span className="text-xs text-muted-foreground block">
+                                        Không hỗ trợ đăng trực tiếp cho nguồn {target.source_type} — dùng quy trình thủ công.
+                                      </span>
+                                      {/* Phase 2K-CB (Issue 4) — the actual manual-execution
+                                         workflow (copy comment, mở Facebook, xác nhận trạng thái)
+                                         already exists on the Run screen; Campaign Detail
+                                         previously had no link there at all. Reuses the existing
+                                         ?taskId= deep link verbatim — no new route, no second
+                                         execution path. */}
+                                      <Link
+                                        href={`/facebook-tools/semi-seeding/my-tasks/run?taskId=${t.id}`}
+                                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                                      >
+                                        <ExternalLink className="w-3.5 h-3.5" /> Mở task để thực hiện thủ công
+                                      </Link>
+                                    </div>
                                   ) : directCommentCapability?.availability === "AVAILABLE" ? (
                                     <div className="space-y-1">
                                       {/* Phase 2K-BY (P1 #6) — presentation-only reinforcement,

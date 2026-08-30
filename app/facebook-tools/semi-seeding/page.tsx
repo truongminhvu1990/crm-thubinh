@@ -221,7 +221,7 @@ export default function SemiSeedingPage() {
           <Input label="Tên campaign" value={name} onChange={(e) => setName(e.target.value)} placeholder="VD: Seeding livestream 20/08" />
           <Select
             label="Facebook Page (tùy chọn)"
-            placeholder="Không chọn Page — chỉ dùng Personal/Nhóm (Quick Capture)"
+            placeholder="Không chọn Page — có thể thêm bài viết sau"
             options={pages.map((p) => ({ value: p.id, label: p.page_name }))}
             value={pageId}
             onChange={(e) => {
@@ -245,12 +245,20 @@ export default function SemiSeedingPage() {
             // Phase 2K-BY (P1 #2) — the manual-only path: no Page, no
             // Page-post picker. The campaign is created empty (0
             // targets) — Quick Capture inside Campaign Detail is the
-            // intended way to add Personal/Group content afterward,
-            // exactly like a Page-backed campaign's own targets can be
-            // added after creation.
+            // intended way to add content afterward, exactly like a
+            // Page-backed campaign's own targets can be added after
+            // creation.
+            //
+            // Phase 2K-CB (Issue 2) — Facebook Page is optional campaign
+            // CONTEXT (used for Direct Comment capability/display), never
+            // a restriction on which content types the campaign can hold.
+            // A campaign — Page-backed or not — can contain Page,
+            // Personal, and Group targets in any combination; wording
+            // must not imply otherwise.
             <p className="text-xs text-muted-foreground">
-              Campaign sẽ được tạo không gắn với Facebook Page nào. Sau khi tạo, dùng &quot;Thêm bài viết Facebook&quot;
-              (Quick Capture) trong Campaign Detail để thêm nội dung Personal/Nhóm.
+              Campaign có thể chứa bài viết Page, Personal, hoặc Nhóm — ở bất kỳ tổ hợp nào. Facebook Page chỉ là ngữ
+              cảnh tùy chọn (dùng để đăng comment trực tiếp khi khả dụng), không giới hạn loại nội dung. Sau khi tạo,
+              dùng &quot;Thêm bài viết Facebook&quot; (Quick Capture) trong Campaign Detail để thêm nội dung.
             </p>
           )}
 

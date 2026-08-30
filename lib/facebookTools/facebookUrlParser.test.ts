@@ -187,6 +187,25 @@ test("parseFacebookContentUrl: a share token with characters outside the confide
   assert.equal(result.ok, false);
 });
 
+/** Phase 2K-CB (Issue 1) — a second real, confirmed share-link sub-type
+ * (/share/r/, a Reel share link), reported live by a real Preview UAT
+ * tester. Mirrors the /share/p/ behavior above exactly: same
+ * SHARE_TOKEN_PATTERN, same "share-token" idConfidence. */
+test("parseFacebookContentUrl: a share-link shape (facebook.com/share/r/{token}/) is parsed, with idConfidence 'share-token'", () => {
+  const result = parseFacebookContentUrl("https://www.facebook.com/share/r/abc123XYZ/");
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.facebookObjectId, "abc123XYZ");
+    assert.equal(result.urlShape, "share");
+    assert.equal(result.idConfidence, "share-token");
+  }
+});
+
+test("parseFacebookContentUrl: a /share/r/ token with characters outside the confidence pattern is rejected, never guessed", () => {
+  const result = parseFacebookContentUrl("https://www.facebook.com/share/r/has spaces/");
+  assert.equal(result.ok, false);
+});
+
 /**
  * Phase 2K-E — parseFacebookGroupDestinationUrl: destination identity is
  * always the group id, never any post id, regardless of which of the
