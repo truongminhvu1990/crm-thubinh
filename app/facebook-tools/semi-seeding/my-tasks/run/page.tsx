@@ -62,6 +62,9 @@ function SeedingTaskRunnerInner() {
   const [copyLinkFeedback, setCopyLinkFeedback] = useState(false);
   const [pendingChange, setPendingChange] = useState<{ taskId: string; status: SeedingTaskStatus } | null>(null);
   const [reasonInput, setReasonInput] = useState("");
+  // Phase 2K-BY (P1 #7) — visible surface for actions that previously
+  // only console.error'd.
+  const [actionError, setActionError] = useState<string | null>(null);
   // Mobile-open fix rev.2 (real iPhone UAT, 2026-08-27) — computed client-
   // side only, after mount, never during the render itself: reading
   // navigator.userAgent during render would differ between the server's
@@ -104,6 +107,7 @@ function SeedingTaskRunnerInner() {
         }
       } catch (error) {
         console.error("Failed to load task runner queue:", error);
+        setActionError("Không thể tải danh sách task — vui lòng tải lại trang.");
       } finally {
         setIsLoading(false);
       }
@@ -120,7 +124,7 @@ function SeedingTaskRunnerInner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status, result_note: resultNote ?? null }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Không thể cập nhật task");
       const updated: SeedingTaskWithContext = await res.json();
       setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, ...updated } : t)));
       // Advance to the next still-eligible task, not just index + 1 — a
@@ -134,6 +138,7 @@ function SeedingTaskRunnerInner() {
       });
     } catch (error) {
       console.error("Failed to update task from runner:", error);
+      setActionError(error instanceof Error ? error.message : "Không thể cập nhật task");
     } finally {
       setIsUpdating(false);
     }
@@ -162,6 +167,7 @@ function SeedingTaskRunnerInner() {
       setTimeout(() => setCopyFeedback(false), 2000);
     } catch (error) {
       console.error("Clipboard copy failed:", error);
+      setActionError("Không thể copy — trình duyệt từ chối quyền truy cập clipboard.");
     }
   }
 
@@ -217,6 +223,7 @@ function SeedingTaskRunnerInner() {
       setTimeout(() => setCopyLinkFeedback(false), 2000);
     } catch (error) {
       console.error("Clipboard copy failed:", error);
+      setActionError("Không thể copy — trình duyệt từ chối quyền truy cập clipboard.");
     }
   }
 
@@ -243,11 +250,23 @@ function SeedingTaskRunnerInner() {
   }
 
   if (tasks.length === 0) {
+    // Phase 2K-BY (P1 #7) — a load failure previously left `tasks` at its
+    // initial empty array, so the user saw this same "nothing to do"
+    // success-looking screen instead of any error. Distinguish the two.
     return (
       <div className="p-6 max-w-xl mx-auto space-y-3">
         <Card className="text-center py-10 space-y-3">
-          <CheckCircle2 className="w-10 h-10 text-primary mx-auto" />
-          <p className="text-sm text-foreground">Không có task nào cần thực hiện lúc này.</p>
+          {actionError ? (
+            <>
+              <AlertTriangle className="w-10 h-10 text-destructive mx-auto" />
+              <p className="text-sm text-destructive">{actionError}</p>
+            </>
+          ) : (
+            <>
+              <CheckCircle2 className="w-10 h-10 text-primary mx-auto" />
+              <p className="text-sm text-foreground">Không có task nào cần thực hiện lúc này.</p>
+            </>
+          )}
           <Link href="/facebook-tools/semi-seeding/my-tasks" className="text-sm text-primary hover:underline">
             Quay lại Công việc của tôi
           </Link>
@@ -280,6 +299,15 @@ function SeedingTaskRunnerInner() {
 
   return (
     <div className="p-6 max-w-xl mx-auto space-y-4">
+      {actionError && (
+        <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <p className="flex-1">{actionError}</p>
+          <button type="button" onClick={() => setActionError(null)} className="text-destructive/70 hover:text-destructive text-xs">
+            Đóng
+          </button>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <Link href="/facebook-tools/semi-seeding/my-tasks" className="text-sm text-muted-foreground hover:text-foreground">
           &larr; Công việc của tôi
@@ -307,6 +335,17 @@ function SeedingTaskRunnerInner() {
           <div className="min-w-0 flex-1 space-y-1.5">
             <p className="text-sm text-foreground line-clamp-3">{task.target_message || "(không có nội dung)"}</p>
             <Badge variant="muted">{seedingTaskActionTypeLabel(task.action_type)}</Badge>
+            {/* Phase 2K-BY (P1 #1) — same account/destination context as
+               My Tasks' list view, shown here too since Run is the actual
+               execution screen. Omitted entirely for a non-distribution
+               task (the honest neutral state). */}
+            {(task.execution_account_name || task.destination_label) && (
+              <p className="text-xs text-muted-foreground">
+                {task.execution_account_name && <>Đăng bằng account: {task.execution_account_name}</>}
+                {task.execution_account_name && task.destination_label && " · "}
+                {task.destination_label && <>Điểm đến: {task.destination_label}</>}
+              </p>
+            )}
           </div>
         </div>
 

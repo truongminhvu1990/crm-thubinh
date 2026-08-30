@@ -6,6 +6,7 @@ import {
   SeedingTaskCounts,
   SeedingExecutionAccountWithStats,
   SeedingExecutionAccountDetail,
+  SeedingExecutionAccountTaskRow,
   SeedingPageAccountWithStats,
   SeedingAccountCenterOverview,
 } from "@/types/seeding";
@@ -108,14 +109,19 @@ export async function getExecutionAccountDetail(
   const account = await getExecutionAccountById(accountId, client);
   if (!account) return null;
 
+  // Phase 2K-BZ (P2 #2) — one extra embed, not a follow-up query: the
+  // campaign name for each task's drill-through link.
   const { data: taskRows, error } = await client
     .from("seeding_tasks")
-    .select("*")
+    .select("*, seeding_campaigns(name)")
     .eq("execution_account_id", accountId)
     .order("updated_at", { ascending: false });
   if (error) throw error;
 
-  const tasks = (taskRows ?? []) as SeedingTask[];
+  const tasks = ((taskRows ?? []) as unknown as (SeedingTask & { seeding_campaigns: { name: string } | null })[]).map((row) => {
+    const { seeding_campaigns, ...task } = row;
+    return { ...task, campaign_name: seeding_campaigns?.name ?? null } as SeedingExecutionAccountTaskRow;
+  });
   const counts = emptyTaskCounts();
   for (const task of tasks) tallyStatus(counts, task.status);
 

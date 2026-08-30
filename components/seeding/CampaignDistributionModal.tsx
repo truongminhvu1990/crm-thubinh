@@ -13,6 +13,7 @@ import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import { useStaffOptions } from "@/lib/hooks/useStaffOptions";
+import { resolveTargetDisplayText } from "@/lib/seeding/seeding.constants";
 
 /** Phase 2K-S — the one UI entry point for the Phase 2K distribution
  * feature: select execution accounts + destinations for a single campaign
@@ -157,7 +158,7 @@ export default function CampaignDistributionModal({ campaignId, target, onClose,
           vòng (round-robin). CRM chỉ lên kế hoạch — nhân viên tự thực hiện thao tác trên Facebook.
         </p>
         <p className="text-sm text-foreground line-clamp-2 rounded-lg border border-border bg-muted/40 p-2">
-          {target.message || "(không có nội dung)"}
+          {resolveTargetDisplayText(target)}
         </p>
 
         {isLoadingResources ? (

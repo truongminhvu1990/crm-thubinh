@@ -11,6 +11,7 @@ import {
   SeedingDirectCommentCapability,
   SeedingTaskCounts,
   SeedingDestination,
+  SeedingDestinationWithTaskCount,
   CreateSeedingExecutionAccountInput,
   UpdateSeedingExecutionAccountInput,
   CreateSeedingDestinationInput,
@@ -88,7 +89,7 @@ export default function SeedingExecutionSetupPage() {
   // shown side by side with Execution Accounts so staff see both real
   // Direct Comment-capable identities and manual-only ones in one place.
   const [pages, setPages] = useState<SeedingPageAccountWithStats[]>([]);
-  const [destinations, setDestinations] = useState<SeedingDestination[]>([]);
+  const [destinations, setDestinations] = useState<SeedingDestinationWithTaskCount[]>([]);
   const staffOptions = useStaffOptions();
 
   const [showAccountModal, setShowAccountModal] = useState(false);
@@ -111,14 +112,18 @@ export default function SeedingExecutionSetupPage() {
   const [destinationNotes, setDestinationNotes] = useState("");
   const [isSavingDestination, setIsSavingDestination] = useState(false);
   const [destinationError, setDestinationError] = useState<string | null>(null);
+  // Phase 2K-BY (P1 #7) — visible surface for actions with no dedicated
+  // error slot of their own (page load, status toggles, detail load).
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function loadAll() {
     setIsLoading(true);
     setForbidden(false);
+    setActionError(null);
     try {
       const [accountCenterRes, destinationsRes] = await Promise.all([
         fetch("/api/seeding/account-center"),
-        fetch("/api/seeding/destinations"),
+        fetch("/api/seeding/destinations?includeTaskCounts=true"),
       ]);
       if (accountCenterRes.status === 403 || destinationsRes.status === 403) {
         setForbidden(true);
@@ -132,6 +137,7 @@ export default function SeedingExecutionSetupPage() {
       if (destinationsRes.ok) setDestinations(await destinationsRes.json());
     } catch (error) {
       console.error("Failed to load seeding execution setup:", error);
+      setActionError("Không thể tải dữ liệu — vui lòng thử lại.");
     } finally {
       setIsLoading(false);
     }
@@ -205,10 +211,11 @@ export default function SeedingExecutionSetupPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Không thể đổi trạng thái tài khoản");
       await loadAll();
     } catch (error) {
       console.error("Failed to toggle execution account status:", error);
+      setActionError(error instanceof Error ? error.message : "Không thể đổi trạng thái tài khoản");
     }
   }
 
@@ -225,6 +232,7 @@ export default function SeedingExecutionSetupPage() {
       setAccountDetail(await res.json());
     } catch (error) {
       console.error("Failed to load execution account detail:", error);
+      setActionError("Không thể tải chi tiết tài khoản — vui lòng thử lại.");
     } finally {
       setIsLoadingAccountDetail(false);
     }
@@ -291,10 +299,11 @@ export default function SeedingExecutionSetupPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Không thể đổi trạng thái điểm đến");
       await loadAll();
     } catch (error) {
       console.error("Failed to toggle destination status:", error);
+      setActionError(error instanceof Error ? error.message : "Không thể đổi trạng thái điểm đến");
     }
   }
 
@@ -314,6 +323,15 @@ export default function SeedingExecutionSetupPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-5xl">
+      {actionError && (
+        <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <p className="flex-1">{actionError}</p>
+          <button type="button" onClick={() => setActionError(null)} className="text-destructive/70 hover:text-destructive text-xs">
+            Đóng
+          </button>
+        </div>
+      )}
       <Link href="/facebook-tools/semi-seeding" className="flex items-center gap-2 text-primary hover:text-primary/80 w-fit text-sm">
         <ArrowLeft className="w-4 h-4" /> Quay lại Semi Seeding
       </Link>
@@ -455,6 +473,11 @@ export default function SeedingExecutionSetupPage() {
                   <th className="py-2 pr-4">Tên</th>
                   <th className="py-2 pr-4">Link Nhóm</th>
                   <th className="py-2 pr-4">Trạng thái</th>
+                  {/* Phase 2K-BZ (P2 #5) — same "task đã dùng" concept
+                     Execution Accounts' own table already shows,
+                     matching this codebase's usual list-with-usage-count
+                     convention (Account Center, Execution Accounts). */}
+                  <th className="py-2 pr-4">Đã dùng</th>
                   <th className="py-2 pr-4"></th>
                 </tr>
               </thead>
@@ -468,6 +491,7 @@ export default function SeedingExecutionSetupPage() {
                       </a>
                     </td>
                     <td className="py-3 pr-4">{statusBadge(d.status)}</td>
+                    <td className="py-3 pr-4 text-muted-foreground">{d.task_count} task</td>
                     <td className="py-3 pr-4 flex gap-2 justify-end">
                       <Button size="sm" variant="secondary" onClick={() => openEditDestination(d)}>
                         Sửa
@@ -580,6 +604,7 @@ export default function SeedingExecutionSetupPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-left text-muted-foreground border-b border-border sticky top-0 bg-card">
+                        <th className="py-1.5 pr-3">Campaign</th>
                         <th className="py-1.5 pr-3">Hành động</th>
                         <th className="py-1.5 pr-3">Trạng thái</th>
                         <th className="py-1.5 pr-3">Cập nhật lúc</th>
@@ -588,6 +613,24 @@ export default function SeedingExecutionSetupPage() {
                     <tbody>
                       {accountDetail.tasks.map((t) => (
                         <tr key={t.id} className="border-b border-border last:border-0">
+                          {/* Phase 2K-BZ (P2 #2) — drill-through to the
+                             task's own campaign, reusing the existing
+                             Campaign Detail route; the real campaign
+                             name is always shown, never the raw
+                             campaign_id, and a legacy task with no
+                             resolvable campaign shows an honest "—". */}
+                          <td className="py-1.5 pr-3">
+                            {t.campaign_name ? (
+                              <a
+                                href={`/facebook-tools/semi-seeding/${t.campaign_id}`}
+                                className="text-primary hover:underline"
+                              >
+                                {t.campaign_name}
+                              </a>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </td>
                           <td className="py-1.5 pr-3 text-foreground">{seedingTaskActionTypeLabel(t.action_type)}</td>
                           <td className="py-1.5 pr-3">{taskStatusBadgeSmall(t.status)}</td>
                           <td className="py-1.5 pr-3 text-muted-foreground whitespace-nowrap">

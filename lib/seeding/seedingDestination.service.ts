@@ -1,6 +1,6 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
-import { SeedingDestination, CreateSeedingDestinationInput, UpdateSeedingDestinationInput } from "@/types/seeding";
+import { SeedingDestination, SeedingDestinationWithTaskCount, CreateSeedingDestinationInput, UpdateSeedingDestinationInput } from "@/types/seeding";
 import { logActivity } from "@/lib/activityLog.service";
 import { parseFacebookGroupDestinationUrl } from "@/lib/facebookTools/facebookUrlParser";
 import { SeedingValidationError } from "./seeding.errors";
@@ -20,6 +20,29 @@ export async function getDestinations(client: SupabaseClient = supabase): Promis
     return [];
   }
   return data as SeedingDestination[];
+}
+
+/** Phase 2K-BZ (P2 #5) — Destinations' own usage count, same
+ * one-query-for-the-list-plus-one-query-for-every-task,
+ * aggregate-in-application-code convention as
+ * getExecutionAccountsWithStats (seedingAccountCenter.service.ts) — no
+ * N+1, no new schema, reuses the existing destination_id FK. */
+export async function getDestinationsWithTaskCounts(client: SupabaseClient = supabase): Promise<SeedingDestinationWithTaskCount[]> {
+  const destinations = await getDestinations(client);
+  if (destinations.length === 0) return [];
+
+  const { data: taskRows, error } = await client.from("seeding_tasks").select("destination_id").not("destination_id", "is", null);
+  if (error) throw error;
+
+  const countByDestinationId = new Map<string, number>();
+  for (const row of (taskRows ?? []) as { destination_id: string }[]) {
+    countByDestinationId.set(row.destination_id, (countByDestinationId.get(row.destination_id) ?? 0) + 1);
+  }
+
+  return destinations.map((destination) => ({
+    ...destination,
+    task_count: countByDestinationId.get(destination.id) ?? 0,
+  }));
 }
 
 /** Distribution's own candidate pool — Active only, ordered by

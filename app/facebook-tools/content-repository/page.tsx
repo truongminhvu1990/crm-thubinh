@@ -129,6 +129,11 @@ export default function ContentRepositoryPage() {
   // Phase 2J-D — manually-imported Personal/Group content, unified into the
   // same repository and the same multi-select -> campaign flow above.
   const [manualContent, setManualContent] = useState<FacebookContentIndexRow[]>([]);
+  // Phase 2K-BZ (P2 #1) — which campaign(s), if any, currently target
+  // each manual content row. Keyed by reference id; a row absent from
+  // this map (or mapped to []) has never been targeted by any campaign
+  // — an honest, distinct state from "still loading".
+  const [manualContentCampaignUsage, setManualContentCampaignUsage] = useState<Record<string, { campaign_id: string; campaign_name: string }[]>>({});
   const [isLoadingManualContent, setIsLoadingManualContent] = useState(false);
   const [selectedManualIds, setSelectedManualIds] = useState<Set<string>>(new Set());
   const [showImportModal, setShowImportModal] = useState(false);
@@ -169,7 +174,17 @@ export default function ContentRepositoryPage() {
       const res = await fetch("/api/facebook-tools/manual-content");
       if (res.status === 403) return;
       if (!res.ok) throw new Error(await res.text());
-      setManualContent(await res.json());
+      const rows: FacebookContentIndexRow[] = await res.json();
+      setManualContent(rows);
+
+      // Phase 2K-BZ (P2 #1) — one extra request for the whole list, not
+      // per-row (no N+1): campaign usage for every reference just loaded.
+      if (rows.length > 0) {
+        const usageRes = await fetch(`/api/facebook-tools/manual-content/campaign-usage?ids=${rows.map((r) => r.id).join(",")}`);
+        if (usageRes.ok) setManualContentCampaignUsage(await usageRes.json());
+      } else {
+        setManualContentCampaignUsage({});
+      }
     } catch (error) {
       console.error("Failed to load manual content references:", error);
     } finally {
@@ -660,6 +675,26 @@ export default function ContentRepositoryPage() {
                     {manualSourceBadge(row.source_type as "Personal" | FacebookManualContentSourceType)}
                     {row.source_label && <Badge variant="muted">{row.source_label}</Badge>}
                   </div>
+                  {/* Phase 2K-BZ (P2 #1) — drill-through to whichever
+                     campaign(s) already target this reference, reusing
+                     the existing Campaign Detail route. Nothing shown at
+                     all when unused — never a "0 campaigns" clutter
+                     line, matching this page's own established
+                     no-badge-when-not-applicable convention. */}
+                  {(manualContentCampaignUsage[row.id] ?? []).length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {(manualContentCampaignUsage[row.id] ?? []).map((usage) => (
+                        <a
+                          key={usage.campaign_id}
+                          href={`/facebook-tools/semi-seeding/${usage.campaign_id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                        >
+                          <ExternalLink className="w-3 h-3" /> Đang dùng trong: {usage.campaign_name}
+                        </a>
+                      ))}
+                    </div>
+                  )}
                   {row.permalink_url && (
                     <a
                       href={row.permalink_url}

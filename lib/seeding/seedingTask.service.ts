@@ -55,6 +55,8 @@ interface TaskWithEmbeds {
       full_picture_url: string | null;
     } | null;
   } | null;
+  seeding_execution_accounts: { display_name: string } | null;
+  seeding_destinations: { label: string } | null;
   [key: string]: unknown;
 }
 
@@ -85,7 +87,7 @@ export async function getTasksAssignedToStaff(
   const { data, error } = await client
     .from("seeding_tasks")
     .select(
-      "*, seeding_campaigns(name, status), seeding_campaign_targets(facebook_page_posts(message, permalink_url, full_picture_url, discovery_status), facebook_manual_content_references(source_type, message, permalink_url, full_picture_url))"
+      "*, seeding_campaigns(name, status), seeding_campaign_targets(facebook_page_posts(message, permalink_url, full_picture_url, discovery_status), facebook_manual_content_references(source_type, message, permalink_url, full_picture_url)), seeding_execution_accounts(display_name), seeding_destinations(label)"
     )
     .eq("assigned_staff_id", staffId)
     .order("scheduled_at", { ascending: true, nullsFirst: false });
@@ -95,13 +97,20 @@ export async function getTasksAssignedToStaff(
   }
 
   return (data as unknown as TaskWithEmbeds[]).map((row) => {
-    const { seeding_campaigns, seeding_campaign_targets, ...task } = row;
+    const { seeding_campaigns, seeding_campaign_targets, seeding_execution_accounts, seeding_destinations, ...task } = row;
     const manual = seeding_campaign_targets?.facebook_manual_content_references ?? null;
     const post = seeding_campaign_targets?.facebook_page_posts ?? null;
     const base = {
       ...(task as unknown as SeedingTask),
       campaign_name: seeding_campaigns?.name ?? null,
       campaign_status: (seeding_campaigns?.status as SeedingTaskWithContext["campaign_status"]) ?? null,
+      // Phase 2K-BY (P1 #1) — a Distribution-created Share task already
+      // stores both ids; this is the first time either is ever read back
+      // for the executor's own screens. null (not a placeholder string)
+      // whenever a task legitimately has none — the honest "not a
+      // distribution task" state, never fabricated.
+      execution_account_name: seeding_execution_accounts?.display_name ?? null,
+      destination_label: seeding_destinations?.label ?? null,
     };
     if (manual) {
       return {

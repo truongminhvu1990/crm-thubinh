@@ -198,3 +198,57 @@ test("updateDestination: rejects clearing permalink_url to empty", async () => {
   const client = makeClient({});
   await assert.rejects(() => updateDestination("dest-1", { permalink_url: "  " }, "staff-1", client), /permalink_url là bắt buộc/);
 });
+
+/** Phase 2K-BZ (P2 #5) — Destinations' own usage count. Same
+ * one-query-for-the-list-plus-one-query-for-every-task convention as
+ * getExecutionAccountsWithStats — no schema change, reuses the existing
+ * seeding_tasks.destination_id column. */
+
+test("getDestinationsWithTaskCounts: aggregates real task counts per destination, by destination_id", async () => {
+  const { getDestinationsWithTaskCounts } = await import("./seedingDestination.service");
+  const client = makeClient({
+    seeding_destinations: [
+      {
+        data: [
+          { id: "dest-1", label: "Nhóm A", status: "Active" },
+          { id: "dest-2", label: "Nhóm B", status: "Active" },
+        ],
+      },
+    ],
+    seeding_tasks: [
+      {
+        data: [
+          { destination_id: "dest-1" },
+          { destination_id: "dest-1" },
+          { destination_id: "dest-2" },
+        ],
+      },
+    ],
+  });
+
+  const result = await getDestinationsWithTaskCounts(client);
+
+  assert.equal(result.find((d) => d.id === "dest-1")?.task_count, 2);
+  assert.equal(result.find((d) => d.id === "dest-2")?.task_count, 1);
+});
+
+test("getDestinationsWithTaskCounts: a destination with zero tasks gets task_count 0 — a real number, not undefined", async () => {
+  const { getDestinationsWithTaskCounts } = await import("./seedingDestination.service");
+  const client = makeClient({
+    seeding_destinations: [{ data: [{ id: "dest-1", label: "Nhóm A", status: "Active" }] }],
+    seeding_tasks: [{ data: [] }],
+  });
+
+  const result = await getDestinationsWithTaskCounts(client);
+
+  assert.equal(result[0].task_count, 0);
+});
+
+test("getDestinationsWithTaskCounts: zero destinations returns an empty array without querying tasks", async () => {
+  const { getDestinationsWithTaskCounts } = await import("./seedingDestination.service");
+  const client = makeClient({ seeding_destinations: [{ data: [] }] });
+
+  const result = await getDestinationsWithTaskCounts(client);
+
+  assert.deepEqual(result, []);
+});

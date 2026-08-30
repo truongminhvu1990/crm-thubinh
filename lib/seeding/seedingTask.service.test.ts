@@ -699,6 +699,8 @@ interface FakeEmbeddedRow {
       full_picture_url: string | null;
     } | null;
   } | null;
+  seeding_execution_accounts?: { display_name: string } | null;
+  seeding_destinations?: { label: string } | null;
 }
 
 function makeAssignedClient(rows: FakeEmbeddedRow[]) {
@@ -1252,4 +1254,52 @@ test("getTasksAssignedToStaff: target_discovery_status surfaces 'Refresh Failed'
   ]);
   const [task] = await getTasksAssignedToStaff("staff-A", client);
   assert.equal(task.target_discovery_status, "Refresh Failed");
+});
+
+/** Phase 2K-BY (P1 #1) — execution_account_name/destination_label, read
+ * back for the first time so a Distribution-created Share task's
+ * executor can actually see which account/destination it's for. */
+
+test("getTasksAssignedToStaff: (P1 #1) a Distribution-created Share task surfaces the real execution account name and destination label", async () => {
+  const { getTasksAssignedToStaff } = await import("./seedingTask.service");
+  const { client } = makeAssignedClient([
+    {
+      id: "t-distributed",
+      campaign_id: "c1",
+      campaign_target_id: "tg1",
+      action_type: "Share",
+      comment_text: null,
+      status: "Pending",
+      assigned_staff_id: "staff-A",
+      seeding_campaigns: { name: "Campaign A" },
+      seeding_campaign_targets: { facebook_page_posts: { message: "m", permalink_url: "p", full_picture_url: null, discovery_status: "Active" } },
+      seeding_execution_accounts: { display_name: "Account Nguyễn Văn A" },
+      seeding_destinations: { label: "Nhóm mua bán vòng tay" },
+    },
+  ]);
+
+  const [task] = await getTasksAssignedToStaff("staff-A", client);
+  assert.equal(task.execution_account_name, "Account Nguyễn Văn A");
+  assert.equal(task.destination_label, "Nhóm mua bán vòng tay");
+});
+
+test("getTasksAssignedToStaff: (P1 #1) a non-distribution task has both fields null — an honest 'not applicable' state, never fabricated", async () => {
+  const { getTasksAssignedToStaff } = await import("./seedingTask.service");
+  const { client } = makeAssignedClient([
+    {
+      id: "t-manual",
+      campaign_id: "c1",
+      campaign_target_id: "tg1",
+      action_type: "Comment",
+      comment_text: "Giá bao nhiêu vậy shop?",
+      status: "Pending",
+      assigned_staff_id: "staff-A",
+      seeding_campaigns: { name: "Campaign A" },
+      seeding_campaign_targets: { facebook_page_posts: { message: "m", permalink_url: "p", full_picture_url: null, discovery_status: "Active" } },
+    },
+  ]);
+
+  const [task] = await getTasksAssignedToStaff("staff-A", client);
+  assert.equal(task.execution_account_name, null);
+  assert.equal(task.destination_label, null);
 });

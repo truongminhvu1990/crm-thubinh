@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Sparkles, AlertTriangle, Settings } from "lucide-react";
 import { SeedingCampaign, CreateSeedingCampaignInput } from "@/types/seeding";
 import { FacebookPageSummary, FacebookPagePost, FacebookPagePostSyncResult } from "@/types/facebookTools";
-import { SEEDING_CAMPAIGN_OBJECTIVE_OPTIONS, seedingCampaignStatusLabel } from "@/lib/seeding/seeding.constants";
+import { SEEDING_CAMPAIGN_OBJECTIVE_OPTIONS, seedingCampaignStatusLabel, seedingCampaignStatusBadgeVariant } from "@/lib/seeding/seeding.constants";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -22,9 +22,7 @@ import PostPicker from "@/components/seeding/PostPicker";
  * facebook_tools.manage) but touches none of Facebook Tools' own files. */
 
 function statusBadge(status: SeedingCampaign["status"]) {
-  if (status === "Active") return <Badge variant="success">{seedingCampaignStatusLabel(status)}</Badge>;
-  if (status === "Completed") return <Badge variant="muted">{seedingCampaignStatusLabel(status)}</Badge>;
-  return <Badge variant="warning">{seedingCampaignStatusLabel(status)}</Badge>;
+  return <Badge variant={seedingCampaignStatusBadgeVariant(status)}>{seedingCampaignStatusLabel(status)}</Badge>;
 }
 
 export default function SemiSeedingPage() {
@@ -94,7 +92,13 @@ export default function SemiSeedingPage() {
 
   function openCreate() {
     setName("");
-    setPageId(pages[0]?.id ?? "");
+    // Phase 2K-BY (P1 #2) — deliberately NOT pre-selected to pages[0]
+    // anymore: no Page is the default, requiring an explicit choice to
+    // attach one. This is what makes a manual-only campaign (Personal/
+    // Group content via Quick Capture, no Connected Page) reachable at
+    // all — createCampaign/the API route already fully support
+    // facebook_page_id being omitted, this was purely a UI gap.
+    setPageId("");
     setObjective(SEEDING_CAMPAIGN_OBJECTIVE_OPTIONS[0].value);
     setSelectedPostIds(new Set());
     setSaveError(null);
@@ -105,9 +109,14 @@ export default function SemiSeedingPage() {
     setIsSaving(true);
     setSaveError(null);
     try {
+      const selectedPage = pages.find((p) => p.id === pageId);
       const input: CreateSeedingCampaignInput = {
         name,
-        facebook_page_id: pages.find((p) => p.id === pageId)?.facebook_page_id ?? "",
+        // Omitted entirely (never an empty string) when no Page is
+        // chosen — createCampaign's own `input.facebook_page_id ?? null`
+        // only treats a genuinely missing/undefined value as "no Page";
+        // an empty string would have been silently wrong.
+        ...(selectedPage ? { facebook_page_id: selectedPage.facebook_page_id } : {}),
         objective,
         targetFacebookPagePostIds: [...selectedPostIds],
       };
@@ -155,7 +164,11 @@ export default function SemiSeedingPage() {
           <Button variant="secondary" onClick={() => router.push("/facebook-tools/semi-seeding/execution-setup")}>
             <Settings className="w-4 h-4" /> Thiết lập thực hiện
           </Button>
-          <Button onClick={openCreate} disabled={pages.length === 0}>
+          {/* Phase 2K-BY (P1 #2) — no longer gated on pages.length: a
+             manual-only campaign (Personal/Group content via Quick
+             Capture, no Connected Page) must be creatable even when zero
+             Pages are connected. */}
+          <Button onClick={openCreate}>
             <Plus className="w-4 h-4" /> Tạo campaign
           </Button>
         </div>
@@ -163,8 +176,8 @@ export default function SemiSeedingPage() {
 
       {pages.length === 0 && !isLoading && (
         <Card className="text-sm text-muted-foreground">
-          Chưa có Facebook Page nào được kết nối. Kết nối Page tại Facebook Tools → Comment Shield trước khi tạo
-          campaign.
+          Chưa có Facebook Page nào được kết nối. Bạn vẫn có thể tạo campaign không gắn Page (dùng Quick Capture cho
+          nội dung Personal/Nhóm) — kết nối Page tại Facebook Tools → Comment Shield nếu cần seeding từ bài viết Page.
         </Card>
       )}
 
@@ -207,8 +220,8 @@ export default function SemiSeedingPage() {
         <div className="space-y-4">
           <Input label="Tên campaign" value={name} onChange={(e) => setName(e.target.value)} placeholder="VD: Seeding livestream 20/08" />
           <Select
-            label="Facebook Page"
-            placeholder="Chọn Page"
+            label="Facebook Page (tùy chọn)"
+            placeholder="Không chọn Page — chỉ dùng Personal/Nhóm (Quick Capture)"
             options={pages.map((p) => ({ value: p.id, label: p.page_name }))}
             value={pageId}
             onChange={(e) => {
@@ -223,11 +236,22 @@ export default function SemiSeedingPage() {
             onChange={(e) => setObjective(e.target.value)}
           />
 
-          {pageId && (
+          {pageId ? (
             <div>
               <label className="block text-sm font-medium text-foreground mb-1.5">Chọn bài viết (Target Posts)</label>
               <PostPicker fetchPosts={fetchPickerPosts} selected={selectedPostIds} onToggle={togglePost} syncPosts={syncPickerPosts} />
             </div>
+          ) : (
+            // Phase 2K-BY (P1 #2) — the manual-only path: no Page, no
+            // Page-post picker. The campaign is created empty (0
+            // targets) — Quick Capture inside Campaign Detail is the
+            // intended way to add Personal/Group content afterward,
+            // exactly like a Page-backed campaign's own targets can be
+            // added after creation.
+            <p className="text-xs text-muted-foreground">
+              Campaign sẽ được tạo không gắn với Facebook Page nào. Sau khi tạo, dùng &quot;Thêm bài viết Facebook&quot;
+              (Quick Capture) trong Campaign Detail để thêm nội dung Personal/Nhóm.
+            </p>
           )}
 
           {saveError && <p className="text-destructive text-sm">{saveError}</p>}
@@ -238,9 +262,11 @@ export default function SemiSeedingPage() {
             <Button
               onClick={handleCreate}
               isLoading={isSaving}
-              disabled={!name || !pageId || !objective || selectedPostIds.size === 0}
+              disabled={!name || !objective || (!!pageId && selectedPostIds.size === 0)}
             >
-              Tạo campaign {selectedPostIds.size > 0 ? `(${selectedPostIds.size} bài)` : "(chưa chọn bài)"}
+              {pageId
+                ? `Tạo campaign ${selectedPostIds.size > 0 ? `(${selectedPostIds.size} bài)` : "(chưa chọn bài)"}`
+                : "Tạo campaign (không gắn Page)"}
             </Button>
           </div>
         </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, use } from "react";
-import { Sparkles, RefreshCw, AlertTriangle, ImageOff, ExternalLink, Link2, Plus, ThumbsUp, MessageCircle, Share2, SearchCheck, Send } from "lucide-react";
+import { Sparkles, RefreshCw, AlertTriangle, ImageOff, ExternalLink, Link2, Plus, ThumbsUp, MessageCircle, Share2, SearchCheck, Send, Pencil, Trash2 } from "lucide-react";
 import {
   SeedingCampaign,
   SeedingCommentSuggestion,
@@ -26,6 +26,8 @@ import {
   seedingTaskStatusLabel,
   seedingTaskActionTypeLabel,
   SEEDING_COMMENT_INTENT_OPTIONS,
+  resolveTargetDisplayText,
+  seedingCampaignStatusBadgeVariant,
 } from "@/lib/seeding/seeding.constants";
 import { handleFacebookLinkClick, isMobileUserAgent } from "@/lib/utils";
 import { useStaffOptions } from "@/lib/hooks/useStaffOptions";
@@ -107,6 +109,18 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
   const [progress, setProgress] = useState<SeedingCampaignProgress | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  // Phase 2K-BY (P1 #7) — a single, page-level visible error surface for
+  // secondary/background actions (status transitions, background
+  // reloads) that previously failed silently (console.error only). This
+  // never replaces a primary action's own inline error (Quick Capture,
+  // description save, Page reassignment already show their own) — it
+  // only covers the gap: actions with no dedicated error UI of their own.
+  const [actionError, setActionError] = useState<string | null>(null);
+  // Phase 2K-BY (P1 #3) — Remove Target. Only ever offered/attempted for
+  // a target with zero tasks (client-side hint matching the server's own
+  // authoritative check) — a target with any task, including a
+  // completed one, can never be removed, by design.
+  const [removingTargetId, setRemovingTargetId] = useState<string | null>(null);
   // Phase 2K-BO — so a Share task's row can show WHICH execution account
   // it's assigned to (previously invisible on this page — only
   // assigned_staff_id was shown). Read-only lookup, id -> display_name.
@@ -245,6 +259,16 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
     detectedSourceType: string;
     idConfidence: string;
   } | null>(null);
+
+  // Phase 2K-BX — Target Card internal identification description. This
+  // is never an edit to the original Facebook post — only the staff's
+  // own internal note (facebook_manual_content_references.source_label),
+  // only ever offered for a manual (Personal/Group) target. One editor
+  // open at a time, inline on the card it belongs to.
+  const [editingDescriptionTargetId, setEditingDescriptionTargetId] = useState<string | null>(null);
+  const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [isSavingDescription, setIsSavingDescription] = useState(false);
+  const [descriptionError, setDescriptionError] = useState<string | null>(null);
   // Phase 2K-BS — server returned needsAcknowledgment for this task; the
   // reason shown is whatever the server just recomputed fresh (never the
   // possibly-stale targetCompatibility map fetched at page load).
@@ -255,6 +279,7 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
   const loadAll = useCallback(async () => {
     setIsLoading(true);
     setForbidden(false);
+    setActionError(null);
     try {
       const [campaignRes, targetsRes, suggestionsRes, tasksRes, progressRes, evidenceRes, directCommentRes, executionAccountsRes, pageInfoRes, targetCompatibilityRes] = await Promise.all([
         fetch(`/api/seeding/campaigns/${id}`),
@@ -291,6 +316,7 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       setTargetCompatibility(targetCompatibilityRes.ok ? await targetCompatibilityRes.json() : {});
     } catch (error) {
       console.error("Failed to load seeding campaign detail:", error);
+      setActionError("Không thể tải dữ liệu campaign — vui lòng tải lại trang.");
     } finally {
       setIsLoading(false);
     }
@@ -312,6 +338,7 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       if (res.ok) setSuggestions(await res.json());
     } catch (error) {
       console.error("Failed to load target-scoped suggestions:", error);
+      setActionError("Không thể tải gợi ý comment cho bài viết này.");
     }
   }
 
@@ -460,6 +487,7 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       setTimeout(() => setCopiedLinkTargetId((id) => (id === targetId ? null : id)), 2000);
     } catch (error) {
       console.error("Clipboard copy failed:", error);
+      setActionError("Không thể copy link — trình duyệt từ chối quyền truy cập clipboard.");
     }
   }
 
@@ -575,6 +603,7 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       if (progressRes.ok) setProgress(await progressRes.json());
     } catch (error) {
       console.error("Failed to update seeding task status:", error);
+      setActionError(error instanceof Error ? error.message : "Không thể cập nhật trạng thái task");
     }
   }
 
@@ -615,6 +644,7 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       }
     } catch (error) {
       console.error("Failed to publish direct comment:", error);
+      setActionError("Không thể đăng comment trực tiếp — lỗi kết nối, vui lòng thử lại.");
     } finally {
       setPostingTaskId(null);
     }
@@ -660,6 +690,28 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
     }
   }
 
+  /** Phase 2K-BY (P1 #3) — a genuinely destructive, irreversible action
+   * (unlike every other button on this card) — a lightweight native
+   * confirm rather than a tenth modal on an already modal-heavy page.
+   * The server re-verifies zero tasks itself regardless of what this
+   * client believes — this button is only ever shown when the client's
+   * own `targetTasks.length === 0`, but that is a UX hint, not the
+   * enforcement. */
+  async function handleRemoveTarget(target: SeedingCampaignTargetWithPost) {
+    if (!window.confirm("Xoá target này khỏi campaign? Không thể hoàn tác.")) return;
+    setRemovingTargetId(target.id);
+    try {
+      const res = await fetch(`/api/seeding/campaigns/${id}/targets/${target.id}`, { method: "DELETE" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error ?? "Không thể xoá target");
+      setTargets((prev) => prev.filter((t) => t.id !== target.id));
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Không thể xoá target");
+    } finally {
+      setRemovingTargetId(null);
+    }
+  }
+
   function quickCaptureResultLabel(): string {
     if (!quickCaptureLastResult) return "";
     const sourceLabel =
@@ -670,6 +722,42 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
           : "Cá nhân (Manual Reference)";
     const dup = quickCaptureLastResult.outcome.includes("already_targeted") ? " — bài viết này đã có trong campaign" : "";
     return `Đã lưu — nguồn: ${sourceLabel}${dup}`;
+  }
+
+  /** Phase 2K-BX — opens the inline editor for one target's internal
+   * description, pre-filled with the current value (empty if none). */
+  function openDescriptionEditor(target: SeedingCampaignTargetWithPost) {
+    setEditingDescriptionTargetId(target.id);
+    setDescriptionDraft(target.source_label ?? "");
+    setDescriptionError(null);
+  }
+
+  function cancelDescriptionEditor() {
+    // No fetch — cancel is a pure client-side no-op, original value is
+    // simply never sent.
+    setEditingDescriptionTargetId(null);
+    setDescriptionDraft("");
+    setDescriptionError(null);
+  }
+
+  async function saveDescription(targetId: string) {
+    setIsSavingDescription(true);
+    setDescriptionError(null);
+    try {
+      const res = await fetch(`/api/seeding/campaigns/${id}/targets/${targetId}/description`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: descriptionDraft }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error ?? "Không thể lưu mô tả");
+      setTargets((prev) => prev.map((t) => (t.id === targetId ? { ...t, source_label: body.sourceLabel } : t)));
+      setEditingDescriptionTargetId(null);
+    } catch (error) {
+      setDescriptionError(error instanceof Error ? error.message : "Không thể lưu mô tả");
+    } finally {
+      setIsSavingDescription(false);
+    }
   }
 
   /** Phase 2K-BP — opens the picker and fetches the candidate list fresh
@@ -690,6 +778,10 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       setReassignCandidates(overview.pages);
     } catch (error) {
       console.error("Failed to load connected Page candidates:", error);
+      // Reuses this modal's own existing error state (reassignPageError) —
+      // it's already open and already has a dedicated error slot, no need
+      // for a second, redundant page-level banner.
+      setReassignPageError("Không thể tải danh sách Facebook Page — vui lòng đóng và thử lại.");
     } finally {
       setIsLoadingReassignCandidates(false);
     }
@@ -726,11 +818,12 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Không thể đổi trạng thái campaign");
       const updated: SeedingCampaign = await res.json();
       setCampaign(updated);
     } catch (error) {
       console.error("Failed to change seeding campaign status:", error);
+      setActionError(error instanceof Error ? error.message : "Không thể đổi trạng thái campaign");
     } finally {
       setIsChangingCampaignStatus(false);
     }
@@ -785,6 +878,28 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
     );
   }
 
+  // Phase 2K-BY (P1 #7) — loadAll failing (network error, etc.) previously
+  // left this page silently stuck on the loading skeleton forever
+  // (isLoading turns false but campaign stays null, and the skeleton
+  // below only ever rendered while isLoading was true — actionError had
+  // no reachable render path). Distinct from the still-loading case: an
+  // honest failure state with the real error and a retry action.
+  if (!isLoading && !campaign) {
+    return (
+      <div className="p-6">
+        <Card className="flex items-center gap-3 text-destructive">
+          <AlertTriangle className="w-5 h-5 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm">{actionError ?? "Không thể tải campaign."}</p>
+          </div>
+          <Button size="sm" variant="secondary" onClick={() => loadAll()}>
+            Thử lại
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
   if (isLoading || !campaign) {
     // Phase 2I (I6) — keeps the page's own shell/context (icon, padding,
     // card outlines) instead of an almost-blank screen with a tiny
@@ -817,13 +932,28 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
 
   return (
     <div className="p-6 space-y-6 max-w-5xl">
+      {/* Phase 2K-BY (P1 #7) — visible surface for secondary-action
+         failures (status transitions, background reloads) that
+         previously only console.error'd. Dismissible; a fresh loadAll()
+         call clears it. Never shown for primary actions that already
+         have their own inline error (Quick Capture, description edit,
+         Page reassignment). */}
+      {actionError && (
+        <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <p className="flex-1">{actionError}</p>
+          <button type="button" onClick={() => setActionError(null)} className="text-destructive/70 hover:text-destructive text-xs">
+            Đóng
+          </button>
+        </div>
+      )}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <Sparkles className="w-6 h-6 text-primary" />
           <div>
             <h1 className="text-xl font-semibold text-foreground">{campaign.name}</h1>
             <p className="text-sm text-muted-foreground">
-              {campaign.objective} · <Badge variant="warning">{seedingCampaignStatusLabel(campaign.status)}</Badge> · {targets.length} bài viết
+              {campaign.objective} · <Badge variant={seedingCampaignStatusBadgeVariant(campaign.status)}>{seedingCampaignStatusLabel(campaign.status)}</Badge> · {targets.length} bài viết
             </p>
           </div>
         </div>
@@ -935,7 +1065,7 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
             <Select
               label="Tạo theo bài viết (tùy chọn)"
               placeholder="Toàn bộ campaign (mặc định)"
-              options={targets.map((t) => ({ value: t.id, label: t.message?.slice(0, 60) || t.id }))}
+              options={targets.map((t) => ({ value: t.id, label: resolveTargetDisplayText(t).slice(0, 60) }))}
               value={generateTargetId}
               onChange={(e) => {
                 const newTargetId = e.target.value;
@@ -982,21 +1112,48 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
           <p className="text-sm text-muted-foreground">Chưa có gợi ý nào — bấm Generate để AI tạo comment.</p>
         ) : (
           <div className="space-y-4">
+            {/* Phase 2K-BZ (P2 #4) — when generation was scoped to one
+               specific target (generateTargetId set), a suggestion here
+               can be turned into a task directly, with zero scrolling to
+               re-find the same text truncated in that target's card
+               further down. Reuses openAssign() exactly as the target
+               card's own buttons already do — same modal, same
+               validation, no new task-creation path. When generation was
+               campaign-wide (no target selected), there is no single,
+               unambiguous target to attach to, so these stay read-only —
+               the label below explains why rather than leaving it
+               unexplained. */}
             {suggestionsByCategory.map(({ category, label, items }) =>
               items.length === 0 ? null : (
                 <div key={category}>
                   <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">{label}</h3>
                   <div className="space-y-2">
-                    {items.map((s) => (
-                      <p key={s.id} className="text-sm text-foreground rounded-lg border border-border p-3">
-                        {s.content}
-                      </p>
-                    ))}
+                    {items.map((s) => {
+                      const scopedTarget = generateTargetId ? targets.find((t) => t.id === generateTargetId) : undefined;
+                      return scopedTarget ? (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => openAssign(scopedTarget, s)}
+                          className="w-full text-left text-sm text-foreground rounded-lg border border-border p-3 hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                        >
+                          {s.content}
+                        </button>
+                      ) : (
+                        <p key={s.id} className="text-sm text-foreground rounded-lg border border-border p-3">
+                          {s.content}
+                        </p>
+                      );
+                    })}
                   </div>
                 </div>
               )
             )}
-            <p className="text-xs text-muted-foreground">Chọn một gợi ý khi tạo task Comment cho từng bài viết bên dưới.</p>
+            <p className="text-xs text-muted-foreground">
+              {generateTargetId
+                ? "Bấm vào một gợi ý ở trên để tạo task Comment ngay cho bài viết đã chọn."
+                : "Gợi ý này dùng ngữ cảnh chung của campaign — chọn một bài viết cụ thể ở trên để bấm chọn trực tiếp, hoặc chọn gợi ý bên dưới từng bài viết."}
+            </p>
           </div>
         )}
       </Card>
@@ -1062,8 +1219,64 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-foreground line-clamp-2">{target.message || "(không có nội dung)"}</p>
+                  {/* Phase 2K-BX — display priority: (1) staff's own
+                     internal identification (source_label), (2) real
+                     Facebook metadata (message), (3) an honest, visually
+                     calm empty state — never "(không có nội dung)",
+                     which read as broken data rather than "nothing here
+                     yet". Editing (manual targets only) always acts on
+                     source_label specifically, never on `message`. */}
+                  {editingDescriptionTargetId === target.id ? (
+                    <div className="space-y-1.5">
+                      <textarea
+                        value={descriptionDraft}
+                        onChange={(e) => setDescriptionDraft(e.target.value)}
+                        rows={2}
+                        maxLength={500}
+                        placeholder="VD: Vòng ni 54.6 khách đang quan tâm"
+                        className="w-full rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                      />
+                      {descriptionError && <p className="text-destructive text-xs">{descriptionError}</p>}
+                      <div className="flex gap-2">
+                        <Button size="sm" isLoading={isSavingDescription} onClick={() => saveDescription(target.id)}>
+                          Lưu
+                        </Button>
+                        <Button size="sm" variant="secondary" onClick={cancelDescriptionEditor} disabled={isSavingDescription}>
+                          Hủy
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p
+                      className={
+                        target.source_label || target.message
+                          ? "text-sm text-foreground line-clamp-2"
+                          : // Phase 2K-BZ (P2 #6) — plain muted text, no
+                            // italic: every other empty state in this
+                            // module (task lists, account lists,
+                            // campaign list) uses this exact style; this
+                            // was the one accidental outlier.
+                            "text-sm text-muted-foreground"
+                      }
+                    >
+                      {resolveTargetDisplayText(target)}
+                    </p>
+                  )}
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    {editingDescriptionTargetId !== target.id && target.manual_content_reference_id && (
+                      <button
+                        type="button"
+                        onClick={() => openDescriptionEditor(target)}
+                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                      >
+                        <Pencil className="w-3.5 h-3.5" /> {target.source_label ? "Chỉnh sửa mô tả" : "Thêm mô tả"}
+                      </button>
+                    )}
+                    {target.discovery_method && (
+                      <Badge variant="muted">
+                        {target.discovery_method === "Quick Capture" ? "Nhập qua Quick Capture" : target.discovery_method}
+                      </Badge>
+                    )}
                     {targetCompatibility[target.id]?.compatibility === "INCOMPATIBLE" && (
                       <Badge variant="destructive" title={targetCompatibility[target.id]?.reason}>
                         Có thể không tương thích với Page hiện tại
@@ -1114,6 +1327,16 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                   <Button size="sm" variant="secondary" onClick={() => setDistributingTarget(target)}>
                     <Send className="w-4 h-4" /> Phân phối task
                   </Button>
+                  {targetTasks.length === 0 && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => handleRemoveTarget(target)}
+                      isLoading={removingTargetId === target.id}
+                    >
+                      <Trash2 className="w-4 h-4" /> Xoá target
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -1199,14 +1422,34 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                                       Không hỗ trợ đăng trực tiếp cho nguồn {target.source_type} — dùng quy trình thủ công bên dưới.
                                     </span>
                                   ) : directCommentCapability?.availability === "AVAILABLE" ? (
-                                    <Button
-                                      size="sm"
-                                      onClick={() => handleDirectPublish(t.id)}
-                                      isLoading={postingTaskId === t.id}
-                                      disabled={postingTaskId !== null && postingTaskId !== t.id}
-                                    >
-                                      <Send className="w-3.5 h-3.5" /> Đăng comment
-                                    </Button>
+                                    <div className="space-y-1">
+                                      {/* Phase 2K-BY (P1 #6) — presentation-only reinforcement,
+                                         co-located with the action it warns about (the card-header
+                                         badge from 2K-BQ can be several rows above this specific
+                                         task). Never blocks the click, never alters
+                                         handleDirectPublish — the server's own fresh
+                                         checkTargetCompatibility + needsAcknowledgment protocol
+                                         (2K-BS) remains the sole source of truth; this is only a
+                                         heads-up before the first click, not a second gate.
+                                         COMPATIBLE/UNKNOWN intentionally render nothing extra
+                                         here — UNKNOWN already has its own honest, non-alarmist
+                                         badge in the card header and must not be duplicated as a
+                                         louder warning down here. */}
+                                      {targetCompatibility[target.id]?.compatibility === "INCOMPATIBLE" && (
+                                        <p className="text-xs text-destructive flex items-center gap-1">
+                                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                          Có thể không tương thích với Page hiện tại
+                                        </p>
+                                      )}
+                                      <Button
+                                        size="sm"
+                                        onClick={() => handleDirectPublish(t.id)}
+                                        isLoading={postingTaskId === t.id}
+                                        disabled={postingTaskId !== null && postingTaskId !== t.id}
+                                      >
+                                        <Send className="w-3.5 h-3.5" /> Đăng comment
+                                      </Button>
+                                    </div>
                                   ) : (
                                     <span className="text-xs text-muted-foreground">
                                       Đăng trực tiếp: {directCommentCapability?.reason ?? "chưa khả dụng"} — dùng quy trình thủ công bên dưới.

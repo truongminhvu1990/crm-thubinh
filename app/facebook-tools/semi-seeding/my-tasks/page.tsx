@@ -91,6 +91,10 @@ export default function MySeedingTasksPage() {
 
   const [pendingChange, setPendingChange] = useState<{ taskId: string; status: SeedingTaskStatus } | null>(null);
   const [reasonInput, setReasonInput] = useState("");
+  // Phase 2K-BY (P1 #7) — visible surface for actions that previously
+  // only console.error'd (load failure, status update failure, clipboard
+  // denial).
+  const [actionError, setActionError] = useState<string | null>(null);
   // Mobile-open fix rev.2 — client-side only, after mount (see the
   // runner page's identical comment for why this can't be computed at
   // render time without risking a hydration mismatch).
@@ -105,6 +109,7 @@ export default function MySeedingTasksPage() {
   const loadTasks = useCallback(async () => {
     setIsLoading(true);
     setForbidden(false);
+    setActionError(null);
     try {
       const res = await fetch("/api/seeding/tasks?assignedToMe=true");
       if (res.status === 403 || res.status === 401) {
@@ -115,6 +120,7 @@ export default function MySeedingTasksPage() {
       setTasks(await res.json());
     } catch (error) {
       console.error("Failed to load my seeding tasks:", error);
+      setActionError("Không thể tải danh sách công việc — vui lòng thử lại.");
     } finally {
       setIsLoading(false);
     }
@@ -132,11 +138,12 @@ export default function MySeedingTasksPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status, result_note: resultNote ?? null }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Không thể cập nhật task");
       const updated: SeedingTaskWithContext = await res.json();
       setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, ...updated } : t)));
     } catch (error) {
       console.error("Failed to update my seeding task status:", error);
+      setActionError(error instanceof Error ? error.message : "Không thể cập nhật task");
     } finally {
       setUpdatingId(null);
     }
@@ -158,6 +165,7 @@ export default function MySeedingTasksPage() {
       setTimeout(() => setCopiedCommentTaskId((id) => (id === taskId ? null : id)), 2000);
     } catch (error) {
       console.error("Clipboard copy failed:", error);
+      setActionError("Không thể copy — trình duyệt từ chối quyền truy cập clipboard.");
     }
   }
 
@@ -170,6 +178,7 @@ export default function MySeedingTasksPage() {
       setTimeout(() => setCopiedLinkTaskId((id) => (id === taskId ? null : id)), 2000);
     } catch (error) {
       console.error("Clipboard copy failed:", error);
+      setActionError("Không thể copy — trình duyệt từ chối quyền truy cập clipboard.");
     }
   }
 
@@ -195,6 +204,18 @@ export default function MySeedingTasksPage() {
 
   return (
     <div className="p-6 space-y-4 max-w-2xl">
+      {/* Phase 2K-BY (P1 #7) — visible surface for actions that
+         previously only console.error'd. Dismissible; the next
+         loadTasks() call clears it. */}
+      {actionError && (
+        <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <p className="flex-1">{actionError}</p>
+          <button type="button" onClick={() => setActionError(null)} className="text-destructive/70 hover:text-destructive text-xs">
+            Đóng
+          </button>
+        </div>
+      )}
       <div className="flex items-center gap-3">
         <ClipboardList className="w-6 h-6 text-primary" />
         <div>
@@ -262,6 +283,18 @@ export default function MySeedingTasksPage() {
                       </Badge>
                       {taskStatusBadge(task.status)}
                     </div>
+                    {/* Phase 2K-BY (P1 #1) — a Distribution-created Share
+                       task's own account/destination assignment, never
+                       shown before. Omitted entirely (not "—") for a
+                       non-distribution task — that is the honest neutral
+                       state, not a missing-data error. */}
+                    {(task.execution_account_name || task.destination_label) && (
+                      <p className="text-xs text-muted-foreground">
+                        {task.execution_account_name && <>Đăng bằng account: {task.execution_account_name}</>}
+                        {task.execution_account_name && task.destination_label && " · "}
+                        {task.destination_label && <>Điểm đến: {task.destination_label}</>}
+                      </p>
+                    )}
                     {campaignClosed && campaignClosedNotice()}
                     {discoveryStatusWarning(task.target_discovery_status)}
                     {task.action_type === "Comment" && task.comment_text && (

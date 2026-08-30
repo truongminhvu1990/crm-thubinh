@@ -1,11 +1,23 @@
 /** Facebook Seeding — Campaign Management (Phase 2C, 2026-08-26). Campaign
- * is a multi-target container: 1 Campaign → many Target Posts (a real Page
- * post, cached in facebook_page_posts) → many Tasks (Like/Comment/Share).
- * Still human-executed only: AI drafts Comment text, a human staff member
- * performs the action on Facebook themselves and reports back Done/Failed/
- * Skipped/Cancelled. No comment/like/share-posting integration exists
- * anywhere — no bot posting, no browser automation, no personal-account
- * automation, no scraping, no actor pool. */
+ * is a multi-target container: 1 Campaign → many Targets (a Page post,
+ * cached in facebook_page_posts, or a Personal/Group post captured into
+ * facebook_manual_content_references) → many Tasks (Like/Comment/Share).
+ *
+ * Execution is a mix of two real, distinct paths, never conflated:
+ * (1) Direct Comment (Phase 2K-BK onward) — a genuine Graph API call
+ *     (lib/seeding/seedingDirectComment.service.ts), Page-sourced Comment
+ *     tasks only, gated by real server-computed capability/compatibility
+ *     and an INCOMPATIBLE-acknowledgment protocol (2K-BS); every other
+ *     task (Like, Share, any Personal/Group-sourced Comment) stays
+ *     (2) human-executed: AI drafts the Comment text, a staff member
+ *     performs the action on Facebook themselves and reports back Done/
+ *     Failed/Skipped/Cancelled. Personal-account Direct Comment via a
+ *     Connected Page token was live-tested and confirmed Meta-rejected
+ *     (Phase 2K-BT) — this is a permanent platform limitation, not a gap.
+ *
+ * Still true, unconditionally: no browser automation, no personal-account
+ * session/credential of any kind anywhere in this module, no scraping, no
+ * actor pool. */
 
 export type SeedingCampaignStatus = "Draft" | "Active" | "Completed";
 
@@ -111,6 +123,11 @@ export interface SeedingCampaignTargetWithPost extends SeedingCampaignTarget {
   permalink_url: string | null;
   full_picture_url: string | null;
   discovery_status: string;
+  /** Phase 2K-BX — how this target's content was captured ("Manual
+   * Import" | "Quick Capture"), null for a Page target (that concept
+   * doesn't apply — Page content is always API Sync). Tertiary UI
+   * context only, never used for any business decision. */
+  discovery_method: string | null;
 }
 
 export interface AddCampaignTargetsResult {
@@ -283,6 +300,13 @@ export interface SeedingTaskWithContext extends SeedingTask {
    * facebook_page_posts, so a manual-content-backed task silently
    * rendered with no context at all. */
   target_source_type: "Page" | "Personal" | "Group" | null;
+  /** Phase 2K-BY (P1 #1) — which execution account/destination this task
+   * (a Distribution-created Share task) is meant to use. Both null for
+   * every non-distribution task — an honest "not applicable" state, not
+   * a missing-data error. Names/labels only, never raw ids, never
+   * fabricated when the task has no such assignment. */
+  execution_account_name: string | null;
+  destination_label: string | null;
 }
 
 /** Phase 2I (I2) — bulk Comment task creation across many selected targets
@@ -451,6 +475,14 @@ export interface SeedingDestination {
   updated_at?: string;
 }
 
+/** Phase 2K-BZ (P2 #5) — Account Center's own usage view of a
+ * destination. task_count is always a real number (never omitted) —
+ * 0 for a destination nobody has distributed to yet, an honest "zero
+ * usage" state distinct from data not having loaded at all. */
+export interface SeedingDestinationWithTaskCount extends SeedingDestination {
+  task_count: number;
+}
+
 export interface CreateSeedingDestinationInput {
   label: string;
   /** The raw Facebook Group URL, exactly as pasted — parsed server-side by
@@ -562,8 +594,17 @@ export interface SeedingExecutionAccountWithStats extends SeedingExecutionAccoun
   task_counts: SeedingTaskCounts;
 }
 
+/** Phase 2K-BZ (P2 #2) — Account Center's task history, enriched with
+ * the campaign name (never a raw UUID) so a manager can drill through
+ * to the right place. campaign_name is null only for a legacy task with
+ * no resolvable campaign — the same nullability convention already
+ * established by SeedingTaskWithContext.campaign_name. */
+export interface SeedingExecutionAccountTaskRow extends SeedingTask {
+  campaign_name: string | null;
+}
+
 export interface SeedingExecutionAccountDetail extends SeedingExecutionAccountWithStats {
-  tasks: SeedingTask[];
+  tasks: SeedingExecutionAccountTaskRow[];
 }
 
 /** The connected-Page side — capability mirrors seedingDirectComment.

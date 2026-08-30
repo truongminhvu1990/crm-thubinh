@@ -11,7 +11,7 @@ import { logActivity } from "@/lib/activityLog.service";
 import { getCampaignById } from "./seedingCampaign.service";
 import { SeedingValidationError } from "./seeding.errors";
 import { parseFacebookContentUrl, FacebookUrlIdConfidence } from "@/lib/facebookTools/facebookUrlParser";
-import { getOrCreateManualContentReference } from "@/lib/facebookTools/facebookManualContent.service";
+import { getOrCreateManualContentReference, updateManualContentReferenceSourceLabel } from "@/lib/facebookTools/facebookManualContent.service";
 import { FacebookManualContentSourceType } from "@/types/facebookTools";
 
 /** Seeding Campaign Management (Phase 2C) — the Campaign <-> Target Post
@@ -40,7 +40,7 @@ export async function getTargetsByCampaign(
   const { data, error } = await client
     .from("seeding_campaign_targets")
     .select(
-      "*, facebook_page_posts(message, permalink_url, full_picture_url, discovery_status), facebook_manual_content_references(source_type, source_label, message, permalink_url, full_picture_url)"
+      "*, facebook_page_posts(message, permalink_url, full_picture_url, discovery_status), facebook_manual_content_references(source_type, source_label, message, permalink_url, full_picture_url, discovery_method)"
     )
     .eq("campaign_id", campaignId)
     .order("created_at", { ascending: true });
@@ -64,6 +64,7 @@ export async function getTargetsByCampaign(
         message: string | null;
         permalink_url: string | null;
         full_picture_url: string | null;
+        discovery_method: string | null;
       } | null;
     })[]
   ).map((row) => {
@@ -83,6 +84,7 @@ export async function getTargetsByCampaign(
         // "Active" here means "the reference itself still exists," never
         // a claim that Facebook content was actually re-checked.
         discovery_status: "Active",
+        discovery_method: facebook_manual_content_references.discovery_method,
       };
     }
     return {
@@ -93,6 +95,9 @@ export async function getTargetsByCampaign(
       permalink_url: facebook_page_posts?.permalink_url ?? null,
       full_picture_url: facebook_page_posts?.full_picture_url ?? null,
       discovery_status: facebook_page_posts?.discovery_status ?? "Unavailable",
+      // Phase 2K-BX — "discovery method" isn't a concept that applies to
+      // a Page target (always API Sync) — null, never a fabricated label.
+      discovery_method: null,
     };
   });
 }
@@ -395,4 +400,131 @@ async function captureAsManualTarget(
     idConfidence,
     target,
   };
+}
+
+const TARGET_DESCRIPTION_MAX_LENGTH = 500;
+
+export interface UpdateTargetDescriptionResult {
+  targetId: string;
+  sourceLabel: string | null;
+}
+
+/** Phase 2K-BX — Target Card Metadata Fallback & Inline Edit. This is
+ * NEVER an attempt to edit the original Facebook post/content — it only
+ * ever writes facebook_manual_content_references.source_label (a field
+ * that already existed, pre-existing, for exactly this "staff's own
+ * internal reference" purpose). Metadata-only, by construction: nothing
+ * here can touch source_type, facebook_post_id, facebook_object_id,
+ * campaign_id, facebook_page_id, task status, or any execution behavior
+ * — those columns are never referenced in this function at all.
+ *
+ * A Page target (manual_content_reference_id is null) is rejected —
+ * there is no existing, honest place to persist an override for
+ * API-synced Page content without touching facebook_page_posts, which
+ * this module (like every other in this codebase) never writes to. */
+export async function updateTargetDescription(
+  campaignId: string,
+  targetId: string,
+  description: string,
+  actorStaffId: string | null,
+  client: SupabaseClient = supabase
+): Promise<UpdateTargetDescriptionResult> {
+  const campaign = await getCampaignById(campaignId, client);
+  if (!campaign) throw new SeedingValidationError("Không tìm thấy campaign");
+
+  const { data: targetRow, error: targetError } = await client
+    .from("seeding_campaign_targets")
+    .select("id, manual_content_reference_id")
+    .eq("id", targetId)
+    .eq("campaign_id", campaignId)
+    .maybeSingle();
+  if (targetError) throw targetError;
+  if (!targetRow) {
+    throw new SeedingValidationError("Không tìm thấy target này trong campaign");
+  }
+  if (!targetRow.manual_content_reference_id) {
+    throw new SeedingValidationError(
+      "Target này lấy nội dung tự động từ Facebook Page đã kết nối — không có mô tả nội bộ để chỉnh sửa ở đây"
+    );
+  }
+
+  const trimmed = description.trim();
+  if (trimmed.length > TARGET_DESCRIPTION_MAX_LENGTH) {
+    throw new SeedingValidationError(`Mô tả quá dài (tối đa ${TARGET_DESCRIPTION_MAX_LENGTH} ký tự)`);
+  }
+
+  const updated = await updateManualContentReferenceSourceLabel(targetRow.manual_content_reference_id, trimmed || null, client);
+
+  await logActivity(
+    {
+      staff_id: actorStaffId,
+      action: "seeding_campaign_target_description_updated",
+      entity: "seeding_campaign_target",
+      entity_id: targetId,
+    },
+    client
+  );
+
+  return { targetId, sourceLabel: updated.source_label ?? null };
+}
+
+/** Phase 2K-BY (P1 #3) — Remove Target. Deliberately narrow: only ever
+ * removes a target that has ZERO tasks of ANY status ever created
+ * against it. This is the ONE behavior a dedicated data-integrity audit
+ * could actually PROVE safe from the existing architecture:
+ * seeding_tasks.campaign_target_id and seeding_comment_suggestions.
+ * campaign_target_id are both `ON DELETE CASCADE` (no FK prevents
+ * deletion) — so a target WITH any task, including a completed one with
+ * real Direct Comment evidence (external_comment_id), would silently
+ * cascade-delete that historical record if removed. That is exactly what
+ * "preserve historical execution truth, never delete evidence of
+ * completed work" forbids, so this function refuses that case outright
+ * rather than guessing whether a soft-archive or some other mechanism is
+ * wanted — that decision is reported to the Product Owner, not decided
+ * here. A target's underlying facebook_page_posts/
+ * facebook_manual_content_references row is NEVER touched — the same
+ * manual content reference can legitimately back a target in more than
+ * one campaign (dedup is keyed on facebook_object_id globally, not per
+ * campaign), so deleting it here could silently break a different
+ * campaign. Idempotent: a second call against an already-removed (or
+ * never-existing) target finds no row and rejects honestly, same
+ * convention as every other target-scoped operation in this file. */
+export async function removeTargetFromCampaign(
+  campaignId: string,
+  targetId: string,
+  actorStaffId: string | null,
+  client: SupabaseClient = supabase
+): Promise<void> {
+  const campaign = await getCampaignById(campaignId, client);
+  if (!campaign) throw new SeedingValidationError("Không tìm thấy campaign");
+
+  const { data: targetRow, error: targetError } = await client
+    .from("seeding_campaign_targets")
+    .select("id")
+    .eq("id", targetId)
+    .eq("campaign_id", campaignId)
+    .maybeSingle();
+  if (targetError) throw targetError;
+  if (!targetRow) {
+    throw new SeedingValidationError("Không tìm thấy target này trong campaign");
+  }
+
+  const { count, error: countError } = await client
+    .from("seeding_tasks")
+    .select("*", { count: "exact", head: true })
+    .eq("campaign_target_id", targetId);
+  if (countError) throw countError;
+  if ((count ?? 0) > 0) {
+    throw new SeedingValidationError(
+      "Target này đã có task (kể cả task đã hoàn thành) — không thể xoá để bảo toàn lịch sử thực hiện."
+    );
+  }
+
+  const { error: deleteError } = await client.from("seeding_campaign_targets").delete().eq("id", targetId);
+  if (deleteError) throw deleteError;
+
+  await logActivity(
+    { staff_id: actorStaffId, action: "seeding_campaign_target_removed", entity: "seeding_campaign_target", entity_id: targetId },
+    client
+  );
 }

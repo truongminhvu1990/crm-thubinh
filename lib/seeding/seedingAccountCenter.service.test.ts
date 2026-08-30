@@ -185,6 +185,42 @@ test("getExecutionAccountDetail: returns the account, its capability, its task l
   assert.deepEqual(result!.task_counts, { pending: 1, inProgress: 0, done: 1, failed: 0, skipped: 0, cancelled: 0, total: 2 });
 });
 
+/** Phase 2K-BZ (P2 #2) — Account Center task drill-through: each task
+ * row now carries the real campaign name (never a raw id), and a legacy
+ * task with no resolvable campaign gets an honest null, never a crash. */
+
+test("getExecutionAccountDetail: (P2 #2) each task carries its real campaign_name, for the drill-through link", async () => {
+  resetMocks();
+  const { getExecutionAccountDetail } = await import("./seedingAccountCenter.service");
+  const tasks = [
+    { id: "t1", execution_account_id: "acc-1", campaign_id: "c1", status: "Done", comment_text: null, seeding_campaigns: { name: "Campaign A" } },
+  ];
+  const client = makeClient({
+    seeding_execution_accounts: [{ data: ACCOUNT_1 }],
+    seeding_tasks: [{ data: tasks }],
+  });
+
+  const result = await getExecutionAccountDetail("acc-1", client);
+
+  assert.equal(result!.tasks[0].campaign_name, "Campaign A");
+  assert.equal(result!.tasks[0].campaign_id, "c1", "campaign_id itself must still be present, unchanged");
+  assert.equal((result!.tasks[0] as unknown as { seeding_campaigns?: unknown }).seeding_campaigns, undefined, "the raw embed must not leak through");
+});
+
+test("getExecutionAccountDetail: (P2 #2) a legacy task with no resolvable campaign gets campaign_name null, never a crash", async () => {
+  resetMocks();
+  const { getExecutionAccountDetail } = await import("./seedingAccountCenter.service");
+  const tasks = [{ id: "t1", execution_account_id: "acc-1", campaign_id: "missing", status: "Pending", comment_text: null, seeding_campaigns: null }];
+  const client = makeClient({
+    seeding_execution_accounts: [{ data: ACCOUNT_1 }],
+    seeding_tasks: [{ data: tasks }],
+  });
+
+  const result = await getExecutionAccountDetail("acc-1", client);
+
+  assert.equal(result!.tasks[0].campaign_name, null);
+});
+
 /** 6. Server-side capability enforcement — the capability object is
  * always computed here, never accepted as input; these read functions
  * take no capability parameter at all, so there is nothing for a caller

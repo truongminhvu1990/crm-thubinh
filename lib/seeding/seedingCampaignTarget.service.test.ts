@@ -42,8 +42,23 @@ const getOrCreateManualContentReferenceMock = mock.fn(
     created: true,
   })
 );
+/** Phase 2K-BX — updateTargetDescription's own dependency, same
+ * one-level-removed mocking convention. Returns a row whose source_label
+ * echoes whatever was passed in, so tests can assert the value flows
+ * through without this module re-implementing the real update logic
+ * (that has its own dedicated coverage in facebookManualContent.service.test.ts). */
+const updateManualContentReferenceSourceLabelMock = mock.fn(async (id: string, sourceLabel: string | null) => ({
+  id,
+  source_type: "Personal",
+  source_label: sourceLabel,
+  facebook_object_id: "unchanged-object-id",
+  permalink_url: "https://www.facebook.com/unchanged-url",
+}));
 mock.module("@/lib/facebookTools/facebookManualContent.service", {
-  namedExports: { getOrCreateManualContentReference: getOrCreateManualContentReferenceMock },
+  namedExports: {
+    getOrCreateManualContentReference: getOrCreateManualContentReferenceMock,
+    updateManualContentReferenceSourceLabel: updateManualContentReferenceSourceLabelMock,
+  },
 });
 
 interface FakePost {
@@ -76,11 +91,13 @@ function makeClient(opts: {
   manualRefs?: FakeManualRef[];
   existingTargets?: FakeTargetRow[];
   tasksByStatus?: Record<string, number>;
+  taskCountsByTarget?: Record<string, number>;
 }) {
   const posts = opts.posts ?? [];
   const manualRefs = opts.manualRefs ?? [];
   const targets = [...(opts.existingTargets ?? [])];
   const tasksByStatus = opts.tasksByStatus ?? {};
+  const taskCountsByTarget = opts.taskCountsByTarget ?? {};
 
   return {
     from(table: string) {
@@ -150,6 +167,18 @@ function makeClient(opts: {
             targets.push(...rows);
             return { select: () => Promise.resolve({ data: rows, error: null }) };
           },
+          // Phase 2K-BY (P1 #3) — removeTargetFromCampaign's own
+          // .delete().eq("id", targetId). Mutates the shared `targets`
+          // array so a subsequent read in the SAME test sees it gone.
+          delete() {
+            return {
+              eq(_col: string, val: string) {
+                const idx = targets.findIndex((t) => t.id === val);
+                if (idx >= 0) targets.splice(idx, 1);
+                return Promise.resolve({ error: null });
+              },
+            };
+          },
         };
       }
       if (table === "seeding_tasks") {
@@ -162,10 +191,16 @@ function makeClient(opts: {
                 return builder;
               },
               then(resolve: (v: unknown) => void, reject: (e: unknown) => void) {
+                // Phase 2K-BY (P1 #3) — removeTargetFromCampaign's own
+                // count check filters by campaign_target_id, not status;
+                // checked first so getCampaignProgress's own
+                // status-filtered tests (below) are completely unaffected.
                 const count =
-                  "status" in filters
-                    ? tasksByStatus[filters.status as string] ?? 0
-                    : Object.values(tasksByStatus).reduce((a, b) => a + b, 0);
+                  "campaign_target_id" in filters
+                    ? taskCountsByTarget[filters.campaign_target_id as string] ?? 0
+                    : "status" in filters
+                      ? tasksByStatus[filters.status as string] ?? 0
+                      : Object.values(tasksByStatus).reduce((a, b) => a + b, 0);
                 return Promise.resolve({ count, error: null }).then(resolve, reject);
               },
             };
@@ -537,6 +572,175 @@ test("quickCaptureTargetFromUrl: a nonexistent campaign is rejected before any p
 
   await assert.rejects(
     () => quickCaptureTargetFromUrl("missing-campaign", "https://www.facebook.com/x/posts/123", "staff-1", client),
+    /Không tìm thấy campaign/
+  );
+});
+
+/** Phase 2K-BX — updateTargetDescription: metadata-only, manual-target-
+ * only. Never touches source_type, facebook_post_id,
+ * manual_content_reference_id, campaign_id, or task status — those are
+ * never referenced anywhere in this function, which this whole suite
+ * verifies indirectly (the fake client's `targets` fixture rows are
+ * never mutated by these calls, only read). */
+
+test("updateTargetDescription: (C) a manual target's description saves successfully and returns the new value", async () => {
+  updateManualContentReferenceSourceLabelMock.mock.resetCalls();
+  const { updateTargetDescription } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({
+    existingTargets: [{ id: "tg-1", campaign_id: "c1", manual_content_reference_id: "ref-1", facebook_post_id: "pfbid02abc" }],
+  });
+
+  const result = await updateTargetDescription("c1", "tg-1", "Vòng ni 54.6 khách đang quan tâm", "staff-1", client);
+
+  assert.equal(result.targetId, "tg-1");
+  assert.equal(result.sourceLabel, "Vòng ni 54.6 khách đang quan tâm");
+  assert.equal(updateManualContentReferenceSourceLabelMock.mock.callCount(), 1);
+  assert.deepEqual(updateManualContentReferenceSourceLabelMock.mock.calls[0].arguments.slice(0, 2), [
+    "ref-1",
+    "Vòng ni 54.6 khách đang quan tâm",
+  ]);
+});
+
+test("updateTargetDescription: (D) editing again overwrites the previous value — no duplicate target, no source identity changed", async () => {
+  const { updateTargetDescription } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({
+    existingTargets: [{ id: "tg-1", campaign_id: "c1", manual_content_reference_id: "ref-1", facebook_post_id: "pfbid02abc" }],
+  });
+
+  const first = await updateTargetDescription("c1", "tg-1", "Mô tả cũ", "staff-1", client);
+  const second = await updateTargetDescription("c1", "tg-1", "Mô tả mới", "staff-1", client);
+
+  assert.equal(first.targetId, "tg-1");
+  assert.equal(second.targetId, "tg-1");
+  assert.equal(second.sourceLabel, "Mô tả mới");
+});
+
+test("updateTargetDescription: an empty/whitespace-only description clears it to null — a legitimate state, not an error", async () => {
+  const { updateTargetDescription } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({
+    existingTargets: [{ id: "tg-1", campaign_id: "c1", manual_content_reference_id: "ref-1", facebook_post_id: "pfbid02abc" }],
+  });
+
+  const result = await updateTargetDescription("c1", "tg-1", "   ", "staff-1", client);
+
+  assert.equal(result.sourceLabel, null);
+});
+
+test("updateTargetDescription: (F) a Page-backed target (no manual_content_reference_id) is rejected — no field exists to persist an override for API-synced content", async () => {
+  const { updateTargetDescription } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({
+    existingTargets: [{ id: "tg-page", campaign_id: "c1", facebook_page_post_id: "post-1", facebook_post_id: "fb-1" }],
+  });
+
+  await assert.rejects(
+    () => updateTargetDescription("c1", "tg-page", "some text", "staff-1", client),
+    /Facebook Page đã kết nối/
+  );
+});
+
+test("updateTargetDescription: (F) a target that does not belong to this campaign is rejected, zero write", async () => {
+  const { updateTargetDescription } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({
+    existingTargets: [{ id: "tg-1", campaign_id: "other-campaign", manual_content_reference_id: "ref-1", facebook_post_id: "pfbid02abc" }],
+  });
+
+  await assert.rejects(() => updateTargetDescription("c1", "tg-1", "text", "staff-1", client), /Không tìm thấy target/);
+});
+
+test("updateTargetDescription: (F) a nonexistent target is rejected", async () => {
+  const { updateTargetDescription } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({ existingTargets: [] });
+
+  await assert.rejects(() => updateTargetDescription("c1", "missing-target", "text", "staff-1", client), /Không tìm thấy target/);
+});
+
+test("updateTargetDescription: (F) a nonexistent campaign is rejected before any target lookup", async () => {
+  getCampaignByIdMock.mock.mockImplementationOnce(async () => null);
+  const { updateTargetDescription } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({
+    existingTargets: [{ id: "tg-1", campaign_id: "missing-campaign", manual_content_reference_id: "ref-1", facebook_post_id: "pfbid02abc" }],
+  });
+
+  await assert.rejects(
+    () => updateTargetDescription("missing-campaign", "tg-1", "text", "staff-1", client),
+    /Không tìm thấy campaign/
+  );
+});
+
+test("updateTargetDescription: (F) an over-length description is rejected before any write", async () => {
+  updateManualContentReferenceSourceLabelMock.mock.resetCalls();
+  const { updateTargetDescription } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({
+    existingTargets: [{ id: "tg-1", campaign_id: "c1", manual_content_reference_id: "ref-1", facebook_post_id: "pfbid02abc" }],
+  });
+
+  await assert.rejects(
+    () => updateTargetDescription("c1", "tg-1", "x".repeat(501), "staff-1", client),
+    /quá dài/
+  );
+  assert.equal(updateManualContentReferenceSourceLabelMock.mock.callCount(), 0);
+});
+
+/** Phase 2K-BY (P1 #3) — removeTargetFromCampaign: the deliberately
+ * narrow, provably-safe case only (zero tasks). Never touches
+ * facebook_page_posts/facebook_manual_content_references — those rows
+ * can legitimately be shared by a target in a different campaign. */
+
+test("removeTargetFromCampaign: a target with zero tasks is removed", async () => {
+  const { removeTargetFromCampaign } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({
+    existingTargets: [{ id: "tg-1", campaign_id: "c1", manual_content_reference_id: "ref-1", facebook_post_id: "pfbid02abc" }],
+    taskCountsByTarget: { "tg-1": 0 },
+  });
+
+  // Resolves without throwing — the "genuinely gone, not just reported
+  // gone" proof lives in the dedicated idempotency test below, which
+  // exercises the exact same underlying lookup a second time.
+  await removeTargetFromCampaign("c1", "tg-1", "staff-1", client);
+});
+
+test("removeTargetFromCampaign: a target with ANY tasks (including a single Done one) is rejected — never silently orphans or deletes historical evidence", async () => {
+  const { removeTargetFromCampaign } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({
+    existingTargets: [{ id: "tg-1", campaign_id: "c1", manual_content_reference_id: "ref-1", facebook_post_id: "pfbid02abc" }],
+    taskCountsByTarget: { "tg-1": 1 },
+  });
+
+  await assert.rejects(() => removeTargetFromCampaign("c1", "tg-1", "staff-1", client), /không thể xoá/);
+
+  // The target must still exist — a second call finds it (rejects on the
+  // task-count check again, not on "not found"), proving no delete
+  // happened on the first attempt.
+  await assert.rejects(() => removeTargetFromCampaign("c1", "tg-1", "staff-1", client), /không thể xoá/);
+});
+
+test("removeTargetFromCampaign: a target belonging to a different campaign is rejected, zero write", async () => {
+  const { removeTargetFromCampaign } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({
+    existingTargets: [{ id: "tg-1", campaign_id: "other-campaign", manual_content_reference_id: "ref-1", facebook_post_id: "pfbid02abc" }],
+  });
+
+  await assert.rejects(() => removeTargetFromCampaign("c1", "tg-1", "staff-1", client), /Không tìm thấy target/);
+});
+
+test("removeTargetFromCampaign: idempotent — removing an already-removed target rejects honestly, never a silent no-op success", async () => {
+  const { removeTargetFromCampaign } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({
+    existingTargets: [{ id: "tg-1", campaign_id: "c1", manual_content_reference_id: "ref-1", facebook_post_id: "pfbid02abc" }],
+    taskCountsByTarget: { "tg-1": 0 },
+  });
+
+  await removeTargetFromCampaign("c1", "tg-1", "staff-1", client);
+  await assert.rejects(() => removeTargetFromCampaign("c1", "tg-1", "staff-1", client), /Không tìm thấy target/);
+});
+
+test("removeTargetFromCampaign: a nonexistent campaign is rejected before any target lookup", async () => {
+  getCampaignByIdMock.mock.mockImplementationOnce(async () => null);
+  const { removeTargetFromCampaign } = await import("./seedingCampaignTarget.service");
+  const client = makeClient({ existingTargets: [] });
+
+  await assert.rejects(
+    () => removeTargetFromCampaign("missing-campaign", "tg-1", "staff-1", client),
     /Không tìm thấy campaign/
   );
 });

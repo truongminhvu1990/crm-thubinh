@@ -312,3 +312,103 @@ test("getOrCreateManualContentReference: an existing row with the same facebook_
   // guess never silently overwrites an existing "Group" reference.
   assert.equal(result.reference.source_type, "Group");
 });
+
+/** Phase 2K-BX — Target Card Metadata Fallback & Inline Edit. Only ever
+ * writes source_label — never facebook_object_id, source_type,
+ * permalink_url, message, or full_picture_url. */
+
+test("updateManualContentReferenceSourceLabel: updates source_label and returns the updated row", async () => {
+  const { updateManualContentReferenceSourceLabel } = await import("./facebookManualContent.service");
+  const updated = {
+    id: "ref-1",
+    source_type: "Personal",
+    source_label: "Vòng ni 54.6 khách đang quan tâm",
+    facebook_object_id: "pfbid02abc",
+    permalink_url: "https://www.facebook.com/x/posts/pfbid02abc",
+  };
+  const client = makeClient({
+    facebook_manual_content_references: [{ data: updated }],
+  });
+
+  const result = await updateManualContentReferenceSourceLabel("ref-1", "Vòng ni 54.6 khách đang quan tâm", client);
+
+  assert.equal(result.source_label, "Vòng ni 54.6 khách đang quan tâm");
+  assert.equal(result.facebook_object_id, "pfbid02abc", "facebook_object_id must never change");
+});
+
+test("updateManualContentReferenceSourceLabel: null clears the description (a legitimate, honest state, not an error)", async () => {
+  const { updateManualContentReferenceSourceLabel } = await import("./facebookManualContent.service");
+  const cleared = {
+    id: "ref-1",
+    source_type: "Personal",
+    source_label: null,
+    facebook_object_id: "pfbid02abc",
+    permalink_url: "https://www.facebook.com/x/posts/pfbid02abc",
+  };
+  const client = makeClient({
+    facebook_manual_content_references: [{ data: cleared }],
+  });
+
+  const result = await updateManualContentReferenceSourceLabel("ref-1", null, client);
+
+  assert.equal(result.source_label, null);
+});
+
+/** Phase 2K-BZ (P2 #1) — Content Repository <-> Campaign linkage. Reuses
+ * the existing seeding_campaign_targets.manual_content_reference_id FK
+ * — no new relationship, no schema change. */
+
+test("getManualContentCampaignUsage: a reference targeted by one campaign returns that campaign", async () => {
+  const { getManualContentCampaignUsage } = await import("./facebookManualContent.service");
+  const client = makeClient({
+    seeding_campaign_targets: [
+      { data: [{ manual_content_reference_id: "ref-1", seeding_campaigns: { id: "c1", name: "Campaign A" } }] },
+    ],
+  });
+
+  const usage = await getManualContentCampaignUsage(["ref-1"], client);
+
+  assert.deepEqual(usage["ref-1"], [{ campaign_id: "c1", campaign_name: "Campaign A" }]);
+});
+
+test("getManualContentCampaignUsage: a reference targeted by TWO different campaigns returns both, not just the first", async () => {
+  const { getManualContentCampaignUsage } = await import("./facebookManualContent.service");
+  const client = makeClient({
+    seeding_campaign_targets: [
+      {
+        data: [
+          { manual_content_reference_id: "ref-1", seeding_campaigns: { id: "c1", name: "Campaign A" } },
+          { manual_content_reference_id: "ref-1", seeding_campaigns: { id: "c2", name: "Campaign B" } },
+        ],
+      },
+    ],
+  });
+
+  const usage = await getManualContentCampaignUsage(["ref-1"], client);
+
+  assert.equal(usage["ref-1"].length, 2);
+  assert.deepEqual(
+    usage["ref-1"].map((u) => u.campaign_id).sort(),
+    ["c1", "c2"]
+  );
+});
+
+test("getManualContentCampaignUsage: a reference nobody has targeted is simply absent from the map — an honest 'unused' state", async () => {
+  const { getManualContentCampaignUsage } = await import("./facebookManualContent.service");
+  const client = makeClient({
+    seeding_campaign_targets: [{ data: [] }],
+  });
+
+  const usage = await getManualContentCampaignUsage(["ref-1"], client);
+
+  assert.equal(usage["ref-1"], undefined);
+});
+
+test("getManualContentCampaignUsage: an empty id list returns an empty map without any query", async () => {
+  const { getManualContentCampaignUsage } = await import("./facebookManualContent.service");
+  const client = makeClient({});
+
+  const usage = await getManualContentCampaignUsage([], client);
+
+  assert.deepEqual(usage, {});
+});

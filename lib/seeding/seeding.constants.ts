@@ -43,6 +43,19 @@ export function seedingCampaignStatusLabel(status: string): string {
   return SEEDING_CAMPAIGN_STATUS_OPTIONS.find((s) => s.value === status)?.label ?? status;
 }
 
+/** Phase 2K-BZ (P2 #3) — the one place a campaign status maps to a Badge
+ * variant. The campaign list page already had this exact logic
+ * (Active=success, Completed=muted, Draft=warning) but Campaign Detail's
+ * own header badge was hardcoded to "warning" regardless of status — a
+ * "Completed" campaign showed the same color as a "Draft" one. Both
+ * pages now call this single function instead of keeping two
+ * independent (and, in one case, wrong) implementations. */
+export function seedingCampaignStatusBadgeVariant(status: string): "success" | "warning" | "muted" {
+  if (status === "Active") return "success";
+  if (status === "Completed") return "muted";
+  return "warning";
+}
+
 /** Phase 2C — the only 3 actions a human-executed Task can represent. Free
  * text at the DB layer, validated here (same convention as everything
  * else in this file), not a CHECK constraint. */
@@ -67,4 +80,19 @@ export function seedingTaskStatusLabel(status: string): string {
 
 export function seedingTaskActionTypeLabel(actionType: string): string {
   return SEEDING_TASK_ACTION_TYPE_OPTIONS.find((a) => a.value === actionType)?.label ?? actionType;
+}
+
+/** Phase 2K-BX (locked display priority) — the ONE place this priority is
+ * implemented, reused everywhere a target's identity is shown (Campaign
+ * Detail's target card, the AI-generation target picker, the Distribution
+ * modal). Priority 1: the staff's own internal identification
+ * (source_label). Priority 2: real Facebook metadata (message). Priority
+ * 3: an honest, calm empty state — never a raw id, never a string that
+ * reads like broken data. Never derive this independently at a second
+ * call site; import and call this instead. */
+export function resolveTargetDisplayText(
+  target: { source_label: string | null; message: string | null },
+  emptyFallback = "Chưa có mô tả bài viết"
+): string {
+  return target.source_label || target.message || emptyFallback;
 }

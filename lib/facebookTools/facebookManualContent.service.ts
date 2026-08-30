@@ -72,6 +72,65 @@ export interface GetOrCreateManualContentReferenceResult {
  * from a new guess" convention; the caller should read back
  * `reference.source_type`, not assume its own `input.sourceType` was
  * applied. */
+/** Phase 2K-BX — Target Card Metadata Fallback & Inline Edit. Updates
+ * ONLY source_label — the field this table already had, pre-existing,
+ * as free-text "for their own reference" (see the table's own doc
+ * comment above). Never touches facebook_object_id, source_type,
+ * permalink_url, message, or full_picture_url: this is never an attempt
+ * to edit the original Facebook post, only the staff's own internal
+ * identification note. `null` clears the description back to the
+ * fallback display state — a legitimate, honest "no description" state,
+ * not an error. */
+export async function updateManualContentReferenceSourceLabel(
+  id: string,
+  sourceLabel: string | null,
+  client: SupabaseClient = supabase
+): Promise<FacebookManualContentReference> {
+  const { data, error } = await client
+    .from("facebook_manual_content_references")
+    .update({ source_label: sourceLabel })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as FacebookManualContentReference;
+}
+
+export interface ManualContentCampaignUsage {
+  campaign_id: string;
+  campaign_name: string;
+}
+
+/** Phase 2K-BZ (P2 #1) — Content Repository <-> Campaign linkage. For a
+ * set of manual content reference ids, which campaign(s) (if any)
+ * currently target them, via the SAME existing FK
+ * (seeding_campaign_targets.manual_content_reference_id) Quick Capture
+ * and addTargetsToCampaign already write — no new relationship, no
+ * schema change, one extra read. A reference legitimately used by more
+ * than one campaign returns every one of them, not just the first.
+ * Empty array (never omitted/undefined) for a reference nobody has
+ * targeted yet — an honest "not used anywhere" state. */
+export async function getManualContentCampaignUsage(
+  referenceIds: string[],
+  client: SupabaseClient = supabase
+): Promise<Record<string, ManualContentCampaignUsage[]>> {
+  const usage: Record<string, ManualContentCampaignUsage[]> = {};
+  if (referenceIds.length === 0) return usage;
+
+  const { data, error } = await client
+    .from("seeding_campaign_targets")
+    .select("manual_content_reference_id, seeding_campaigns(id, name)")
+    .in("manual_content_reference_id", referenceIds);
+  if (error) throw error;
+
+  for (const row of (data ?? []) as unknown as { manual_content_reference_id: string; seeding_campaigns: { id: string; name: string } | null }[]) {
+    if (!row.seeding_campaigns) continue;
+    const list = (usage[row.manual_content_reference_id] ??= []);
+    list.push({ campaign_id: row.seeding_campaigns.id, campaign_name: row.seeding_campaigns.name });
+  }
+  return usage;
+}
+
 export async function getOrCreateManualContentReference(
   input: GetOrCreateManualContentReferenceInput,
   actorStaffId: string | null,
