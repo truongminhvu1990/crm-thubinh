@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requirePermission } from "@/lib/permission/serverAuth";
 import { createClient } from "@/lib/supabase/server";
 import { getPageById } from "@/lib/facebookTools/facebookPage.service";
-import { getPagePostsPage, syncPagePosts } from "@/lib/facebookTools/facebookPagePost.service";
+import { getPagePostsPage, getPagePostIds, syncPagePosts } from "@/lib/facebookTools/facebookPagePost.service";
 import { FacebookPageContentDiscoveryStatus } from "@/types/facebookTools";
 import { handleSeedingError } from "../../../_errors";
 
@@ -35,6 +35,23 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const client = await createClient();
     const page = await getPageById(pageId, client);
     if (!page) return NextResponse.json({ error: "Facebook page not found" }, { status: 404 });
+
+    // Phase 2K-CF (Issue 5) — "Chọn tất cả" (create-campaign Post Picker):
+    // ids only, matching the exact same filter set as the paginated list
+    // below, never full post payloads. Additive query param — every
+    // existing caller of this route (no idsOnly param) is unaffected.
+    if (searchParams.get("idsOnly") === "true") {
+      const ids = await getPagePostIds(
+        {
+          pageId: page.facebook_page_id,
+          search: searchParams.get("search") ?? undefined,
+          statusType: searchParams.get("statusType") ?? undefined,
+          discoveryStatus,
+        },
+        client
+      );
+      return NextResponse.json({ ids });
+    }
 
     const result = await getPagePostsPage(
       {

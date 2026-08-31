@@ -397,3 +397,53 @@ export async function updateTaskStatus(
   );
   return data as SeedingTask;
 }
+
+/** Phase 2K-CF (Issue 2), Product Owner Decision A (LOCKED) — the only
+ * task field editable after creation: comment_text, and only while the
+ * task is still unassigned. Deliberately not a generic "update task"
+ * function — this signature structurally cannot touch target identity,
+ * campaign identity, execution history, status, or evidence; there is no
+ * parameter for any of them.
+ *
+ * The UNASSIGNED-only rule is enforced with a single atomic conditional
+ * UPDATE (`WHERE id = ? AND assigned_staff_id IS NULL`), the same pattern
+ * this module already uses for duplicate-publish protection elsewhere in
+ * this codebase — not a separate fetch-then-check, which would leave a
+ * window for the task to become assigned between the check and the
+ * write. If another request assigned the task in that window, this
+ * UPDATE matches zero rows and the resulting `null` is reported as a
+ * clear rejection, never a silent no-op and never a partial write. */
+export async function updateTaskCommentText(
+  id: string,
+  commentText: string,
+  actorStaffId: string | null,
+  client: SupabaseClient = supabase
+): Promise<SeedingTask> {
+  if (!commentText?.trim()) {
+    throw new SeedingValidationError("Nội dung comment không được để trống");
+  }
+
+  const current = await getTaskById(id, client);
+  if (!current) throw new Error("Seeding task not found");
+  if (current.action_type !== "Comment") {
+    throw new SeedingValidationError("Chỉ có thể chỉnh sửa nội dung cho task Comment");
+  }
+
+  const { data, error } = await client
+    .from("seeding_tasks")
+    .update({ comment_text: commentText.trim() })
+    .eq("id", id)
+    .is("assigned_staff_id", null)
+    .select()
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    throw new SeedingValidationError("Task đã được giao cho người thực hiện — không thể chỉnh sửa");
+  }
+
+  await logActivity(
+    { staff_id: actorStaffId, action: "seeding_task_comment_edited", entity: "seeding_task", entity_id: id },
+    client
+  );
+  return data as SeedingTask;
+}

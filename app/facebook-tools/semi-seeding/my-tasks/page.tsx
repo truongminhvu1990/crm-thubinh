@@ -5,7 +5,7 @@ import Link from "next/link";
 import { AlertTriangle, ImageOff, ExternalLink, ThumbsUp, MessageCircle, Share2, ClipboardList, Lock, PlayCircle, Copy, Link2, Maximize2 } from "lucide-react";
 import { SeedingTaskWithContext, SeedingTaskStatus, SEEDING_TASK_ALLOWED_TRANSITIONS } from "@/types/seeding";
 import { seedingTaskStatusLabel, seedingTaskActionTypeLabel } from "@/lib/seeding/seeding.constants";
-import { handleFacebookLinkClick, isMobileUserAgent } from "@/lib/utils";
+import { cn, handleFacebookLinkClick, isMobileUserAgent } from "@/lib/utils";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -81,8 +81,21 @@ function actionIcon(actionType: string) {
   return <MessageCircle className="w-4 h-4" />;
 }
 
+/** Phase 2K-CF (Issue 1) — same eligibility concept the sequential
+ * runner (my-tasks/run/page.tsx's own isEligible) and the "Bắt đầu thực
+ * hiện tuần tự" button already used inline here — extracted once, in
+ * this file only, so the new status filter/tab uses the exact same
+ * definition as the button it sits next to. Run's own eligibility logic
+ * is untouched. */
+function isTaskActionable(t: SeedingTaskWithContext): boolean {
+  return t.campaign_status !== "Completed" && (t.status === "Pending" || t.status === "In Progress");
+}
+
+type TaskFilterMode = "actionable" | "all";
+
 export default function MySeedingTasksPage() {
   const [tasks, setTasks] = useState<SeedingTaskWithContext[]>([]);
+  const [filterMode, setFilterMode] = useState<TaskFilterMode>("actionable");
   const [forbidden, setForbidden] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -237,24 +250,65 @@ export default function MySeedingTasksPage() {
       ) : (
         <div className="space-y-3">
           {(() => {
-            // Phase 2I (I4) — the sequential runner only makes sense when
-            // there's actually eligible (Pending/In Progress, non-closed-
-            // campaign) work; hidden otherwise rather than linking to an
-            // empty runner.
-            const eligibleCount = tasks.filter(
-              (t) => t.campaign_status !== "Completed" && (t.status === "Pending" || t.status === "In Progress")
-            ).length;
-            if (eligibleCount === 0) return null;
+            const actionableCount = tasks.filter(isTaskActionable).length;
+            const allCount = tasks.length;
+            const visibleTasks = filterMode === "actionable" ? tasks.filter(isTaskActionable) : tasks;
             return (
-              <Link
-                href="/facebook-tools/semi-seeding/my-tasks/run"
-                className="flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground px-4 py-2.5 text-sm font-medium hover:bg-primary/90 touch-manipulation"
-              >
-                <PlayCircle className="w-4 h-4" /> Bắt đầu thực hiện tuần tự ({eligibleCount} task)
-              </Link>
-            );
-          })()}
-          {tasks.map((task) => {
+              <>
+                {/* Phase 2K-CF (Issue 1) — the sequential Run queue already
+                   correctly excludes terminal-status/closed-campaign tasks
+                   (unchanged); this filter/tab addresses the separate
+                   problem of this LIST mixing every status together with
+                   no way to focus on actionable work. Default view =
+                   actionable only. */}
+                <div className="flex items-center gap-2" role="tablist" aria-label="Lọc theo trạng thái">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={filterMode === "actionable"}
+                    onClick={() => setFilterMode("actionable")}
+                    className={cn(
+                      "rounded-full px-3 py-1.5 text-sm font-medium touch-manipulation transition-colors",
+                      filterMode === "actionable"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground hover:bg-muted/70"
+                    )}
+                  >
+                    Cần xử lý ({actionableCount})
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={filterMode === "all"}
+                    onClick={() => setFilterMode("all")}
+                    className={cn(
+                      "rounded-full px-3 py-1.5 text-sm font-medium touch-manipulation transition-colors",
+                      filterMode === "all"
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground hover:bg-muted/70"
+                    )}
+                  >
+                    Tất cả ({allCount})
+                  </button>
+                </div>
+
+                {actionableCount > 0 && (
+                  <Link
+                    href="/facebook-tools/semi-seeding/my-tasks/run"
+                    className="flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground px-4 py-2.5 text-sm font-medium hover:bg-primary/90 touch-manipulation"
+                  >
+                    <PlayCircle className="w-4 h-4" /> Bắt đầu thực hiện tuần tự ({actionableCount} task)
+                  </Link>
+                )}
+
+                {visibleTasks.length === 0 ? (
+                  <Card className="text-sm text-muted-foreground text-center py-10">
+                    {filterMode === "actionable"
+                      ? "Không còn task nào cần xử lý — mọi việc đã xong."
+                      : "Không có task nào."}
+                  </Card>
+                ) : (
+                  visibleTasks.map((task) => {
             const campaignClosed = task.campaign_status === "Completed";
             const nextActions = campaignClosed ? [] : (SEEDING_TASK_ALLOWED_TRANSITIONS[task.status] ?? []);
             return (
@@ -358,8 +412,12 @@ export default function MySeedingTasksPage() {
                   </div>
                 </div>
               </Card>
+                    );
+                  })
+                )}
+              </>
             );
-          })}
+          })()}
         </div>
       )}
 

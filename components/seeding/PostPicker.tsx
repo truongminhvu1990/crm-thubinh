@@ -27,9 +27,23 @@ interface Props {
    * keeps this component reusable without forcing every caller to wire a
    * sync endpoint). */
   syncPosts?: () => Promise<FacebookPagePostSyncResult>;
+  /** Phase 2K-CF (Issue 5, Decision B — LOCKED) — "Chọn tất cả" selects
+   * every post matching the CURRENT search, not just the page currently
+   * loaded on screen. The caller owns fetching the matching ids (ids
+   * only, never full post payloads — see getPagePostIds) and merging
+   * them into `selected`; this component only reports the current
+   * `search` string at the moment of the click, so the caller's fetch is
+   * always against exactly what's on screen right now. Additive: does
+   * not clear ids selected under a previous, different search — matching
+   * the instruction that selection stay predictable across search/filter
+   * changes rather than silently dropping prior selections. Omitted
+   * entirely (no button shown) when the caller doesn't supply it. */
+  onSelectAllMatching?: (search: string) => Promise<void>;
+  onClearAll?: () => void;
 }
 
-export default function PostPicker({ fetchPosts, selected, onToggle, syncPosts }: Props) {
+export default function PostPicker({ fetchPosts, selected, onToggle, syncPosts, onSelectAllMatching, onClearAll }: Props) {
+  const [isSelectingAll, setIsSelectingAll] = useState(false);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -85,6 +99,16 @@ export default function PostPicker({ fetchPosts, selected, onToggle, syncPosts }
   }
 
   const totalPages = Math.max(1, Math.ceil(totalCount / FACEBOOK_PAGE_POSTS_PAGE_SIZE));
+
+  async function handleSelectAll() {
+    if (!onSelectAllMatching) return;
+    setIsSelectingAll(true);
+    try {
+      await onSelectAllMatching(search);
+    } finally {
+      setIsSelectingAll(false);
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -171,9 +195,24 @@ export default function PostPicker({ fetchPosts, selected, onToggle, syncPosts }
         </div>
       )}
 
+      {(onSelectAllMatching || onClearAll) && (
+        <div className="flex items-center gap-2">
+          {onSelectAllMatching && (
+            <Button type="button" variant="secondary" size="sm" onClick={handleSelectAll} isLoading={isSelectingAll} disabled={totalCount === 0}>
+              Chọn tất cả
+            </Button>
+          )}
+          {onClearAll && (
+            <Button type="button" variant="secondary" size="sm" onClick={onClearAll} disabled={selected.size === 0}>
+              Bỏ chọn tất cả
+            </Button>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center justify-between flex-wrap gap-2">
         <p className="text-xs text-muted-foreground">
-          Đã chọn {selected.size} bài — {totalCount} bài trong cache
+          Đã chọn {selected.size} / {totalCount} bài viết
         </p>
         <div className="flex items-center gap-2">
           <button

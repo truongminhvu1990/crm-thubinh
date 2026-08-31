@@ -1303,3 +1303,89 @@ test("getTasksAssignedToStaff: (P1 #1) a non-distribution task has both fields n
   assert.equal(task.execution_account_name, null);
   assert.equal(task.destination_label, null);
 });
+
+/** Phase 2K-CF (Issue 2), Product Owner Decision A (LOCKED) —
+ * updateTaskCommentText: the sole editable field, and only while
+ * unassigned. The atomic `.eq("id", id).is("assigned_staff_id", null)`
+ * guard is the real enforcement — these tests exercise it via the fake
+ * client's own sequenced results, matching exactly what a real
+ * conditional UPDATE would return (a row when the WHERE matched, null
+ * when it didn't). */
+
+test("updateTaskCommentText: an unassigned Comment task can be updated", async () => {
+  const { updateTaskCommentText } = await import("./seedingTask.service");
+
+  const client = makeClient({
+    seeding_tasks: [
+      { data: { id: "t1", action_type: "Comment", assigned_staff_id: null, comment_text: "old" } },
+      { data: { id: "t1", action_type: "Comment", assigned_staff_id: null, comment_text: "Nội dung mới" } },
+    ],
+  });
+
+  const result = await updateTaskCommentText("t1", "Nội dung mới", "staff-manager", client);
+  assert.equal(result.comment_text, "Nội dung mới");
+});
+
+test("updateTaskCommentText: an already-assigned task is rejected, never partially written", async () => {
+  const { updateTaskCommentText } = await import("./seedingTask.service");
+  const { SeedingValidationError } = await import("./seeding.errors");
+
+  const client = makeClient({
+    seeding_tasks: [
+      { data: { id: "t1", action_type: "Comment", assigned_staff_id: "staff-A", comment_text: "old" } },
+      // The atomic conditional UPDATE's WHERE clause (assigned_staff_id
+      // IS NULL) matches zero rows for an already-assigned task — a real
+      // Supabase .maybeSingle() call returns { data: null } in exactly
+      // this case, never an error.
+      { data: null },
+    ],
+  });
+
+  await assert.rejects(() => updateTaskCommentText("t1", "Nội dung mới", "staff-manager", client), SeedingValidationError);
+});
+
+test("updateTaskCommentText: a task that becomes assigned between the initial read and the write is rejected, not silently written", async () => {
+  const { updateTaskCommentText } = await import("./seedingTask.service");
+  const { SeedingValidationError } = await import("./seeding.errors");
+
+  const client = makeClient({
+    seeding_tasks: [
+      // Read at the moment the editor opened: still unassigned.
+      { data: { id: "t1", action_type: "Comment", assigned_staff_id: null, comment_text: "old" } },
+      // By the time the write's conditional UPDATE actually runs, another
+      // request has assigned it — the WHERE clause now matches zero rows.
+      { data: null },
+    ],
+  });
+
+  await assert.rejects(() => updateTaskCommentText("t1", "Nội dung mới", "staff-manager", client), SeedingValidationError);
+});
+
+test("updateTaskCommentText: a non-Comment task (Like/Share) is rejected — there is no content field to edit", async () => {
+  const { updateTaskCommentText } = await import("./seedingTask.service");
+  const { SeedingValidationError } = await import("./seeding.errors");
+
+  const client = makeClient({
+    seeding_tasks: [{ data: { id: "t1", action_type: "Like", assigned_staff_id: null } }],
+  });
+
+  await assert.rejects(() => updateTaskCommentText("t1", "Nội dung mới", "staff-manager", client), SeedingValidationError);
+});
+
+test("updateTaskCommentText: empty/whitespace-only content is rejected before any write", async () => {
+  const { updateTaskCommentText } = await import("./seedingTask.service");
+  const { SeedingValidationError } = await import("./seeding.errors");
+  const client = makeClient({});
+
+  await assert.rejects(() => updateTaskCommentText("t1", "   ", "staff-manager", client), SeedingValidationError);
+});
+
+test("updateTaskCommentText: a nonexistent task id is rejected, never silently updates a different row", async () => {
+  const { updateTaskCommentText } = await import("./seedingTask.service");
+
+  const client = makeClient({
+    seeding_tasks: [{ data: null }],
+  });
+
+  await assert.rejects(() => updateTaskCommentText("does-not-exist", "Nội dung mới", "staff-manager", client));
+});

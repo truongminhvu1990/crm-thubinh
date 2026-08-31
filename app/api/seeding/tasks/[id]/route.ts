@@ -2,13 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentStaffFromRequest } from "@/lib/permission/serverAuth";
 import { staffHasPermission } from "@/lib/permission/permissionCenter.service";
 import { createClient } from "@/lib/supabase/server";
-import { getTaskById, updateTaskStatus } from "@/lib/seeding/seedingTask.service";
+import { getTaskById, updateTaskStatus, updateTaskCommentText } from "@/lib/seeding/seedingTask.service";
 import { handleSeedingError } from "../../_errors";
 
 /** Mark a Task Done/Skipped. Allowed for: seeding.manage (a manager acting
  * on any task), or seeding.execute AND the calling staff member is the
  * task's own assignee — an execute-only staff member can update their own
- * queue but not someone else's. */
+ * queue but not someone else's.
+ *
+ * Phase 2K-CF (Issue 2) — a request body with `comment_text` is a
+ * content-edit request, routed to a structurally distinct path
+ * (seeding.manage only, unassigned-only, enforced atomically inside
+ * updateTaskCommentText) before the status-transition branch below is
+ * ever reached. A content-edit request can never also carry a status
+ * change through this route — the two are mutually exclusive branches,
+ * not merged fields on one generic update. */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
@@ -20,6 +28,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const task = await getTaskById(id, client);
     if (!task) return NextResponse.json({ error: "Task not found" }, { status: 404 });
 
+    const body = await request.json();
+
+    if (typeof body.comment_text === "string") {
+      const canManage = await staffHasPermission(staff, "seeding.manage", client);
+      if (!canManage) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      const updated = await updateTaskCommentText(id, body.comment_text, staff.id, client);
+      return NextResponse.json(updated);
+    }
+
     const canManage = await staffHasPermission(staff, "seeding.manage", client);
     const canExecuteOwnTask =
       task.assigned_staff_id === staff.id && (await staffHasPermission(staff, "seeding.execute", client));
@@ -27,7 +44,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const body = await request.json();
     const updated = await updateTaskStatus(id, body, staff.id, client);
     return NextResponse.json(updated);
   } catch (error) {

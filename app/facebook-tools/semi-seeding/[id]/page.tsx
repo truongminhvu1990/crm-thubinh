@@ -270,6 +270,16 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
   const [descriptionDraft, setDescriptionDraft] = useState("");
   const [isSavingDescription, setIsSavingDescription] = useState(false);
   const [descriptionError, setDescriptionError] = useState<string | null>(null);
+  // Phase 2K-CF (Issue 2), Product Owner Decision A (LOCKED) — inline
+  // editor for a task's comment_text, same one-editor-at-a-time pattern
+  // as the target description editor above. Only ever offered for an
+  // unassigned Comment task — the server (updateTaskCommentText) is the
+  // real enforcement; this UI state never assumes it, it only reflects
+  // what the server already returned.
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [taskCommentDraft, setTaskCommentDraft] = useState("");
+  const [isSavingTaskComment, setIsSavingTaskComment] = useState(false);
+  const [taskEditError, setTaskEditError] = useState<string | null>(null);
   // Phase 2K-BS — server returned needsAcknowledgment for this task; the
   // reason shown is whatever the server just recomputed fresh (never the
   // possibly-stale targetCompatibility map fetched at page load).
@@ -506,6 +516,20 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       else next.add(targetId);
       return next;
     });
+  }
+
+  /** Phase 2K-CF (Issue 6) — `targets` is already the full, unpaginated,
+   * unfiltered array for this campaign (confirmed by audit) — unlike the
+   * create-campaign PostPicker (Issue 5), there is no visible-page-vs-
+   * full-result-set ambiguity here, so "select all" safely means every
+   * target currently rendered. Reuses the existing selectedTargetIds Set;
+   * no second selection model. */
+  function selectAllTargets() {
+    setSelectedTargetIds(new Set(targets.map((t) => t.id)));
+  }
+
+  function clearAllTargets() {
+    setSelectedTargetIds(new Set());
   }
 
   function openBulkModal() {
@@ -758,6 +782,45 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       setDescriptionError(error instanceof Error ? error.message : "Không thể lưu mô tả");
     } finally {
       setIsSavingDescription(false);
+    }
+  }
+
+  function openTaskEditor(task: SeedingTask) {
+    setEditingTaskId(task.id);
+    setTaskCommentDraft(task.comment_text ?? "");
+    setTaskEditError(null);
+  }
+
+  function cancelTaskEditor() {
+    setEditingTaskId(null);
+    setTaskCommentDraft("");
+    setTaskEditError(null);
+  }
+
+  /** Phase 2K-CF (Issue 2), Product Owner Decision A (LOCKED) — the
+   * server (updateTaskCommentText, PATCH .../tasks/[id] with
+   * comment_text) is the real enforcement of "unassigned only,"
+   * including the race window between opening this editor and saving:
+   * if the task was assigned in between, the server rejects with a
+   * clear error, no partial write, and this just surfaces that error —
+   * it never assumes success. */
+  async function saveTaskComment(taskId: string) {
+    setIsSavingTaskComment(true);
+    setTaskEditError(null);
+    try {
+      const res = await fetch(`/api/seeding/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment_text: taskCommentDraft }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error ?? "Không thể lưu nội dung task");
+      setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, ...body } : t)));
+      setEditingTaskId(null);
+    } catch (error) {
+      setTaskEditError(error instanceof Error ? error.message : "Không thể lưu nội dung task");
+    } finally {
+      setIsSavingTaskComment(false);
     }
   }
 
@@ -1190,7 +1253,15 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
             </Button>
             {bulkSelectMode && (
               <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-sm text-muted-foreground">Đã chọn {selectedTargetIds.size} bài viết</span>
+                <Button size="sm" variant="secondary" onClick={selectAllTargets} disabled={selectedTargetIds.size === targets.length}>
+                  Chọn tất cả
+                </Button>
+                <Button size="sm" variant="secondary" onClick={clearAllTargets} disabled={selectedTargetIds.size === 0}>
+                  Bỏ chọn tất cả
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  Đã chọn {selectedTargetIds.size} / {targets.length} bài viết
+                </span>
                 <Button size="sm" disabled={selectedTargetIds.size === 0} onClick={openBulkModal}>
                   Tạo Task Comment hàng loạt
                 </Button>
@@ -1389,7 +1460,50 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                                 {actionIcon(t.action_type)} {seedingTaskActionTypeLabel(t.action_type)}
                               </span>
                             </td>
-                            <td className="py-3 pr-4 text-foreground max-w-xs">{t.comment_text || "—"}</td>
+                            <td className="py-3 pr-4 text-foreground max-w-xs">
+                              {editingTaskId === t.id ? (
+                                <div className="space-y-1.5">
+                                  <textarea
+                                    value={taskCommentDraft}
+                                    onChange={(e) => setTaskCommentDraft(e.target.value)}
+                                    rows={2}
+                                    className="w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
+                                  />
+                                  {taskEditError && <p className="text-destructive text-xs">{taskEditError}</p>}
+                                  <div className="flex gap-1.5">
+                                    <Button size="sm" isLoading={isSavingTaskComment} onClick={() => saveTaskComment(t.id)}>
+                                      Lưu
+                                    </Button>
+                                    <Button size="sm" variant="secondary" onClick={cancelTaskEditor} disabled={isSavingTaskComment}>
+                                      Hủy
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="space-y-1">
+                                  <p>{t.comment_text || "—"}</p>
+                                  {/* Phase 2K-CF (Issue 2), Product Owner Decision A (LOCKED) —
+                                     editable only while unassigned; the server is the real
+                                     enforcement (updateTaskCommentText), this is presentation
+                                     only. Like/Share tasks have no content field to edit at
+                                     all, so neither state renders for them. */}
+                                  {t.action_type === "Comment" &&
+                                    (t.assigned_staff_id ? (
+                                      <span className="text-xs text-muted-foreground italic">
+                                        Task đã được giao — không thể chỉnh sửa
+                                      </span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => openTaskEditor(t)}
+                                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                                      >
+                                        <Pencil className="w-3 h-3" /> Chỉnh sửa
+                                      </button>
+                                    ))}
+                                </div>
+                              )}
+                            </td>
                             <td className="py-3 pr-4 text-muted-foreground">
                               {staffOptions.find((s) => s.value === t.assigned_staff_id)?.label ?? "Chưa gán"}
                             </td>

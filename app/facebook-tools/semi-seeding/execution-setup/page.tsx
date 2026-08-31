@@ -203,6 +203,23 @@ export default function SeedingExecutionSetupPage() {
     }
   }
 
+  /** Phase 2K-CF (Issue 4) — byte-for-byte the same flow Comment Shield's
+   * own handleConnect already uses: fetch the OAuth URL, then a full-page
+   * redirect. No new route, no new logic — connectPagesFromOAuthCode
+   * already upserts every Page the authorizing account administers,
+   * additively, alongside whatever is already connected. */
+  async function handleConnectPage() {
+    try {
+      const res = await fetch("/api/facebook-tools/pages/connect-url");
+      if (!res.ok) throw new Error(await res.text());
+      const { url } = await res.json();
+      window.location.href = url;
+    } catch (error) {
+      console.error("Failed to start Facebook connect flow:", error);
+      setActionError("Không thể bắt đầu kết nối Facebook. Kiểm tra cấu hình Meta App (FACEBOOK_APP_ID/SECRET).");
+    }
+  }
+
   async function handleToggleAccountStatus(account: SeedingExecutionAccount) {
     try {
       const nextStatus = account.status === "Active" ? "Inactive" : "Active";
@@ -422,10 +439,30 @@ export default function SeedingExecutionSetupPage() {
          purely so staff can see, at a glance, which Pages can actually
          support Direct Comment right now and why not when they can't. */}
       <Card>
-        <div className="flex items-center gap-2 mb-3">
-          <Link2 className="w-5 h-5 text-primary" />
-          <h2 className="font-semibold text-foreground">Facebook Page đã kết nối</h2>
+        <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
+          <div className="flex items-center gap-2">
+            <Link2 className="w-5 h-5 text-primary" />
+            <h2 className="font-semibold text-foreground">Facebook Page đã kết nối</h2>
+          </div>
+          <Button size="sm" variant="secondary" onClick={handleConnectPage}>
+            <Plus className="w-4 h-4" /> Kết nối thêm Facebook Page
+          </Button>
         </div>
+        {/* Phase 2K-CF (Issue 4) — the connection architecture already
+           supports multiple Pages from multiple Facebook accounts in one
+           OAuth grant (connectPagesFromOAuthCode upserts every Page the
+           authorizing account administers); this button only adds the
+           missing entry point here, reusing the exact same flow Comment
+           Shield's own "Kết nối Facebook" already uses
+           (GET /api/facebook-tools/pages/connect-url -> Facebook Login for
+           Business -> the existing OAuth callback). No new route, no new
+           table, no token/architecture change. */}
+        <p className="text-xs text-muted-foreground mb-3">
+          Kết nối thêm sẽ không thay thế Page hiện có — mọi Page mà tài khoản Facebook đó quản lý (kể cả một tài khoản
+          Facebook khác) sẽ được thêm vào danh sách bên dưới, cùng tồn tại với các Page đã kết nối trước đó. Sau khi
+          kết nối thành công, bạn sẽ được chuyển đến trang Comment Shield (nơi luồng kết nối này vốn thuộc về) — quay
+          lại trang này để xem Page vừa thêm.
+        </p>
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Đang tải...</p>
         ) : pages.length === 0 ? (

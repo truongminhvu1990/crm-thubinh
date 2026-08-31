@@ -566,44 +566,47 @@ export default function ContentRepositoryPage() {
             </p>
           ) : (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {/* Phase 2K-CF (Issue 3) — dense list, not a card grid: thumbnail
+                 fixed-size on the left, message/date center (flex-1,
+                 truncated so long content never forces horizontal scroll),
+                 badges/counts wrap onto their own row on narrow screens
+                 instead of a fixed right-hand column that would overflow.
+                 Every existing behavior (click-to-select, badges, counts,
+                 pagination) is unchanged — only the container markup. */}
+              <div className="flex flex-col divide-y divide-border border border-border rounded-lg overflow-hidden">
                 {rows.map((post) => (
                   <button
                     key={post.id}
                     type="button"
                     onClick={() => handleCardClick(post)}
                     className={cn(
-                      "relative text-left flex flex-col rounded-lg border transition-colors overflow-hidden touch-manipulation",
+                      "relative text-left flex items-center gap-3 px-3 py-2.5 transition-colors touch-manipulation",
                       selectionMode && selectedPostIds.has(post.id)
-                        ? "border-primary ring-2 ring-primary/40"
-                        : "border-border hover:border-primary/40 hover:bg-primary/5"
+                        ? "bg-primary/5 ring-1 ring-inset ring-primary/40"
+                        : "hover:bg-primary/5"
                     )}
                   >
                     {selectionMode && selectedPostIds.has(post.id) && (
-                      <CheckCircle2 className="absolute top-2 right-2 w-6 h-6 text-primary bg-white rounded-full z-10" />
+                      <CheckCircle2 className="absolute top-2 right-2 w-5 h-5 text-primary bg-white rounded-full z-10" />
                     )}
                     {post.full_picture_url ? (
                       <img
                         src={post.full_picture_url}
                         alt=""
                         loading="lazy"
-                        className="w-full h-36 object-cover bg-muted"
+                        className="w-14 h-14 rounded-lg object-cover bg-muted shrink-0"
                       />
                     ) : (
-                      <div className="w-full h-36 bg-muted flex items-center justify-center">
-                        <ImageOff className="w-6 h-6 text-muted-foreground" />
+                      <div className="w-14 h-14 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                        <ImageOff className="w-5 h-5 text-muted-foreground" />
                       </div>
                     )}
-                    <div className="p-3 flex-1 flex flex-col gap-1.5">
-                      <p className="text-sm text-foreground line-clamp-2 min-h-[2.5rem]">
-                        {post.message || "(không có nội dung)"}
-                      </p>
-                      <p className="text-xs text-muted-foreground">{formatPublishedAt(post.published_at)}</p>
-                      <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <p className="text-sm text-foreground line-clamp-2">{post.message || "(không có nội dung)"}</p>
+                      <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
+                        <span>{formatPublishedAt(post.published_at)}</span>
                         {post.status_type && <Badge variant="muted">{contentTypeLabel(post.status_type)}</Badge>}
                         {discoveryStatusBadge(post.discovery_status)}
-                      </div>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
                         <span className="flex items-center gap-1">
                           <MessageCircle className="w-3.5 h-3.5" /> {post.comment_count}
                         </span>
@@ -644,7 +647,7 @@ export default function ContentRepositoryPage() {
             Chưa có nội dung nào được nhập. Dùng nút &quot;Nhập link&quot; ở trên để thêm.
           </p>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="flex flex-col divide-y divide-border border border-border rounded-lg overflow-hidden">
             {manualContent.map((row) => (
               <div
                 key={row.id}
@@ -652,26 +655,24 @@ export default function ContentRepositoryPage() {
                 tabIndex={selectionMode ? 0 : undefined}
                 onClick={() => handleManualCardClick(row)}
                 className={cn(
-                  "relative text-left flex flex-col rounded-lg border transition-colors overflow-hidden",
+                  "relative text-left flex items-center gap-3 px-3 py-2.5 transition-colors",
                   selectionMode && selectedManualIds.has(row.id)
-                    ? "border-primary ring-2 ring-primary/40 cursor-pointer"
+                    ? "bg-primary/5 ring-1 ring-inset ring-primary/40 cursor-pointer"
                     : selectionMode
-                      ? "border-border hover:border-primary/40 hover:bg-primary/5 cursor-pointer"
-                      : "border-border"
+                      ? "hover:bg-primary/5 cursor-pointer"
+                      : ""
                 )}
               >
                 {selectionMode && selectedManualIds.has(row.id) && (
-                  <CheckCircle2 className="absolute top-2 right-2 w-6 h-6 text-primary bg-white rounded-full z-10" />
+                  <CheckCircle2 className="absolute top-2 right-2 w-5 h-5 text-primary bg-white rounded-full z-10" />
                 )}
-                <div className="w-full h-24 bg-muted flex items-center justify-center">
-                  <ImageOff className="w-6 h-6 text-muted-foreground" />
+                <div className="w-14 h-14 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                  <ImageOff className="w-5 h-5 text-muted-foreground" />
                 </div>
-                <div className="p-3 flex-1 flex flex-col gap-1.5">
-                  <p className="text-sm text-foreground line-clamp-2 min-h-[2.5rem] italic text-muted-foreground">
-                    (Không có nội dung xem trước — nhập thủ công)
-                  </p>
-                  <p className="text-xs text-muted-foreground">{formatPublishedAt(row.discovered_at)}</p>
-                  <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="text-sm italic text-muted-foreground">(Không có nội dung xem trước — nhập thủ công)</p>
+                  <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
+                    <span>{formatPublishedAt(row.discovered_at)}</span>
                     {manualSourceBadge(row.source_type as "Personal" | FacebookManualContentSourceType)}
                     {row.source_label && <Badge variant="muted">{row.source_label}</Badge>}
                   </div>
@@ -682,7 +683,7 @@ export default function ContentRepositoryPage() {
                      line, matching this page's own established
                      no-badge-when-not-applicable convention. */}
                   {(manualContentCampaignUsage[row.id] ?? []).length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
+                    <div className="flex flex-wrap gap-2">
                       {(manualContentCampaignUsage[row.id] ?? []).map((usage) => (
                         <a
                           key={usage.campaign_id}
@@ -701,7 +702,7 @@ export default function ContentRepositoryPage() {
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={(e) => e.stopPropagation()}
-                      className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline mt-1"
+                      className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
                     >
                       <ExternalLink className="w-3.5 h-3.5" /> Mở trên Facebook
                     </a>

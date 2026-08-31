@@ -90,6 +90,28 @@ export default function SemiSeedingPage() {
     });
   }
 
+  /** Phase 2K-CF (Issue 5, Decision B — LOCKED) — every post id matching
+   * the current search, not just the currently-loaded picker page. Ids
+   * only (GET .../posts?idsOnly=true), never full post payloads. Merges
+   * additively into the existing selection — does not clear ids selected
+   * under a previous, different search. */
+  const selectAllMatchingPosts = useCallback(
+    async (search: string) => {
+      if (!pageId) return;
+      const params = new URLSearchParams({ idsOnly: "true" });
+      if (search) params.set("search", search);
+      const res = await fetch(`/api/seeding/pages/${pageId}/posts?${params.toString()}`);
+      if (!res.ok) return;
+      const { ids } = (await res.json()) as { ids: string[] };
+      setSelectedPostIds((prev) => new Set([...prev, ...ids]));
+    },
+    [pageId]
+  );
+
+  function clearAllPosts() {
+    setSelectedPostIds(new Set());
+  }
+
   function openCreate() {
     setName("");
     // Phase 2K-BY (P1 #2) — deliberately NOT pre-selected to pages[0]
@@ -239,7 +261,14 @@ export default function SemiSeedingPage() {
           {pageId ? (
             <div>
               <label className="block text-sm font-medium text-foreground mb-1.5">Chọn bài viết (Target Posts)</label>
-              <PostPicker fetchPosts={fetchPickerPosts} selected={selectedPostIds} onToggle={togglePost} syncPosts={syncPickerPosts} />
+              <PostPicker
+                fetchPosts={fetchPickerPosts}
+                selected={selectedPostIds}
+                onToggle={togglePost}
+                syncPosts={syncPickerPosts}
+                onSelectAllMatching={selectAllMatchingPosts}
+                onClearAll={clearAllPosts}
+              />
             </div>
           ) : (
             // Phase 2K-BY (P1 #2) — the manual-only path: no Page, no

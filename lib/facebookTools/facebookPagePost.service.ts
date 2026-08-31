@@ -125,26 +125,41 @@ export { vietnamDayStartUtc, vietnamDayEndExclusiveUtc };
  * fixed at published_at DESC (PO decision — no advanced sort needed).
  * Selects only list-relevant columns, never the whole row set beyond what
  * the grid/detail actually render. */
+/** Shared WHERE-clause builder for both getPagePostsPage (full rows, one
+ * page) and getPagePostIds (ids only, unpaginated) below — Phase 2K-CF
+ * (Issue 5) extraction, same filters applied identically both ways so
+ * "select all matching the current filter" can never silently diverge
+ * from what the picker's own paginated list actually shows. */
+function applyPagePostFilters(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  query: any,
+  filters: Pick<FacebookPagePostFilters, "search" | "statusType" | "discoveryStatus" | "dateFrom" | "dateTo">
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any {
+  let q = query;
+  if (filters.search) {
+    const term = filters.search.replace(/[%,]/g, "");
+    q = q.ilike("message", `%${term}%`);
+  }
+  if (filters.statusType) q = q.eq("status_type", filters.statusType);
+  if (filters.discoveryStatus) q = q.eq("discovery_status", filters.discoveryStatus);
+  if (filters.dateFrom) q = q.gte("published_at", vietnamDayStartUtc(filters.dateFrom).toISOString());
+  if (filters.dateTo) q = q.lt("published_at", vietnamDayEndExclusiveUtc(filters.dateTo).toISOString());
+  return q;
+}
+
 export async function getPagePostsPage(
   filters: FacebookPagePostFilters,
   client: SupabaseClient = supabase
 ): Promise<FacebookPagePostsPage> {
-  let query = client
+  const baseQuery = client
     .from("facebook_page_posts")
     .select(
       "id, facebook_page_id, facebook_post_id, message, permalink_url, full_picture_url, status_type, comment_count, reaction_count, share_count, published_at, discovery_status, last_synced_at",
       { count: "exact" }
     )
     .eq("facebook_page_id", filters.pageId);
-
-  if (filters.search) {
-    const term = filters.search.replace(/[%,]/g, "");
-    query = query.ilike("message", `%${term}%`);
-  }
-  if (filters.statusType) query = query.eq("status_type", filters.statusType);
-  if (filters.discoveryStatus) query = query.eq("discovery_status", filters.discoveryStatus);
-  if (filters.dateFrom) query = query.gte("published_at", vietnamDayStartUtc(filters.dateFrom).toISOString());
-  if (filters.dateTo) query = query.lt("published_at", vietnamDayEndExclusiveUtc(filters.dateTo).toISOString());
+  const query = applyPagePostFilters(baseQuery, filters);
 
   const pageNum = Math.max(1, filters.page || 1);
   const from = (pageNum - 1) * FACEBOOK_PAGE_POSTS_PAGE_SIZE;
@@ -159,6 +174,44 @@ export async function getPagePostsPage(
     return { rows: [], totalCount: 0 };
   }
   return { rows: (data ?? []) as FacebookPagePost[], totalCount: count ?? 0 };
+}
+
+/** Ids-only, matching the exact same filter set as getPagePostsPage above
+ * — for "Chọn tất cả" (create-campaign Post Picker, Decision B: select
+ * every post matching the current search/filter, not just the currently-
+ * loaded page). Deliberately never selects full post payloads — id only.
+ *
+ * Loops in PostgREST's own default page-size chunks (1000 rows/request)
+ * until a page returns fewer than that — the exact same technique this
+ * file's own fetchAllColumnValues above already uses for
+ * getAllExistingPostIds/getDistinctStatusTypes, because a single
+ * `.range(0, N)` request is silently capped at PostgREST's project-level
+ * max-rows setting (1000) regardless of what N is requested — confirmed
+ * live against Dev (2120 posts on the one connected Page; a naive single
+ * `.range()` call returned only 1000, not the true matching count). Not
+ * duplicating fetchAllColumnValues itself since that helper has no filter
+ * parameter beyond pageId. */
+export async function getPagePostIds(
+  filters: Pick<FacebookPagePostFilters, "pageId" | "search" | "statusType" | "discoveryStatus" | "dateFrom" | "dateTo">,
+  client: SupabaseClient = supabase
+): Promise<string[]> {
+  const ids: string[] = [];
+  const pageSize = 1000;
+  let offset = 0;
+  for (;;) {
+    const baseQuery = client.from("facebook_page_posts").select("id").eq("facebook_page_id", filters.pageId);
+    const query = applyPagePostFilters(baseQuery, filters);
+    const { data, error } = await query.range(offset, offset + pageSize - 1);
+    if (error) {
+      console.error("Error fetching Facebook page post ids:", error);
+      return ids;
+    }
+    const rows = (data ?? []) as { id: string }[];
+    rows.forEach((r) => ids.push(r.id));
+    if (rows.length < pageSize) break;
+    offset += pageSize;
+  }
+  return ids;
 }
 
 function mapPost(pageId: string, post: FacebookPagePostData): Record<string, unknown> {

@@ -568,3 +568,59 @@ test("getDistinctStatusTypes: correctly covers a Page with more cached posts tha
 
   assert.deepEqual(result, ["added_photos", "added_video"], "a distinct value only present beyond row 1000 must not be missed");
 });
+
+/** Phase 2K-CF (Issue 5, Decision B — LOCKED) — getPagePostIds: ids only,
+ * matching the exact same filter set getPagePostsPage applies, for
+ * "Chọn tất cả" (select every post matching the current search/filter,
+ * not just the currently-loaded page). */
+
+test("getPagePostIds: returns every id matching the current page, not just one page's worth", async () => {
+  const rows = Array.from({ length: 48 }, (_, i) => makeRow({ id: `row-${i}`, facebook_post_id: `post-${i}` }));
+  const { getPagePostIds } = await import("./facebookPagePost.service");
+
+  const result = await getPagePostIds({ pageId: "page-1" }, makeQueryClient(rows));
+
+  assert.equal(result.length, 48, "must return every matching id, well beyond one FACEBOOK_PAGE_POSTS_PAGE_SIZE page");
+});
+
+test("getPagePostIds: correctly loops past PostgREST's default 1000-row cap (real Dev bug found during UAT — a single range() request silently truncated at 1000 of 2120 real posts)", async () => {
+  const rows = Array.from({ length: 1500 }, (_, i) => makeRow({ id: `row-${i}`, facebook_post_id: `post-${i}` }));
+  const { getPagePostIds } = await import("./facebookPagePost.service");
+
+  const result = await getPagePostIds({ pageId: "page-1" }, makeQueryClient(rows));
+
+  assert.equal(result.length, 1500, "must not silently truncate at 1000");
+});
+
+test("getPagePostIds: applies the exact same search filter as getPagePostsPage", async () => {
+  const rows = [
+    makeRow({ id: "row-1", facebook_post_id: "post-1", message: "Vòng ngọc bích đẹp" }),
+    makeRow({ id: "row-2", facebook_post_id: "post-2", message: "Sản phẩm khác" }),
+  ];
+  const { getPagePostIds } = await import("./facebookPagePost.service");
+
+  const result = await getPagePostIds({ pageId: "page-1", search: "ngọc" }, makeQueryClient(rows));
+
+  assert.deepEqual(result, ["row-1"]);
+});
+
+test("getPagePostIds: an empty result set (no posts match) returns an empty array, never an error", async () => {
+  const rows = [makeRow({ id: "row-1", facebook_post_id: "post-1", message: "Không khớp" })];
+  const { getPagePostIds } = await import("./facebookPagePost.service");
+
+  const result = await getPagePostIds({ pageId: "page-1", search: "không tồn tại" }, makeQueryClient(rows));
+
+  assert.deepEqual(result, []);
+});
+
+test("getPagePostIds: scoped to the given pageId only, never returns another Page's posts", async () => {
+  const rows = [
+    makeRow({ id: "row-1", facebook_post_id: "post-1", facebook_page_id: "page-1" }),
+    makeRow({ id: "row-2", facebook_post_id: "post-2", facebook_page_id: "page-2" }),
+  ];
+  const { getPagePostIds } = await import("./facebookPagePost.service");
+
+  const result = await getPagePostIds({ pageId: "page-1" }, makeQueryClient(rows));
+
+  assert.deepEqual(result, ["row-1"]);
+});
