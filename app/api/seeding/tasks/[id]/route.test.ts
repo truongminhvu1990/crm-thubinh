@@ -22,6 +22,7 @@ let hasExecutePermission = false;
 let currentTask: { id: string; assigned_staff_id: string | null } | null = null;
 const updateTaskCommentTextCalls: unknown[][] = [];
 const updateTaskStatusCalls: unknown[][] = [];
+const assignTaskStaffCalls: unknown[][] = [];
 
 before(() => {
   mock.module("@/lib/permission/serverAuth", {
@@ -54,6 +55,10 @@ before(() => {
         updateTaskStatusCalls.push(args);
         return { id: "t1", status: (args[1] as { status: string }).status };
       },
+      assignTaskStaff: async (...args: unknown[]) => {
+        assignTaskStaffCalls.push(args);
+        return { id: "t1", assigned_staff_id: args[1] };
+      },
     },
   });
 });
@@ -65,6 +70,7 @@ beforeEach(() => {
   currentTask = null;
   updateTaskCommentTextCalls.length = 0;
   updateTaskStatusCalls.length = 0;
+  assignTaskStaffCalls.length = 0;
 });
 
 function makeRequest(body: unknown): NextRequest {
@@ -125,4 +131,62 @@ test("PATCH status (existing path, unaffected): execute-only staff can still upd
   assert.equal(res.status, 200);
   assert.equal(updateTaskStatusCalls.length, 1);
   assert.equal(updateTaskCommentTextCalls.length, 0, "a status-only body must never reach updateTaskCommentText");
+});
+
+/** Phase 2K-CJ — a request body with `assigned_staff_id` is a
+ * structurally distinct assignment request, same seeding.manage-only
+ * boundary and branch-isolation shape as comment_text above. */
+
+test("PATCH assigned_staff_id: unauthenticated is rejected with 401, never reaches assignTaskStaff", async () => {
+  const { PATCH } = await import("./route");
+  const res = await PATCH(makeRequest({ assigned_staff_id: "staff-A" }), { params: Promise.resolve({ id: "t1" }) });
+  assert.equal(res.status, 401);
+  assert.equal(assignTaskStaffCalls.length, 0);
+});
+
+test("PATCH assigned_staff_id: authenticated without seeding.manage (execute-only) is rejected with 403", async () => {
+  currentStaff = { id: "staff-1", full_name: "Execute Only" };
+  hasExecutePermission = true;
+  hasManagePermission = false;
+  currentTask = { id: "t1", assigned_staff_id: null };
+
+  const { PATCH } = await import("./route");
+  const res = await PATCH(makeRequest({ assigned_staff_id: "staff-A" }), { params: Promise.resolve({ id: "t1" }) });
+  assert.equal(res.status, 403);
+  assert.equal(assignTaskStaffCalls.length, 0);
+});
+
+test("PATCH assigned_staff_id: seeding.manage can assign — reaches assignTaskStaff with the exact taskId and staffId", async () => {
+  currentStaff = { id: "staff-manager", full_name: "Manager" };
+  hasManagePermission = true;
+  currentTask = { id: "t1", assigned_staff_id: null };
+
+  const { PATCH } = await import("./route");
+  const res = await PATCH(makeRequest({ assigned_staff_id: "staff-A" }), { params: Promise.resolve({ id: "t1" }) });
+  assert.equal(res.status, 200);
+  assert.equal(assignTaskStaffCalls.length, 1);
+  assert.equal(assignTaskStaffCalls[0][0], "t1");
+  assert.equal(assignTaskStaffCalls[0][1], "staff-A");
+});
+
+test("PATCH assigned_staff_id: a nonexistent task returns 404 before assignTaskStaff is ever called", async () => {
+  currentStaff = { id: "staff-manager", full_name: "Manager" };
+  hasManagePermission = true;
+  currentTask = null;
+
+  const { PATCH } = await import("./route");
+  const res = await PATCH(makeRequest({ assigned_staff_id: "staff-A" }), { params: Promise.resolve({ id: "t1" }) });
+  assert.equal(res.status, 404);
+  assert.equal(assignTaskStaffCalls.length, 0);
+});
+
+test("PATCH assigned_staff_id: an assignment body never reaches updateTaskStatus or updateTaskCommentText", async () => {
+  currentStaff = { id: "staff-manager", full_name: "Manager" };
+  hasManagePermission = true;
+  currentTask = { id: "t1", assigned_staff_id: null };
+
+  const { PATCH } = await import("./route");
+  await PATCH(makeRequest({ assigned_staff_id: "staff-A" }), { params: Promise.resolve({ id: "t1" }) });
+  assert.equal(updateTaskStatusCalls.length, 0);
+  assert.equal(updateTaskCommentTextCalls.length, 0);
 });

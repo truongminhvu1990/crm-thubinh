@@ -1389,3 +1389,71 @@ test("updateTaskCommentText: a nonexistent task id is rejected, never silently u
 
   await assert.rejects(() => updateTaskCommentText("does-not-exist", "Nội dung mới", "staff-manager", client));
 });
+
+/** Phase 2K-CJ — assignTaskStaff: closes the gap where a task created
+ * unassigned had no path to ever be assigned. Same atomic
+ * `.eq("id", id).is("assigned_staff_id", null)` guard and race-safety
+ * reasoning as updateTaskCommentText above — deliberately UNASSIGNED-only,
+ * never a full reassignment of an already-assigned task. */
+
+test("assignTaskStaff: an unassigned task can be assigned", async () => {
+  const { assignTaskStaff } = await import("./seedingTask.service");
+
+  const client = makeClient({
+    seeding_tasks: [
+      { data: { id: "t1", action_type: "Comment", assigned_staff_id: null } },
+      { data: { id: "t1", action_type: "Comment", assigned_staff_id: "staff-A" } },
+    ],
+  });
+
+  const result = await assignTaskStaff("t1", "staff-A", "staff-manager", client);
+  assert.equal(result.assigned_staff_id, "staff-A");
+});
+
+test("assignTaskStaff: an already-assigned task is rejected, never overwrites the existing assignee", async () => {
+  const { assignTaskStaff } = await import("./seedingTask.service");
+  const { SeedingValidationError } = await import("./seeding.errors");
+
+  const client = makeClient({
+    seeding_tasks: [
+      { data: { id: "t1", action_type: "Comment", assigned_staff_id: "staff-A" } },
+      // The atomic conditional UPDATE's WHERE clause matches zero rows
+      // for an already-assigned task.
+      { data: null },
+    ],
+  });
+
+  await assert.rejects(() => assignTaskStaff("t1", "staff-B", "staff-manager", client), SeedingValidationError);
+});
+
+test("assignTaskStaff: a task that becomes assigned between the initial read and the write is rejected, not silently overwritten", async () => {
+  const { assignTaskStaff } = await import("./seedingTask.service");
+  const { SeedingValidationError } = await import("./seeding.errors");
+
+  const client = makeClient({
+    seeding_tasks: [
+      { data: { id: "t1", action_type: "Comment", assigned_staff_id: null } },
+      { data: null },
+    ],
+  });
+
+  await assert.rejects(() => assignTaskStaff("t1", "staff-B", "staff-manager", client), SeedingValidationError);
+});
+
+test("assignTaskStaff: an empty/missing staffId is rejected before any write", async () => {
+  const { assignTaskStaff } = await import("./seedingTask.service");
+  const { SeedingValidationError } = await import("./seeding.errors");
+  const client = makeClient({});
+
+  await assert.rejects(() => assignTaskStaff("t1", "", "staff-manager", client), SeedingValidationError);
+});
+
+test("assignTaskStaff: a nonexistent task id is rejected, never silently updates a different row", async () => {
+  const { assignTaskStaff } = await import("./seedingTask.service");
+
+  const client = makeClient({
+    seeding_tasks: [{ data: null }],
+  });
+
+  await assert.rejects(() => assignTaskStaff("does-not-exist", "staff-A", "staff-manager", client));
+});

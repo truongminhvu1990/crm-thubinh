@@ -350,9 +350,9 @@ export async function createBulkCommentTasks(
 
 /** The only write path `seeding.execute` needs: report a Task's outcome.
  * Deliberately does not allow editing comment_text/assigned_staff_id/
- * scheduled_at here — reassigning or rescheduling a Task is a
- * `seeding.manage` action (createTask above), not something the assignee
- * does to their own queue.
+ * scheduled_at here — assigning or rescheduling a Task is a
+ * `seeding.manage` action (updateTaskCommentText / assignTaskStaff below,
+ * Phase 2K-CF/2K-CJ), not something the assignee does to their own queue.
  *
  * State machine (PO decision, 2026-08-26 — SEEDING_TASK_ALLOWED_TRANSITIONS
  * in types/seeding.ts is the single source of truth): Pending -> anything;
@@ -443,6 +443,58 @@ export async function updateTaskCommentText(
 
   await logActivity(
     { staff_id: actorStaffId, action: "seeding_task_comment_edited", entity: "seeding_task", entity_id: id },
+    client
+  );
+  return data as SeedingTask;
+}
+
+/** Phase 2K-CJ — closes a real gap in the assignment lifecycle: today
+ * assigned_staff_id is only ever set at task-creation time
+ * (createTask/createBulkCommentTasks, and seedingDistribution.service.ts
+ * for Distribution-generated Share tasks whose execution account has no
+ * assigned staff) — there was previously no way to assign staff to a
+ * task that was created unassigned. updateTaskStatus's own doc comment
+ * already documents the intended boundary ("reassigning... is a
+ * seeding.manage action"), but no function ever implemented it; createTask
+ * cannot serve this purpose either, since assigned_staff_id is part of
+ * its own duplicate-detection key — calling it again with a different
+ * assignee creates a second, separate task rather than updating the
+ * first.
+ *
+ * Deliberately UNASSIGNED-only, mirroring updateTaskCommentText's exact
+ * same atomic conditional UPDATE (`WHERE id = ? AND assigned_staff_id IS
+ * NULL`) and race-safety reasoning. Reassigning an ALREADY-assigned task
+ * to someone else is a materially different, still-open business
+ * question (should the original assignee be notified? does an
+ * In-Progress task's status need to change?) and is explicitly NOT
+ * implemented here. */
+export async function assignTaskStaff(
+  id: string,
+  staffId: string,
+  actorStaffId: string | null,
+  client: SupabaseClient = supabase
+): Promise<SeedingTask> {
+  if (!staffId) {
+    throw new SeedingValidationError("Vui lòng chọn người thực hiện");
+  }
+
+  const current = await getTaskById(id, client);
+  if (!current) throw new Error("Seeding task not found");
+
+  const { data, error } = await client
+    .from("seeding_tasks")
+    .update({ assigned_staff_id: staffId })
+    .eq("id", id)
+    .is("assigned_staff_id", null)
+    .select()
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    throw new SeedingValidationError("Task đã được giao cho người khác — không thể gán lại");
+  }
+
+  await logActivity(
+    { staff_id: actorStaffId, action: "seeding_task_assigned", entity: "seeding_task", entity_id: id },
     client
   );
   return data as SeedingTask;

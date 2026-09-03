@@ -280,6 +280,14 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
   const [taskCommentDraft, setTaskCommentDraft] = useState("");
   const [isSavingTaskComment, setIsSavingTaskComment] = useState(false);
   const [taskEditError, setTaskEditError] = useState<string | null>(null);
+  // Phase 2K-CJ — inline "Gán người thực hiện" for an unassigned task,
+  // same one-editor-at-a-time pattern as the task comment editor above.
+  // The server (assignTaskStaff) is the real enforcement of
+  // "unassigned only"; this UI never assumes success.
+  const [assigningStaffTaskId, setAssigningStaffTaskId] = useState<string | null>(null);
+  const [assignStaffDraft, setAssignStaffDraft] = useState("");
+  const [isAssigningStaff, setIsAssigningStaff] = useState(false);
+  const [assignStaffError, setAssignStaffError] = useState<string | null>(null);
   // Phase 2K-BS — server returned needsAcknowledgment for this task; the
   // reason shown is whatever the server just recomputed fresh (never the
   // possibly-stale targetCompatibility map fetched at page load).
@@ -821,6 +829,46 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
       setTaskEditError(error instanceof Error ? error.message : "Không thể lưu nội dung task");
     } finally {
       setIsSavingTaskComment(false);
+    }
+  }
+
+  function openAssignStaffEditor(taskId: string) {
+    setAssigningStaffTaskId(taskId);
+    setAssignStaffDraft("");
+    setAssignStaffError(null);
+  }
+
+  function cancelAssignStaffEditor() {
+    setAssigningStaffTaskId(null);
+    setAssignStaffDraft("");
+    setAssignStaffError(null);
+  }
+
+  /** Phase 2K-CJ — the server (assignTaskStaff, PATCH .../tasks/[id]
+   * with assigned_staff_id) is the real enforcement: unassigned-only,
+   * atomic, race-safe. This only surfaces whatever the server actually
+   * decided. */
+  async function saveAssignStaff(taskId: string) {
+    if (!assignStaffDraft) {
+      setAssignStaffError("Vui lòng chọn người thực hiện");
+      return;
+    }
+    setIsAssigningStaff(true);
+    setAssignStaffError(null);
+    try {
+      const res = await fetch(`/api/seeding/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assigned_staff_id: assignStaffDraft }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error ?? "Không thể gán người thực hiện");
+      setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, ...body } : t)));
+      setAssigningStaffTaskId(null);
+    } catch (error) {
+      setAssignStaffError(error instanceof Error ? error.message : "Không thể gán người thực hiện");
+    } finally {
+      setIsAssigningStaff(false);
     }
   }
 
@@ -1505,7 +1553,39 @@ export default function SeedingCampaignDetailPage({ params }: { params: Promise<
                               )}
                             </td>
                             <td className="py-3 pr-4 text-muted-foreground">
-                              {staffOptions.find((s) => s.value === t.assigned_staff_id)?.label ?? "Chưa gán"}
+                              {assigningStaffTaskId === t.id ? (
+                                <div className="space-y-1.5 min-w-[160px]">
+                                  <Select
+                                    placeholder="Chọn người thực hiện"
+                                    options={staffOptions}
+                                    value={assignStaffDraft}
+                                    onChange={(e) => setAssignStaffDraft(e.target.value)}
+                                  />
+                                  {assignStaffError && <p className="text-destructive text-xs">{assignStaffError}</p>}
+                                  <div className="flex gap-1.5">
+                                    <Button size="sm" isLoading={isAssigningStaff} onClick={() => saveAssignStaff(t.id)}>
+                                      Lưu
+                                    </Button>
+                                    <Button size="sm" variant="secondary" onClick={cancelAssignStaffEditor} disabled={isAssigningStaff}>
+                                      Hủy
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : t.assigned_staff_id ? (
+                                staffOptions.find((s) => s.value === t.assigned_staff_id)?.label ?? "Chưa gán"
+                              ) : (
+                                // Phase 2K-CJ — closes the assignment dead-end: an
+                                // unassigned task previously had no path to ever
+                                // be assigned to anyone once created. Server
+                                // enforces unassigned-only (assignTaskStaff).
+                                <button
+                                  type="button"
+                                  onClick={() => openAssignStaffEditor(t.id)}
+                                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                                >
+                                  Chưa gán — Gán người thực hiện
+                                </button>
+                              )}
                             </td>
                             <td className="py-3 pr-4 text-muted-foreground">
                               {t.execution_account_id ? executionAccountNameById.get(t.execution_account_id) ?? "—" : "—"}
