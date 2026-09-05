@@ -76,6 +76,14 @@ function CommentShieldPageInner() {
   const searchParams = useSearchParams();
 
   const [pages, setPages] = useState<FacebookPageSummary[]>([]);
+  // Phase 1 (Multi-Page isolation) — which connected Page this screen is
+  // currently acting on. Previously this page had no selector at all and
+  // always operated on `pages.find((p) => p.status !== "Disconnected")`,
+  // silently ignoring every Page after the first connected one — the same
+  // gap Content Repository already fixed for itself (see that page's own
+  // `selectedPageId`). Mirrors that page's pattern exactly rather than
+  // inventing a new one.
+  const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
   const [isLoadingPages, setIsLoadingPages] = useState(false);
   const [forbidden, setForbidden] = useState(false);
   const [connectBanner, setConnectBanner] = useState<string | null>(null);
@@ -104,7 +112,10 @@ function CommentShieldPageInner() {
   // comment" row per live post and must not be touched by this flow.
   const [commentHideState, setCommentHideState] = useState<Record<string, "hiding" | "success" | "error">>({});
 
-  const activePage = pages.find((p) => p.status !== "Disconnected") ?? null;
+  // Connected (non-Disconnected) Page currently selected. Falls back to
+  // `null` — never silently substitutes a different Page — so callers
+  // below (loadLivePosts/handleDisconnect/etc.) never act on the wrong Page.
+  const activePage = pages.find((p) => p.id === selectedPageId && p.status !== "Disconnected") ?? null;
 
   const loadPages = useCallback(async () => {
     setIsLoadingPages(true);
@@ -116,7 +127,16 @@ function CommentShieldPageInner() {
         return;
       }
       if (!res.ok) throw new Error(await res.text());
-      setPages(await res.json());
+      const data: FacebookPageSummary[] = await res.json();
+      setPages(data);
+      // Keep the selection pointed at a connected Page whenever possible:
+      // first load (nothing selected yet), or the previously-selected Page
+      // just became Disconnected (e.g. this screen's own "Ngắt kết nối").
+      // A still-valid manual selection is left untouched.
+      setSelectedPageId((prev) => {
+        if (prev && data.some((p) => p.id === prev && p.status !== "Disconnected")) return prev;
+        return data.find((p) => p.status !== "Disconnected")?.id ?? null;
+      });
     } catch (error) {
       console.error("Failed to load connected Facebook pages:", error);
     } finally {
@@ -380,25 +400,37 @@ function CommentShieldPageInner() {
 
       <Card>
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
+          <div className="flex items-center gap-3 flex-wrap">
             <h2 className="font-medium text-foreground">Kết nối Facebook Page</h2>
-            {activePage ? (
-              <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
-                <span>{activePage.page_name}</span>
-                {pageStatusBadge(activePage.status)}
-              </div>
+            {pages.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Chưa kết nối Page nào.</p>
             ) : (
-              <p className="text-sm text-muted-foreground mt-1">Chưa kết nối Page nào.</p>
+              <select
+                className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                value={selectedPageId ?? ""}
+                onChange={(e) => setSelectedPageId(e.target.value)}
+              >
+                {pages.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.page_name}
+                  </option>
+                ))}
+              </select>
             )}
+            {activePage && pageStatusBadge(activePage.status)}
           </div>
           <div className="flex gap-2">
-            {activePage ? (
+            {/* Multi-Page: connecting is always available, not gated behind
+             * "no Page connected yet" — Facebook Login for Business can add
+             * any number of Pages the OAuth account administers, and each
+             * connect upserts by facebook_page_id (facebookPage.service.ts),
+             * so re-running this for a second Page is already safe. */}
+            <Button onClick={handleConnect} disabled={isLoadingPages} variant={pages.length > 0 ? "secondary" : "primary"}>
+              <Link2 className="w-4 h-4" /> {pages.length > 0 ? "Kết nối thêm Page" : "Kết nối Facebook Page"}
+            </Button>
+            {activePage && (
               <Button variant="secondary" onClick={handleDisconnect}>
                 <Unlink className="w-4 h-4" /> Ngắt kết nối
-              </Button>
-            ) : (
-              <Button onClick={handleConnect} disabled={isLoadingPages}>
-                <Link2 className="w-4 h-4" /> Kết nối Facebook Page
               </Button>
             )}
           </div>
