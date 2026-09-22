@@ -268,4 +268,25 @@ export class OrderPage extends BasePage {
   async deleteDraft() {
     await this.deleteDraftButton.click();
   }
+
+  // ---- Detail page: change customer (Order Customer Editable Before
+  // Completion PD, APPROVED 2026-09-22) — components/order/OrderDetailHeader.tsx's
+  // inline "Đổi" button next to Customer, and ReassignCustomerModal.tsx. ----
+
+  readonly reassignCustomerButton = this.page.getByTestId("order-reassign-customer-button");
+  readonly reassignCustomerModal = this.page.getByTestId("order-reassign-customer-modal");
+  readonly reassignCustomerSearchInput = this.page.getByTestId("order-reassign-customer-search-input");
+  readonly reassignCustomerSaveButton = this.page.getByTestId("order-reassign-customer-save-button");
+  readonly reassignCustomerCancelButton = this.page.getByTestId("order-reassign-customer-cancel-button");
+
+  async openReassignCustomerModal() {
+    await this.reassignCustomerButton.click();
+    await expect(this.reassignCustomerModal).toBeVisible();
+  }
+
+  async reassignCustomerTo(customerSearchTerm: string, customerName: string) {
+    await this.reassignCustomerSearchInput.fill(customerSearchTerm);
+    await this.page.getByRole("button", { name: new RegExp(this.escapeRegExp(customerName)) }).first().click();
+    await this.reassignCustomerSaveButton.click();
+  }
 }

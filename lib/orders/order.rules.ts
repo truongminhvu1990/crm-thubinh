@@ -115,6 +115,21 @@ export function canReassignSalesOwner(status: OrderStatus): boolean {
   return isOrderOpen(status);
 }
 
+/**
+ * Order Customer Editable Before Completion (Product Owner PD, APPROVED
+ * 2026-09-22; Compensation-blocking condition REMOVED per Product Owner
+ * Decision "Lock Option A", 2026-09-22): "Order chưa Hoàn thành: được phép
+ * thay đổi Customer... Order Đã Hoàn thành: KHÔNG được phép." Deliberately
+ * NOT reusing isOrderOpen/canEditOrderItems (which also exclude Lost) — the
+ * PD's own rule text conditions this only on Order Status reaching
+ * Completed, Draft/Reserved/Lost are all "chưa Hoàn thành" and none is
+ * named as a further blocker. No Compensation-status condition of any kind
+ * gates this — the single gate is Order Status === Completed.
+ */
+export function canChangeOrderCustomer(status: OrderStatus): boolean {
+  return status !== "Completed";
+}
+
 /** ORDERS_UI.md §6 action table: Complete is available from Draft or Reserved.
  * Delegates to the transition table above rather than re-checking isOrderOpen,
  * so the two stay a single source of truth. */

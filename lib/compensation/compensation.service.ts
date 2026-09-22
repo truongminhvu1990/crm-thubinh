@@ -198,6 +198,49 @@ export async function cancelCompensationsForOrder(orderId: string, client: Supab
   }
 }
 
+/** Called from Order's own changeOrderCustomer() — Order Customer Editable
+ * Before Completion PD (Product Owner APPROVED, 2026-09-22), scope item
+ * "Compensation nếu có dependency trực tiếp đến Customer." `compensations.
+ * customer_id` is a snapshot captured once at creation (createCompensationsForOrder,
+ * fired at reserveOrder/OrderConfirmed) — not a live reference back to
+ * `orders.customer_id` — so changing the Order's Customer afterward leaves
+ * this column stale unless resynced here.
+ *
+ * Reuses the exact touchable/protected boundary cancelCompensationsForOrder
+ * above already established for this same "Order changed after Compensation
+ * exists" situation: Draft/Pending/Confirmed are resynced (Confirmed only
+ * means Payment Status = Paid + staff-approved, still Compensation's own
+ * mutable window per that function's doc comment — "Confirmed... [is]
+ * reachable... Order can still be Reserved... Handed Off / Paid are still
+ * never touched"); Handed Off/Paid are left untouched — once Handed Off a
+ * Compensation belongs to Settlement's own lifecycle and Paid is recognized
+ * financial history, neither is ever silently rewritten by an Order-side
+ * edit.
+ *
+ * Product Owner Decision, 2026-09-22 ("Lock Option A"): this narrower resync
+ * scope is purely about which Compensation rows get their own customer_id
+ * updated — it is NOT, and must never become, a condition that blocks the
+ * Order-level Customer reassignment itself. order.service.ts's
+ * changeOrderCustomer() calls this unconditionally, with no Compensation-
+ * status pre-check of any kind. Best-effort, same convention as every other
+ * Order-> Compensation integration point in this file. */
+export async function syncCompensationCustomerForOrder(
+  orderId: string,
+  customerId: string,
+  client: SupabaseClient = supabase
+): Promise<void> {
+  try {
+    const { error } = await client
+      .from("compensations")
+      .update({ customer_id: customerId })
+      .eq("order_id", orderId)
+      .in("status", ["Draft", "Pending", "Confirmed"]);
+    if (error) throw error;
+  } catch (error) {
+    console.error("Error syncing compensation customer for order:", orderId, error);
+  }
+}
+
 export interface CompensationListFilters {
   searchTerm?: string;
   status?: string;

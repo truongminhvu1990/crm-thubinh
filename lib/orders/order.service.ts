@@ -5,10 +5,13 @@ import { getStaffByName } from "@/lib/staff.service";
 import { getActiveCommissionRules } from "@/lib/commission/commission.repository";
 import { calculateCommissionAmount, findMatchingRule } from "@/lib/commission/commission.service";
 import { createConsignmentFinancialRecordsForOrder } from "@/lib/consignment/consignmentFinancialRecord.service";
+import { syncCompensationCustomerForOrder } from "@/lib/compensation/compensation.service";
+import { getCustomerById } from "@/lib/customer.service";
 import {
   AddOrderItemInput,
   AddPaymentInput,
   CancelOrderInput,
+  ChangeOrderCustomerInput,
   CreateOrderInput,
   MarkOrderLostInput,
   Order,
@@ -28,6 +31,7 @@ import {
   calculateSubtotal,
   calculateTotalAmount,
   canAddPayment,
+  canChangeOrderCustomer,
   canEditOrderItems,
   canReassignSalesOwner,
   derivePaymentStatus,
@@ -43,6 +47,7 @@ import {
 } from "./order.rules";
 import {
   validateAddOrderItemInput,
+  validateChangeOrderCustomerInput,
   validateCreateOrderInput,
   validateMarkOrderLostInput,
   validatePaymentAmount,
@@ -331,6 +336,16 @@ export interface OrderWriteService {
    * `client`: RLS compatibility, same contract as above. */
   getCancellationInfo(orderId: string, client?: SupabaseClient): Promise<{ hasCompensation: boolean; hasCommission: boolean }>;
   reassignSalesOwner(input: ReassignSalesOwnerInput, actor: string, auditClient?: SupabaseClient): Promise<Order>;
+  /**
+   * Order Customer Editable Before Completion (Product Owner PD, APPROVED
+   * 2026-09-22; Compensation-blocking condition REMOVED per Product Owner
+   * Decision "Lock Option A", 2026-09-22). Its own dedicated method, same
+   * convention as reassignSalesOwner — business-rule gated (blocked once
+   * Completed, order.rules.ts's canChangeOrderCustomer) and excluded from
+   * the generic updateOrder DTO. The single gate is Order Status ===
+   * Completed — no Compensation-status condition of any kind blocks this.
+   */
+  changeOrderCustomer(input: ChangeOrderCustomerInput, actor: string, auditClient?: SupabaseClient): Promise<Order>;
 }
 
 export class OrderNotFoundError extends Error {}
@@ -950,6 +965,53 @@ export function createOrderService(repository: OrderRepository): OrderWriteServi
         },
         auditClient
       );
+      return updated;
+    },
+
+    /**
+     * Order Customer Editable Before Completion (Product Owner PD, APPROVED
+     * 2026-09-22; Compensation-blocking condition REMOVED per Product Owner
+     * Decision "Lock Option A", 2026-09-22). Business rule: reassignable any
+     * time before Completion (Draft/Reserved/Lost all allowed, Completed
+     * blocked — see canChangeOrderCustomer's own doc comment). The single
+     * gate is Order Status === Completed — no other condition, of any kind,
+     * blocks this. Never creates a new order, never touches Order Number/
+     * items/pricing/payments/inventory/status — this is the one field this
+     * method writes.
+     *
+     * compensations.customer_id IS a snapshot (set once at reserveOrder, not
+     * a live reference). Product Owner Decision, 2026-09-22 ("Lock Option
+     * A"): reassignment is unconditionally allowed regardless of
+     * Compensation status (Draft/Pending/Confirmed/Handed Off/Paid all allow
+     * it). syncCompensationCustomerForOrder below still only resyncs
+     * Draft/Pending/Confirmed rows (its own pre-existing scope, unchanged) —
+     * a Handed Off/Paid Compensation's own customer_id is left as originally
+     * recorded, preserving that already-recognized financial-history value,
+     * but this never blocks the Order-level Customer reassignment itself.
+     */
+    async changeOrderCustomer(input, _actor, auditClient) {
+      const order = await requireOrder(repository, input.order_id, auditClient);
+
+      const customerIdError = validateChangeOrderCustomerInput(input);
+      if (customerIdError) {
+        throw new OrderValidationError({ customer_id: customerIdError });
+      }
+
+      if (!canChangeOrderCustomer(order.order_status)) {
+        throw new OrderRuleViolationError("Đơn hàng đã Hoàn thành — không thể đổi khách hàng");
+      }
+
+      if (input.customer_id === order.customer_id) {
+        return order;
+      }
+
+      const newCustomer = await getCustomerById(input.customer_id, auditClient);
+      if (!newCustomer) {
+        throw new OrderValidationError({ customer_id: "Khách hàng không tồn tại" });
+      }
+
+      const updated = await repository.updateOrder(input.order_id, { customer_id: input.customer_id }, auditClient);
+      await syncCompensationCustomerForOrder(input.order_id, input.customer_id, auditClient);
       return updated;
     },
   };

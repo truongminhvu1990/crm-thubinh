@@ -112,6 +112,83 @@ export async function createTestProduct(overrides: Partial<Product> = {}): Promi
   return data as Product;
 }
 
+/**
+ * Precondition fixture for tests whose subject isn't Order creation/
+ * reservation itself (Order Customer Editable Before Completion PD) —
+ * creates an order with exactly one item directly via the DB, same
+ * reasoning/pattern as createTestCustomer/createTestProduct above:
+ * isolates the test from Order Creation's own UI flow and, in particular,
+ * from that flow's known non-atomic order_number generation race. A random
+ * order_number here can never collide with that race. `orderStatus`/
+ * `paymentStatus` are set directly (default Draft/Unpaid) rather than
+ * driven through a Reserve/Add-Payment UI action, since this baseline's
+ * Order Detail page does not yet expose a Reserve control — the subject
+ * under test is changeOrderCustomer's behavior given an order already in a
+ * particular state, not how that state is reached. line_total matches
+ * computeLineTotal's own formula (snapshot_sale_price * quantity -
+ * discount) so total_amount/subtotal are internally consistent, same as a
+ * real order would be.
+ */
+export async function createTestOrderWithItem(
+  customerId: string,
+  productId: string,
+  overrides: {
+    salesOwner?: string;
+    salePrice?: number;
+    discount?: number;
+    quantity?: number;
+    orderStatus?: Order["order_status"];
+    paymentStatus?: Order["payment_status"];
+  } = {}
+): Promise<{ order: Order; item: OrderItem }> {
+  const salePrice = overrides.salePrice ?? 1_000_000;
+  const discount = overrides.discount ?? 0;
+  const quantity = overrides.quantity ?? 1;
+  const lineTotal = salePrice * quantity - discount;
+  const salesOwner = overrides.salesOwner ?? "QA Test Owner";
+  const orderNumber = `OD-QA-${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+
+  const { data: orderData, error: orderError } = await db()
+    .from("orders")
+    .insert({
+      order_number: orderNumber,
+      customer_id: customerId,
+      sales_owner: salesOwner,
+      created_by: salesOwner,
+      subtotal: salePrice * quantity,
+      discount_total: discount,
+      total_amount: lineTotal,
+      order_status: overrides.orderStatus ?? "Draft",
+      payment_status: overrides.paymentStatus ?? "Unpaid",
+    })
+    .select()
+    .single();
+  if (orderError) throw orderError;
+  const order = orderData as Order;
+
+  const { data: itemData, error: itemError } = await db()
+    .from("order_items")
+    .insert({
+      order_id: order.id,
+      product_id: productId,
+      snapshot_sale_price: salePrice,
+      discount,
+      quantity,
+      line_total: lineTotal,
+    })
+    .select()
+    .single();
+  if (itemError) throw itemError;
+
+  // Mirrors what the real addProductToOrder() flow does (reserveProduct) —
+  // this Product now belongs to this order's open Item, so it must already
+  // read Reserved, not the DB default Available.
+  const { error: productError } = await db().from("products").update({ status: "Reserved" }).eq("id", productId);
+  if (productError) throw productError;
+
+  return { order, item: itemData as OrderItem };
+}
+
 export async function getOrderById(id: string): Promise<Order | null> {
   const { data, error } = await db().from("orders").select("*").eq("id", id).maybeSingle();
   if (error) throw error;

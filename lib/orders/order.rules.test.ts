@@ -5,6 +5,7 @@ import {
   deriveFinancialSettlementState,
   calculateOverpaidAmount,
   canAddPayment,
+  canChangeOrderCustomer,
 } from "./order.rules";
 import { OrderStatus } from "@/types/order";
 
@@ -91,3 +92,25 @@ for (const status of OPEN_AND_COMPLETED_STATUSES) {
     assert.equal(canAddPayment(status, "Partially Paid"), true);
   });
 }
+
+/**
+ * Order Customer Editable Before Completion (Product Owner PD, APPROVED
+ * 2026-09-22): "Order chưa Hoàn thành: được phép... Đã Hoàn thành: KHÔNG
+ * được phép." Gated on Order Status alone — Draft/Reserved/Lost are all
+ * "chưa Hoàn thành" (AC1/AC2/AC3), only Completed blocks it (AC4).
+ */
+test("canChangeOrderCustomer: Draft allows the change (AC1)", () => {
+  assert.equal(canChangeOrderCustomer("Draft"), true);
+});
+
+test("canChangeOrderCustomer: Reserved allows the change (AC2)", () => {
+  assert.equal(canChangeOrderCustomer("Reserved"), true);
+});
+
+test("canChangeOrderCustomer: Lost allows the change (PD's rule text conditions only on reaching Completed)", () => {
+  assert.equal(canChangeOrderCustomer("Lost"), true);
+});
+
+test("canChangeOrderCustomer: Completed blocks the change (AC4)", () => {
+  assert.equal(canChangeOrderCustomer("Completed"), false);
+});

@@ -331,15 +331,26 @@ async function generateOrderNumber(client: SupabaseClient = supabase): Promise<s
 }
 
 /** Fields a generic `updateOrder` call may change. Excludes: `id`/`order_number`
- * (immutable, ORDERS_DATABASE.md §8), `customer_id` (no business rule permits
- * reassigning an order's customer), `created_by` (immutable audit field, §4
+ * (immutable, ORDERS_DATABASE.md §8), `created_by` (immutable audit field, §4
  * "Native, set once, never re-derived"), `order_status`/`payment_status`
  * (status transitions go through their own dedicated methods —
  * markOrderLost/completeOrder — which the Service layer gates with business
  * rules; allowing them here too would open a rule-bypassing second path),
  * `subtotal`/`discount_total`/`total_amount` (Derived, §4 — written only by
- * updateOrderRollups), `created_at`/`updated_at` (system-managed). */
-const ORDER_WRITABLE_FIELDS: (keyof Order)[] = ["sales_owner", "order_date", "lost_reason", "note"];
+ * updateOrderRollups), `created_at`/`updated_at` (system-managed).
+ *
+ * `customer_id` included per Order Customer Editable Before Completion PD
+ * (Product Owner APPROVED, 2026-09-22) — supersedes this list's own prior
+ * exclusion note ("no business rule permits reassigning an order's
+ * customer"), which described an unbuilt gap, not a locked prohibition (no
+ * spec document ever stated Customer is immutable once set). Like
+ * sales_owner, this field IS business-rule gated (blocked once Completed —
+ * order.rules.ts's canChangeOrderCustomer) and reaches this whitelist only
+ * through its own dedicated workflow (order.service.ts's
+ * changeOrderCustomer), never through the generic UpdateOrderInput path —
+ * this whitelist is reused by both call sites, the gating itself lives one
+ * layer up. */
+const ORDER_WRITABLE_FIELDS: (keyof Order)[] = ["sales_owner", "order_date", "lost_reason", "note", "customer_id"];
 
 function pickOrderWritableFields(changes: Partial<Order>): Partial<Order> {
   const filtered: Record<string, unknown> = {};
