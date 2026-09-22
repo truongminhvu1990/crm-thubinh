@@ -9,12 +9,13 @@ export function hasPermission(role: StaffRole | null | undefined, permission: Pe
 }
 
 /** Maps the signed-in Supabase Auth user to a `staff` row - `auth_user_id`
- * first, `email` fallback (Production Authorization Incident, 2026-09-21;
- * see `lib/permission/staffIdentity.ts` for the shared resolution order,
- * now identical to the server-side `getCurrentStaffFromRequest()`). Returns
- * null if unauthenticated, if no staff record resolves, or if the resolved
- * staff row isn't `status: "Active"` - callers should treat null the same
- * as "no permissions", not throw. */
+ * first, `email` fallback (authorization identity-resolution hardening,
+ * 2026-09-21; see `lib/permission/staffIdentity.ts` for the shared
+ * resolution order, now identical to the server-side
+ * `getCurrentStaffFromRequest()` - previously this function only matched
+ * by `email`). Returns null if unauthenticated or if no staff record
+ * resolves - callers should treat null the same as "no permissions", not
+ * throw. */
 export async function getCurrentStaff(): Promise<Staff | null> {
   const {
     data: { user },

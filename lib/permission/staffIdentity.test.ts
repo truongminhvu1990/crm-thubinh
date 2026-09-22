@@ -2,12 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { resolveStaffFromAuthUser } from "./staffIdentity";
 
-/** Production Authorization Incident (2026-09-21) regression coverage —
- * the exact root cause: `lib/permission.ts#getCurrentStaff()` only ever
- * matched `staff.email`, with no `auth_user_id` fallback, unlike the
- * server-side `getCurrentStaffFromRequest()` — a staff row whose email no
- * longer matched `auth.users.email` exactly resolved server-side but not
- * client-side. Both callers now share this one resolver. */
+/** Authorization identity-resolution hardening (2026-09-21) regression
+ * coverage — the confirmed divergence: `lib/permission.ts#getCurrentStaff()`
+ * only ever matched `staff.email`, with no `auth_user_id` fallback, unlike
+ * the server-side `getCurrentStaffFromRequest()` — a staff row whose email
+ * no longer matched `auth.users.email` exactly resolved server-side but not
+ * client-side. Both callers now share this one resolver.
+ *
+ * This is NOT a fix for the original Production incident (root cause
+ * remains UNCONFIRMED — see staffIdentity.ts's comment) and deliberately
+ * does not filter on `staff.status`: an Inactive/Locked/Archived staff row
+ * still resolves here exactly as both prior implementations already did.
+ * Whether it should be rejected is a real, separately-tracked question
+ * (Rule A/B, docs/PERMISSION_CENTER_INVESTIGATION_V2.md) — out of scope
+ * for this change. */
 
 const ACTIVE_STAFF_WITH_AUTH_USER_ID = {
   id: "staff-1",
@@ -27,13 +35,22 @@ const ACTIVE_STAFF_EMAIL_ONLY = {
   auth_user_id: null,
 };
 
-const INACTIVE_STAFF_WITH_AUTH_USER_ID = {
+const LOCKED_STAFF_WITH_AUTH_USER_ID = {
   id: "staff-3",
   email: "locked@example.com",
   status: "Locked",
   role: "Sales",
   role_id: "role-sales",
   auth_user_id: "auth-3",
+};
+
+const ARCHIVED_STAFF_EMAIL_ONLY = {
+  id: "staff-4",
+  email: "archived@example.com",
+  status: "Archived",
+  role: "Marketing",
+  role_id: "role-marketing",
+  auth_user_id: null,
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -70,7 +87,7 @@ test("falls back to email when auth_user_id has no match", async () => {
   assert.equal(staff?.id, "staff-2");
 });
 
-test("resolves to null when neither auth_user_id nor email match anything — the confirmed incident case", async () => {
+test("resolves to null when neither auth_user_id nor email match anything", async () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const client = makeStaffTable([ACTIVE_STAFF_WITH_AUTH_USER_ID, ACTIVE_STAFF_EMAIL_ONLY]) as any;
   const staff = await resolveStaffFromAuthUser(client, { id: "orphan-auth-id", email: "no-such-staff@example.com" });
@@ -89,11 +106,20 @@ test("a staff row with auth_user_id = NULL never resolves via the auth_user_id p
   assert.equal(staff?.id, "staff-2");
 });
 
-test("an inactive (Locked) staff row does not resolve, even with a matching auth_user_id", async () => {
+test("a Locked staff row still resolves via auth_user_id — no status filtering, matching existing pre-change behavior", async () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const client = makeStaffTable([INACTIVE_STAFF_WITH_AUTH_USER_ID]) as any;
+  const client = makeStaffTable([LOCKED_STAFF_WITH_AUTH_USER_ID]) as any;
   const staff = await resolveStaffFromAuthUser(client, { id: "auth-3", email: "locked@example.com" });
-  assert.equal(staff, null);
+  assert.equal(staff?.id, "staff-3");
+  assert.equal(staff?.status, "Locked");
+});
+
+test("an Archived staff row still resolves via email fallback — no status filtering, matching existing pre-change behavior", async () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const client = makeStaffTable([ARCHIVED_STAFF_EMAIL_ONLY]) as any;
+  const staff = await resolveStaffFromAuthUser(client, { id: "auth-does-not-exist", email: "archived@example.com" });
+  assert.equal(staff?.id, "staff-4");
+  assert.equal(staff?.status, "Archived");
 });
 
 test("no user (unauthenticated) is the caller's responsibility, not this function's — documented via email-less user", async () => {

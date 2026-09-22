@@ -51,11 +51,16 @@ export function createRequestClient(request: NextRequest): SupabaseClient {
  * is reliably linked (Package 6, future Auth-creation work), the email
  * fallback can be retired in a later, separate change.
  *
- * Production Authorization Incident (2026-09-21): the resolution logic
- * itself now lives in `./staffIdentity.ts`, shared with the browser-side
+ * Authorization identity-resolution hardening (2026-09-21, Production
+ * Authorization Incident follow-up): the resolution logic itself now
+ * lives in `./staffIdentity.ts`, shared with the browser-side
  * `lib/permission.ts#getCurrentStaff()`, which previously only matched by
  * email and had no `auth_user_id` fallback at all - the two paths had
- * drifted apart. See that module's comment for the full incident context. */
+ * drifted apart. This closes that confirmed divergence; it is not a fix
+ * for the original incident, whose root cause remains unconfirmed - see
+ * `./staffIdentity.ts`'s comment for the full context. Behavior here is
+ * otherwise unchanged: still `auth_user_id` first, `email` fallback,
+ * `null` on no match, no `status` filtering. */
 export async function getCurrentStaffFromRequest(request: NextRequest): Promise<Staff | null> {
   const supabase = createRequestClient(request);
 
