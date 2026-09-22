@@ -1,6 +1,7 @@
 import {
   AddOrderItemInput,
   AddPaymentInput,
+  ChangeOrderCustomerInput,
   CreateOrderInput,
   MarkOrderLostInput,
   ReassignSalesOwnerInput,
@@ -72,6 +73,15 @@ export function validateMarkOrderLostInput(input: Pick<MarkOrderLostInput, "lost
 
 export function validateReassignSalesOwnerInput(input: Pick<ReassignSalesOwnerInput, "sales_owner">): string | null {
   return input.sales_owner ? null : "Vui lòng chọn nhân viên phụ trách";
+}
+
+/** Order Customer Editable Before Completion PD (APPROVED) — structural
+ * check only (customer_id present); the status-gate and new-customer-
+ * exists check are I/O-bearing and live in order.service.ts's
+ * changeOrderCustomer, same validate/service-layer split as every other
+ * pair in this module. */
+export function validateChangeOrderCustomerInput(input: Pick<ChangeOrderCustomerInput, "customer_id">): string | null {
+  return input.customer_id ? null : "Vui lòng chọn khách hàng";
 }
 
 export function isValidOrderNumberFormat(orderNumber: string): boolean {

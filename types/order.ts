@@ -183,6 +183,18 @@ export interface ReassignSalesOwnerInput {
   sales_owner: string;
 }
 
+/** Order Customer Editable Before Completion (Product Owner PD, APPROVED
+ * 2026-09-22). Deliberately its own dedicated input/workflow, same
+ * reasoning as ReassignSalesOwnerInput above — Customer reassignment is
+ * business-rule gated (blocked once Completed, see order.rules.ts's
+ * canChangeOrderCustomer), so it is excluded from the generic
+ * UpdateOrderInput below and given its own service method
+ * (changeOrderCustomer) instead. */
+export interface ChangeOrderCustomerInput {
+  order_id: string;
+  customer_id: string;
+}
+
 /** The generic Update Order workflow's input — deliberately narrower than
  * the repository's `updateOrder(id, changes: Partial<Order>)`. Excludes
  * sales_owner/lost_reason: both already have their own business-rule-gated

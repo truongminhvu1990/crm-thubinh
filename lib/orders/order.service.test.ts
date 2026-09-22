@@ -102,6 +102,27 @@ mock.module("@/lib/consignment/consignmentFinancialRecord.service", {
   },
 });
 
+/** Order Customer Editable Before Completion PD (APPROVED 2026-09-22) —
+ * changeOrderCustomer's own dependencies, mocked wholesale for the same
+ * reason as staff.service/receivingAccount.service above. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let syncCompensationCustomerForOrderCalls: any[][] = [];
+mock.module("@/lib/compensation/compensation.service", {
+  namedExports: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    syncCompensationCustomerForOrder: async (...args: any[]) => {
+      syncCompensationCustomerForOrderCalls.push(args);
+    },
+  },
+});
+
+let customerLookupResult: { id: string; full_name: string } | null = { id: "customer-2", full_name: "Tran Thi B" };
+mock.module("@/lib/customer.service", {
+  namedExports: {
+    getCustomerById: async () => customerLookupResult,
+  },
+});
+
 function makeOrder(overrides: Partial<Order> = {}): Order {
   return {
     id: "order-1",
@@ -183,6 +204,8 @@ test.beforeEach(() => {
   getReceivingAccountByIdCalls = [];
   getStaffByNameCalls = [];
   getActiveCommissionRulesCalls = [];
+  syncCompensationCustomerForOrderCalls = [];
+  customerLookupResult = { id: "customer-2", full_name: "Tran Thi B" };
 });
 
 test("completeOrder: sale_price = order_item.line_total, never order.total_amount", async () => {
@@ -1106,4 +1129,199 @@ test("addPayment: Cash (no receiving_account_id) preserves the existing addPayme
   );
 
   assert.equal(addPaymentCalled, true);
+});
+
+// ============================================================
+// Order Customer Editable Before Completion (Product Owner PD, APPROVED
+// 2026-09-22; Compensation-blocking condition REMOVED per Product Owner
+// Decision "Lock Option A", 2026-09-22) — changeOrderCustomer()
+// ============================================================
+
+test("changeOrderCustomer: Draft order — customer reassigned, compensation sync attempted", async () => {
+  const { createOrderService } = await import("./order.service");
+
+  let updateOrderCalledWith: { id: string; changes: Partial<Order> } | null = null;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", customer_id: "customer-1" }),
+    updateOrder: async (id, changes) => {
+      updateOrderCalledWith = { id, changes };
+      return makeOrder({ ...changes, id, order_status: "Draft" });
+    },
+  });
+
+  const updated = await createOrderService(repository).changeOrderCustomer(
+    { order_id: "order-1", customer_id: "customer-2" },
+    "actor"
+  );
+
+  assert.deepEqual(updateOrderCalledWith, { id: "order-1", changes: { customer_id: "customer-2" } });
+  assert.equal(updated.customer_id, "customer-2");
+  assert.equal(syncCompensationCustomerForOrderCalls.length, 1);
+  assert.equal(syncCompensationCustomerForOrderCalls[0][0], "order-1");
+  assert.equal(syncCompensationCustomerForOrderCalls[0][1], "customer-2");
+});
+
+test("changeOrderCustomer: Reserved order — still allowed (AC2)", async () => {
+  const { createOrderService } = await import("./order.service");
+
+  let updateOrderCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Reserved", customer_id: "customer-1" }),
+    updateOrder: async (id, changes) => {
+      updateOrderCalled = true;
+      return makeOrder({ ...changes, id, order_status: "Reserved" });
+    },
+  });
+
+  await createOrderService(repository).changeOrderCustomer({ order_id: "order-1", customer_id: "customer-2" }, "actor");
+  assert.equal(updateOrderCalled, true);
+});
+
+test("changeOrderCustomer: Reserved + Paid order — still allowed (AC3)", async () => {
+  const { createOrderService } = await import("./order.service");
+
+  let updateOrderCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Reserved", payment_status: "Paid", customer_id: "customer-1" }),
+    updateOrder: async (id, changes) => {
+      updateOrderCalled = true;
+      return makeOrder({ ...changes, id, order_status: "Reserved", payment_status: "Paid" });
+    },
+  });
+
+  await createOrderService(repository).changeOrderCustomer({ order_id: "order-1", customer_id: "customer-2" }, "actor");
+  assert.equal(updateOrderCalled, true);
+});
+
+test("changeOrderCustomer: Completed order — BLOCKED for everyone, no override (AC4)", async () => {
+  const { createOrderService, OrderRuleViolationError } = await import("./order.service");
+
+  let updateOrderCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Completed", payment_status: "Paid", customer_id: "customer-1" }),
+    updateOrder: async (id, changes) => {
+      updateOrderCalled = true;
+      return makeOrder({ ...changes, id, order_status: "Completed" });
+    },
+  });
+
+  await assert.rejects(
+    () => createOrderService(repository).changeOrderCustomer({ order_id: "order-1", customer_id: "customer-2" }, "actor"),
+    OrderRuleViolationError
+  );
+  assert.equal(updateOrderCalled, false);
+  assert.equal(syncCompensationCustomerForOrderCalls.length, 0);
+});
+
+test("changeOrderCustomer: empty customer_id is rejected with OrderValidationError, repository never reached (AC10)", async () => {
+  const { createOrderService, OrderValidationError } = await import("./order.service");
+
+  let updateOrderCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft" }),
+    updateOrder: async () => {
+      updateOrderCalled = true;
+      return makeOrder();
+    },
+  });
+
+  await assert.rejects(
+    () => createOrderService(repository).changeOrderCustomer({ order_id: "order-1", customer_id: "" }, "actor"),
+    OrderValidationError
+  );
+  assert.equal(updateOrderCalled, false);
+});
+
+test("changeOrderCustomer: new customer_id does not exist — rejected with OrderValidationError", async () => {
+  const { createOrderService, OrderValidationError } = await import("./order.service");
+  customerLookupResult = null;
+
+  let updateOrderCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", customer_id: "customer-1" }),
+    updateOrder: async () => {
+      updateOrderCalled = true;
+      return makeOrder();
+    },
+  });
+
+  await assert.rejects(
+    () => createOrderService(repository).changeOrderCustomer({ order_id: "order-1", customer_id: "customer-2" }, "actor"),
+    OrderValidationError
+  );
+  assert.equal(updateOrderCalled, false);
+});
+
+test("changeOrderCustomer: same customer_id as current — no-op, repository never reached", async () => {
+  const { createOrderService } = await import("./order.service");
+
+  let updateOrderCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Draft", customer_id: "customer-1" }),
+    updateOrder: async () => {
+      updateOrderCalled = true;
+      return makeOrder();
+    },
+  });
+
+  const result = await createOrderService(repository).changeOrderCustomer(
+    { order_id: "order-1", customer_id: "customer-1" },
+    "actor"
+  );
+  assert.equal(updateOrderCalled, false);
+  assert.equal(result.customer_id, "customer-1");
+  assert.equal(syncCompensationCustomerForOrderCalls.length, 0);
+});
+
+/**
+ * Product Owner Decision, 2026-09-22 ("Lock Option A") — REMOVES the
+ * Compensation-status blocking condition an earlier revision of
+ * changeOrderCustomer had. The single gate is Order Status === Completed;
+ * no Compensation status (Draft/Pending/Confirmed/Handed Off/Paid) may ever
+ * block a Customer reassignment. These two tests are the Decision's own
+ * required proof set for the two statuses that would previously have
+ * blocked the change.
+ */
+test("changeOrderCustomer: Handed Off compensation exists + non-Completed Order — reassignment succeeds (Lock Option A: no Compensation-status block)", async () => {
+  const { createOrderService } = await import("./order.service");
+
+  let updateOrderCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Reserved", customer_id: "customer-1" }),
+    updateOrder: async (id, changes) => {
+      updateOrderCalled = true;
+      return makeOrder({ ...changes, id });
+    },
+    findCompensationStatusesForOrder: async () => ["Handed Off"],
+  });
+
+  const updated = await createOrderService(repository).changeOrderCustomer(
+    { order_id: "order-1", customer_id: "customer-2" },
+    "actor"
+  );
+  assert.equal(updateOrderCalled, true);
+  assert.equal(updated.customer_id, "customer-2");
+  assert.equal(syncCompensationCustomerForOrderCalls.length, 1);
+});
+
+test("changeOrderCustomer: Paid compensation exists + non-Completed Order — reassignment succeeds (Lock Option A: no Compensation-status block)", async () => {
+  const { createOrderService } = await import("./order.service");
+
+  let updateOrderCalled = false;
+  const repository = makeRepository({
+    findOrderById: async () => makeOrder({ order_status: "Reserved", customer_id: "customer-1" }),
+    updateOrder: async (id, changes) => {
+      updateOrderCalled = true;
+      return makeOrder({ ...changes, id });
+    },
+    findCompensationStatusesForOrder: async () => ["Paid"],
+  });
+
+  const updated = await createOrderService(repository).changeOrderCustomer(
+    { order_id: "order-1", customer_id: "customer-2" },
+    "actor"
+  );
+  assert.equal(updateOrderCalled, true);
+  assert.equal(updated.customer_id, "customer-2");
+  assert.equal(syncCompensationCustomerForOrderCalls.length, 1);
 });

@@ -12,6 +12,7 @@ import {
   canMarkOrderLost,
   canCancelOrder,
   canAddPayment,
+  canChangeOrderCustomer,
   validateOrderHasItems,
 } from "@/lib/orders/order.rules";
 import { getProducts, getProductById } from "@/lib/product.service";
@@ -33,6 +34,7 @@ import AddPaymentModal from "@/components/order/AddPaymentModal";
 import OrderEventTimeline from "@/components/order/OrderEventTimeline";
 import MarkOrderLostModal from "@/components/order/MarkOrderLostModal";
 import ReassignSalesOwnerModal from "@/components/order/ReassignSalesOwnerModal";
+import ReassignCustomerModal from "@/components/order/ReassignCustomerModal";
 import CancelOrderModal from "@/components/order/CancelOrderModal";
 
 const currency = new Intl.NumberFormat("vi-VN", {
@@ -63,6 +65,7 @@ export default function OrderDetailPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [isLostModalOpen, setIsLostModalOpen] = useState(false);
   const [isReassignModalOpen, setIsReassignModalOpen] = useState(false);
+  const [isReassignCustomerModalOpen, setIsReassignCustomerModalOpen] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
 
@@ -276,6 +279,11 @@ export default function OrderDetailPage() {
 
   const { order, items, payments, events } = detail;
   const isEditable = canEditOrderItems(order.order_status);
+  // Order Customer Editable Before Completion (Product Owner PD, APPROVED
+  // 2026-09-22) — gated on canChangeOrderCustomer alone (blocked only once
+  // Completed), same for every role; no Owner-only bypass exists for this
+  // field (see order.service.ts's changeOrderCustomer doc comment).
+  const isCustomerEditable = canChangeOrderCustomer(order.order_status);
   const isDeletable = isOwner ? canAdminDeleteOrder() : canDeleteOrder(order.order_status, order.payment_status);
 
   // Delete confirmation must identify the order (Product Owner requirement,
@@ -350,6 +358,8 @@ export default function OrderDetailPage() {
           order={order}
           isEditable={isEditable}
           onReassignClick={() => setIsReassignModalOpen(true)}
+          isCustomerEditable={isCustomerEditable}
+          onChangeCustomerClick={() => setIsReassignCustomerModalOpen(true)}
         />
 
         <OrderTimeline order={order} />
@@ -484,6 +494,18 @@ export default function OrderDetailPage() {
         onClose={() => setIsReassignModalOpen(false)}
         onSaved={() => {
           setIsReassignModalOpen(false);
+          loadOrder();
+        }}
+      />
+
+      <ReassignCustomerModal
+        open={isReassignCustomerModalOpen}
+        orderId={id}
+        currentCustomerId={order.customer_id}
+        currentCustomerLabel={order.customer?.full_name ?? order.customer_id}
+        onClose={() => setIsReassignCustomerModalOpen(false)}
+        onSaved={() => {
+          setIsReassignCustomerModalOpen(false);
           loadOrder();
         }}
       />

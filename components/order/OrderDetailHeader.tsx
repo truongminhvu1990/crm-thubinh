@@ -15,11 +15,23 @@ interface Props {
    * only shows while the order is open (Draft/Reserved, §5). */
   isEditable?: boolean;
   onReassignClick?: () => void;
+  /** Order Customer Editable Before Completion PD (APPROVED 2026-09-22) —
+   * the inline "Đổi" action next to Customer, gated separately from
+   * isEditable/onReassignClick above since the two are different business
+   * rules (canChangeOrderCustomer vs. canEditOrderItems). */
+  isCustomerEditable?: boolean;
+  onChangeCustomerClick?: () => void;
 }
 
 /** Order Detail header (ORDERS_UI §6). Created By is deliberately
  * secondary/smaller than Sales Owner (Design Principle 5, Spec §17 risk). */
-export default function OrderDetailHeader({ order, isEditable = false, onReassignClick }: Props) {
+export default function OrderDetailHeader({
+  order,
+  isEditable = false,
+  onReassignClick,
+  isCustomerEditable = false,
+  onChangeCustomerClick,
+}: Props) {
   return (
     <Card>
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
@@ -30,11 +42,22 @@ export default function OrderDetailHeader({ order, isEditable = false, onReassig
             <PaymentStatusBadge status={order.payment_status} className="text-sm px-2.5 py-0.5" />
           </div>
           {order.customer && (
-            <p className="text-muted-foreground text-sm mt-1">
+            <p className="text-muted-foreground text-sm mt-1 inline-flex items-center gap-1.5">
               Khách hàng:{" "}
               <Link href={`/customers/${order.customer.id}`} className="text-primary hover:underline">
                 {order.customer.full_name}
               </Link>
+              {isCustomerEditable && onChangeCustomerClick && (
+                <button
+                  data-testid="order-reassign-customer-button"
+                  onClick={onChangeCustomerClick}
+                  className="text-primary hover:underline text-xs font-normal inline-flex items-center gap-0.5"
+                  aria-label="Đổi khách hàng"
+                >
+                  <Pencil className="w-3 h-3" />
+                  Đổi
+                </button>
+              )}
             </p>
           )}
         </div>

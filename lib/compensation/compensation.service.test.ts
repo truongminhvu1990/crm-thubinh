@@ -204,6 +204,22 @@ test("cancelCompensationsForOrder: Phase B (Option B, Product Owner Approval 202
   );
 });
 
+test("syncCompensationCustomerForOrder: Order Customer Editable PD (APPROVED) — resyncs Draft/Pending/Confirmed, never Handed Off/Paid", async () => {
+  const { syncCompensationCustomerForOrder } = await import("./compensation.service");
+  const { client, calls } = makeClient({ compensations: [{ data: null }] });
+
+  await syncCompensationCustomerForOrder("order-1", "customer-2", client);
+
+  const update = calls.find((c) => c.method === "update");
+  assert.deepEqual(update!.args, [{ customer_id: "customer-2" }]);
+  const inFilter = calls.find((c) => c.method === "in");
+  assert.deepEqual(inFilter!.args, ["status", ["Draft", "Pending", "Confirmed"]]);
+  assert.ok(
+    !(inFilter!.args[1] as string[]).includes("Handed Off") && !(inFilter!.args[1] as string[]).includes("Paid"),
+    "Handed Off/Paid compensations must never be reachable here — order.service.ts's changeOrderCustomer no longer pre-checks Compensation status at all (Lock Option A), it calls this unconditionally"
+  );
+});
+
 test("confirmCompensation: Pending + Payment Status Paid -> Confirmed", async () => {
   const { confirmCompensation } = await import("./compensation.service");
   const { client } = makeClient({
