@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { Role, PermissionRecord, RolePermission } from "@/types/permissionCenter";
 import { permissionApi } from "@/lib/permission/permissionCenterApi";
+import { classifyPermissionLoadError, PermissionLoadError } from "@/lib/permission/loadErrorClassification";
 import PermissionTabs from "@/components/permission/PermissionTabs";
 import SearchInput from "@/components/ui/SearchInput";
 import Card from "@/components/ui/Card";
@@ -19,15 +20,26 @@ export default function PermissionMatrixPage() {
   const [grants, setGrants] = useState<RolePermission[]>([]);
   const [search, setSearch] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<PermissionLoadError | null>(null);
   const [pending, setPending] = useState<Set<string>>(new Set());
 
   async function load() {
     setIsLoading(true);
-    const [r, p, g] = await Promise.all([permissionApi.getRoles(), permissionApi.getCatalog(), permissionApi.getRolePermissions()]);
-    setRoles(r);
-    setPermissions(p);
-    setGrants(g);
-    setIsLoading(false);
+    setLoadError(null);
+    try {
+      const [r, p, g] = await Promise.all([permissionApi.getRoles(), permissionApi.getCatalog(), permissionApi.getRolePermissions()]);
+      setRoles(r);
+      setPermissions(p);
+      setGrants(g);
+    } catch (error) {
+      // Production Authorization Incident (2026-09-21): a 401/403 here
+      // previously left isLoading stuck true forever (Promise.all had no
+      // catch at all) - now it resolves to an explicit error state instead
+      // of an indefinite spinner or a misleading "no results" card.
+      setLoadError(classifyPermissionLoadError(error));
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -92,6 +104,23 @@ export default function PermissionMatrixPage() {
         <div className="flex justify-center py-16">
           <div className="animate-spin text-2xl">⟳</div>
         </div>
+      ) : loadError ? (
+        <Card className="text-center py-12">
+          <p className="text-muted-foreground text-sm">
+            {loadError.kind === "unauthorized"
+              ? "Bạn cần đăng nhập lại để xem Ma trận quyền."
+              : loadError.kind === "forbidden"
+                ? "Bạn không có quyền xem Ma trận quyền."
+                : "Không thể tải Ma trận quyền. Vui lòng thử lại."}
+          </p>
+          <button
+            type="button"
+            onClick={() => load()}
+            className="mt-4 text-sm font-medium text-primary hover:text-primary/80"
+          >
+            Thử lại
+          </button>
+        </Card>
       ) : groups.length === 0 ? (
         <Card className="text-center py-12">
           <p className="text-muted-foreground text-sm">Không tìm thấy quyền phù hợp</p>

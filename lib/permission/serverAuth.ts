@@ -3,6 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 import { SupabaseClient } from "@supabase/supabase-js";
 import { Staff } from "@/types/staff";
 import { staffHasPermission } from "./permissionCenter.service";
+import { resolveStaffFromAuthUser } from "./staffIdentity";
 
 /** The same request-cookie-based client shape lib/supabase/proxy.ts and
  * getCurrentStaffFromRequest below already use, extracted so
@@ -48,7 +49,18 @@ export function createRequestClient(request: NextRequest): SupabaseClient {
  *      below turns into 401, exactly as before.
  * This is explicitly transitional, not a redesign - once every staff row
  * is reliably linked (Package 6, future Auth-creation work), the email
- * fallback can be retired in a later, separate change. */
+ * fallback can be retired in a later, separate change.
+ *
+ * Authorization identity-resolution hardening (2026-09-21, Production
+ * Authorization Incident follow-up): the resolution logic itself now
+ * lives in `./staffIdentity.ts`, shared with the browser-side
+ * `lib/permission.ts#getCurrentStaff()`, which previously only matched by
+ * email and had no `auth_user_id` fallback at all - the two paths had
+ * drifted apart. This closes that confirmed divergence; it is not a fix
+ * for the original incident, whose root cause remains unconfirmed - see
+ * `./staffIdentity.ts`'s comment for the full context. Behavior here is
+ * otherwise unchanged: still `auth_user_id` first, `email` fallback,
+ * `null` on no match, no `status` filtering. */
 export async function getCurrentStaffFromRequest(request: NextRequest): Promise<Staff | null> {
   const supabase = createRequestClient(request);
 
@@ -57,28 +69,7 @@ export async function getCurrentStaffFromRequest(request: NextRequest): Promise<
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: byAuthUserId, error: authUserIdError } = await supabase
-    .from("staff")
-    .select("*")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
-  if (authUserIdError) {
-    console.error("Error resolving current staff member by auth_user_id (server):", authUserIdError);
-  }
-  if (byAuthUserId) return byAuthUserId as Staff;
-
-  if (!user.email) return null;
-
-  const { data: byEmail, error: emailError } = await supabase
-    .from("staff")
-    .select("*")
-    .eq("email", user.email)
-    .maybeSingle();
-  if (emailError) {
-    console.error("Error resolving current staff member by email (server):", emailError);
-    return null;
-  }
-  return byEmail as Staff | null;
+  return resolveStaffFromAuthUser(supabase, user);
 }
 
 /** Gate for every Permission Center write endpoint (Package 12). Reuses the
