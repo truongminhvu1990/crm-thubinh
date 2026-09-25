@@ -26,7 +26,28 @@
 //    Owner/Manager-only gate already used for Cost/Profit on the Sales
 //    Ledger table) - null otherwise ("if available" per the brief).
 export interface MonthlySoldProductRow {
-  purchase_id: string;
+  /** Unique row key: the order_item id for an Order line, or the
+   * customer_purchases id for a legacy entry (see `is_legacy`). */
+  line_key: string;
+  /** customer_purchases.id when this line has a purchase snapshot (Completed
+   * orders, and legacy entries); null for a sold line with no purchase yet
+   * (e.g. a Reserved order with a deposit - purchases are only written at
+   * completion). */
+  purchase_id: string | null;
+  /** Revenue & Sales Reporting Unification (Product Owner decision): the
+   * Order this line belongs to, its statuses, and whether it is recognized
+   * revenue (BR-001: Completed + Paid) or sold-but-unrecognized (e.g. a
+   * Completed order not fully paid, or a Reserved order with a deposit).
+   * Legacy entries (`is_legacy`, no linked Order) have no Order and are
+   * recognized by BR-002 (LOCKED). */
+  order_id: string | null;
+  order_status: string | null;
+  payment_status: string | null;
+  recognition: "recognized" | "unrecognized";
+  is_legacy: boolean;
+  /** Order date for an Order line (the report's date basis - same as the
+   * Dashboard's); customer_purchases.sale_date for a legacy entry. Shown
+   * as "Ngày bán". */
   sale_date: string;
   order_number: string | null;
   product_id: string | null;
@@ -122,9 +143,24 @@ export interface MonthlySoldProductsPage {
 // here, never merged into one number before this point, so the Financial
 // Summary panel can show them as separate line items.
 export interface MonthlySoldProductsSummary {
-  totalRevenue: number;
+  /** Revenue & Sales Reporting Unification. SOLD VALUE = RECOGNIZED +
+   * UNRECOGNIZED, exactly. Sold scope and the recognition split are defined
+   * once in lib/reports/revenueDefinition.ts (isSoldOrder / isOrderRecognized). */
+  soldValue: number;
+  /** BR-001 recognized revenue of the sold lines (Completed + Paid, plus
+   * BR-002 legacy entries). Formerly `totalRevenue`. */
+  recognizedRevenue: number;
+  unrecognizedValue: number;
+  /** Number of sold product lines (rows). */
+  soldLines: number;
   totalCustomers: number;
+  /** Distinct sold Orders (+ each legacy entry as its own single-item
+   * "order", unchanged from before) = recognizedOrders + unrecognizedOrders. */
   totalOrders: number;
+  recognizedOrders: number;
+  unrecognizedOrders: number;
+  /** recognizedRevenue / soldValue in [0, 1]; 0 when soldValue is 0. */
+  recognizedRatio: number;
   operatingExpenses: number;
   cogs: number | null;
   partnerCompensation: number | null;

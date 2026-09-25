@@ -7,6 +7,13 @@ interface Props {
   /** Total Revenue - reused as-is from the main report summary, never
    * recomputed here. */
   revenue: number;
+  /** Revenue & Sales Reporting Unification - the same report's SOLD VALUE
+   * and UNRECOGNIZED value (reused from the summary, never recomputed):
+   * soldValue = revenue + unrecognizedValue. Unrecognized value is shown for
+   * reconciliation only - it is NOT part of the profit calculation below,
+   * which is computed on recognized revenue. */
+  soldValue: number;
+  unrecognizedValue: number;
   /** Cost of Goods Sold - reused as-is from the main report summary
    * (MonthlySoldProductsSummary.cogs). `null` when the viewer can't see
    * cost-derived figures (Staff) - shown as "—", never as 0. */
@@ -57,6 +64,8 @@ function Row({
  * section's own already-fetched total) - nothing is recomputed. */
 export default function FinancialSummaryPanel({
   revenue,
+  soldValue,
+  unrecognizedValue,
   cogs,
   partnerCompensation,
   staffCommission,
@@ -75,7 +84,9 @@ export default function FinancialSummaryPanel({
     <Card testId="financial-summary-panel">
       <h3 className="text-base font-semibold text-foreground mb-1">Tóm tắt tài chính</h3>
       <div className="divide-y divide-border">
+        <Row label="Tổng giá trị sản phẩm bán" value={currency.format(soldValue)} muted />
         <Row label="Doanh thu đã ghi nhận" value={currency.format(revenue)} muted />
+        <Row label="Doanh thu chưa ghi nhận (không tính vào lãi/lỗ)" value={currency.format(unrecognizedValue)} muted />
         <Row label="Giá vốn hàng bán (COGS)" value={cogsKnown ? currency.format(cogs as number) : "—"} muted />
         <Row
           label="Hoa hồng đối tác"

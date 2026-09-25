@@ -76,6 +76,16 @@ export const MONTHLY_SOLD_PRODUCTS_COLUMNS: MonthlySoldProductsColumnDef[] = [
   { key: "payment_methods", label: "Phương thức thanh toán", width: 22, exportValue: (r) => r.payment_methods || "" },
 ];
 
+/** Recognition status of a sold line, as shown in the table's always-visible
+ * "Ghi nhận doanh thu" column and appended to every Excel export. Recognized
+ * = BR-001 (Completed + Paid, or a BR-002 legacy entry); everything else is
+ * sold-but-unrecognized, with the reason spelled out. */
+export function recognitionLabel(row: Pick<MonthlySoldProductRow, "recognition" | "order_status" | "payment_status" | "is_legacy">): string {
+  if (row.recognition === "recognized") return row.is_legacy ? "Đã ghi nhận (dữ liệu cũ)" : "Đã ghi nhận";
+  if (row.order_status === "Reserved") return "Chưa ghi nhận — đang cọc";
+  return "Chưa ghi nhận — chưa Paid đầy đủ";
+}
+
 /** Columns the current viewer may see at all - the picker only offers
  * these, and export only ever includes a subset of these. */
 export function getAvailableMonthlySoldProductsColumns(ctx: MonthlySoldProductsColumnContext): MonthlySoldProductsColumnDef[] {

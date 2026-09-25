@@ -174,6 +174,30 @@ test("getOrderValueSummary: empty result set produces all-zero summary, not an e
     totalOrderCount: 0,
     orderBasedRecognizedValue: 0,
     orderBasedUnrecognizedValue: 0,
+    recognizedOrderCount: 0,
+    unrecognizedOrderCount: 0,
+    recognizedRatio: 0,
     breakdown: [],
   });
+});
+
+test("getOrderValueSummary: order counts, recognized ratio and TOTAL = RECOGNIZED + UNRECOGNIZED (Revenue & Sales Reporting Unification)", async () => {
+  const { getOrderValueSummary } = await import("./orderValueSummary.service");
+  const client = fakeClient([
+    order("Completed", "Paid", 100),
+    order("Completed", "Partially Paid", 50),
+    order("Reserved", "Partially Paid", 200),
+    order("Draft", "Unpaid", 10),
+  ]);
+
+  const result = await getOrderValueSummary(null, undefined, client);
+
+  assert.equal(result.totalOrderValue, 360);
+  assert.equal(result.orderBasedRecognizedValue, 100);
+  assert.equal(result.orderBasedUnrecognizedValue, 260);
+  assert.equal(result.totalOrderValue, result.orderBasedRecognizedValue + result.orderBasedUnrecognizedValue);
+  assert.equal(result.totalOrderCount, 4);
+  assert.equal(result.recognizedOrderCount, 1);
+  assert.equal(result.unrecognizedOrderCount, 3);
+  assert.equal(result.recognizedRatio, 100 / 360);
 });

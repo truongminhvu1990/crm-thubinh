@@ -7,6 +7,7 @@ import { ExcelColumn, exportRowsToExcel, downloadBlob } from "@/lib/reports/repo
 import {
   MonthlySoldProductsColumnKey,
   getAvailableMonthlySoldProductsColumns,
+  recognitionLabel,
 } from "@/lib/monthlySoldProducts/monthlySoldProductsColumns";
 import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
 import { useReportColumnPreference } from "@/lib/hooks/useReportColumnPreference";
@@ -30,9 +31,15 @@ const REPORT_TITLE = "Sản phẩm đã bán theo tháng";
 const DEFAULT_FILTERS: Filters = { page: 1 };
 
 const EMPTY_SUMMARY: Summary = {
-  totalRevenue: 0,
+  soldValue: 0,
+  recognizedRevenue: 0,
+  unrecognizedValue: 0,
+  soldLines: 0,
   totalCustomers: 0,
   totalOrders: 0,
+  recognizedOrders: 0,
+  unrecognizedOrders: 0,
+  recognizedRatio: 0,
   operatingExpenses: 0,
   cogs: null,
   partnerCompensation: null,
@@ -117,6 +124,8 @@ export default function MonthlySoldProductsSection() {
       const exportColumns: ExcelColumn<MonthlySoldProductRow>[] = getAvailableMonthlySoldProductsColumns({ canViewGrossProfit })
         .filter((c) => visibleColumns.has(c.key))
         .map((c) => ({ header: c.label, width: c.width, value: c.exportValue }));
+      // Recognition status is always exported, same as it is always shown.
+      exportColumns.push({ header: "Ghi nhận doanh thu", width: 30, value: (r) => recognitionLabel(r) });
 
       const blob = await exportRowsToExcel<MonthlySoldProductRow>("San pham da ban", exportColumns, allRows);
       downloadBlob(blob, `san-pham-da-ban-theo-thang-${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -197,7 +206,9 @@ export default function MonthlySoldProductsSection() {
 
       <ExpenseManagementSection
         filters={{ dateFrom: filters.dateFrom, dateTo: filters.dateTo, month: filters.month }}
-        revenue={summary.totalRevenue}
+        revenue={summary.recognizedRevenue}
+        soldValue={summary.soldValue}
+        unrecognizedValue={summary.unrecognizedValue}
         cogs={summary.cogs}
         partnerCompensation={summary.partnerCompensation}
         staffCommission={summary.staffCommission}

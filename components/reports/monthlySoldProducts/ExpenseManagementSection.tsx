@@ -20,6 +20,8 @@ interface Props {
   filters: DateRangeFilters;
   /** Reused as-is from the main report summary - see FinancialSummaryPanel. */
   revenue: number;
+  soldValue: number;
+  unrecognizedValue: number;
   cogs: number | null;
   /** Finance Project #1, Phase D (Product Owner Approval, 2026-08-21) -
    * accrual-basis commission expense, reused as-is from the main report
@@ -58,6 +60,8 @@ function buildQuery(filters: DateRangeFilters): string {
 export default function ExpenseManagementSection({
   filters,
   revenue,
+  soldValue,
+  unrecognizedValue,
   cogs,
   partnerCompensation,
   staffCommission,
@@ -125,6 +129,8 @@ export default function ExpenseManagementSection({
 
       <FinancialSummaryPanel
         revenue={revenue}
+        soldValue={soldValue}
+        unrecognizedValue={unrecognizedValue}
         cogs={cogs}
         partnerCompensation={partnerCompensation}
         staffCommission={staffCommission}

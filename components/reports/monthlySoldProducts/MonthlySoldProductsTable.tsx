@@ -3,6 +3,8 @@
 import { Receipt } from "lucide-react";
 import { MonthlySoldProductRow } from "@/types/monthlySoldProducts";
 import { formatDate } from "@/lib/utils";
+import Badge from "@/components/ui/Badge";
+import { recognitionLabel } from "@/lib/monthlySoldProducts/monthlySoldProductsColumns";
 import {
   MonthlySoldProductsColumnKey,
   DEFAULT_VISIBLE_MONTHLY_SOLD_PRODUCTS_COLUMNS,
@@ -115,11 +117,16 @@ export default function MonthlySoldProductsTable({
                 Phương thức thanh toán
               </th>
             )}
+            {/* Always shown (not part of the column picker): whether a sold
+                line is recognized revenue must never be hideable. */}
+            <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Ghi nhận doanh thu
+            </th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.purchase_id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+            <tr key={r.line_key} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
               {show("sale_date") && (
                 <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">{formatDate(r.sale_date)}</td>
               )}
@@ -168,6 +175,9 @@ export default function MonthlySoldProductsTable({
               {show("payment_methods") && (
                 <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">{r.payment_methods || "—"}</td>
               )}
+              <td className="px-4 py-3.5 text-sm whitespace-nowrap" data-testid="monthly-sold-products-recognition-cell">
+                <Badge variant={r.recognition === "recognized" ? "success" : "warning"}>{recognitionLabel(r)}</Badge>
+              </td>
             </tr>
           ))}
         </tbody>
