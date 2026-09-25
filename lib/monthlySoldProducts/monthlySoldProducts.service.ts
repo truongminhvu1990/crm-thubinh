@@ -1,5 +1,6 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import {
+  MONTHLY_SOLD_PRODUCTS_PAGE_SIZE,
   MonthlySoldProductsFilters,
   MonthlySoldProductRow,
   MonthlySoldProductsSummary,
@@ -40,107 +41,107 @@ export async function getMonthlySoldProductsPage(
   client?: SupabaseClient,
   staff?: Staff | null
 ): Promise<{ rows: MonthlySoldProductRow[]; totalCount: number }> {
-  const { rows, totalCount } = await repo.getMonthlySoldProductsPage(filters, client, staff);
-  const permitted = await canViewCostAndProfit(staff, client);
+  const lines = await repo.getSoldLines(filters, client, staff);
+  const permitted = await canViewCostAndProfit(staff);
+  const from = (filters.page - 1) * MONTHLY_SOLD_PRODUCTS_PAGE_SIZE;
+  const rows: MonthlySoldProductRow[] = lines.slice(from, from + MONTHLY_SOLD_PRODUCTS_PAGE_SIZE).map(toRow);
   const guardedRows = permitted ? rows : rows.map((r) => ({ ...r, gross_profit: null }));
-  return { rows: guardedRows, totalCount };
+  return { rows: guardedRows, totalCount: lines.length };
 }
 
-/** Summary, computed over every currently-filtered row (not just the
- * visible page). Total Revenue applies BR-001/BR-002 Revenue Recognition
- * (LOCKED) via the sales_ledger view's own `is_revenue_recognized` column -
- * the same rule Sales Ledger's summary already applies, reused here rather
- * than redefined. Total Orders groups rows by their linked Order
- * (order_item_id -> order_items.order_id) where one exists; a row with no
- * linked Order (manual/historical entry) is counted as its own single-item
- * "order," since it represents one standalone sale with no Order to group it
- * under - unchanged from this report's pre-existing Average Order Value
- * denominator logic. Total Customers is a distinct count over the same
- * filtered set.
+/** Strips the repository-only fields (cost/filter inputs) from a SoldLine. */
+function toRow(line: repo.SoldLine): MonthlySoldProductRow {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { cost_price, salesperson_id, sales_owner, ...row } = line;
+  return row;
+}
+
+/** Summary, computed over every currently-filtered sold line (not just the
+ * visible page). Revenue & Sales Reporting Unification (Product Owner
+ * decision): SOLD VALUE = RECOGNIZED + UNRECOGNIZED, exactly.
  *
- * Profit/Loss = Total Revenue − Product Cost − Partner Compensation −
- * Staff Commission − Operating Expenses (Finance Project #1, Phase D,
- * Product Owner Approval 2026-08-21 — extends the original 2026-07-28
- * "Report Calculation," which never subtracted commission). Both
- * commission sources are accrual-basis (lib/reports/commissionExpense.ts:
- * counted once earned/confirmed, independent of Paid/Unpaid — Paid state
- * only affects payable/cash-flow reporting elsewhere, never this figure)
- * and scoped to the SAME order_id/purchase_id set as this function's own
- * recognized Revenue rows, so an expense is never deducted for a sale this
- * report doesn't also count as Revenue. Partner Compensation and Staff
- * Commission remain two separate systems, queried independently — no
- * schema merge, no new ledger; this is a reporting-layer aggregation only.
- * Product Cost sums
- * products.cost_price only for revenue-recognized rows (mirrors Total
- * Revenue's own gate - subtracting cost for a sale whose revenue wasn't
- * counted would corrupt the figure) and only where cost_price is known
- * (unknown cost contributes 0, same "if available" treatment as this
- * report's own Gross Profit column). Operating Expenses is the period's
- * total from the new Expense Management module, filtered by date range only
- * (no salesperson/category/customer dimension - it's a period-level cost).
- * Profit Margin (%) = Profit/Loss ÷ Total Revenue × 100. `cogs` is this same
- * `productCost` value, exposed as its own field (Financial Summary
- * enhancement, Product Owner Decision, 2026-07-28) - computed once here and
- * reused for both `cogs` and the `profitLoss` formula, never recomputed
- * twice.
+ *  - Sold scope, and the recognized/unrecognized split of a line, come from
+ *    the repository (getSoldLines), which applies the shared definitions in
+ *    lib/reports/revenueDefinition.ts - isOrderRecognized is BR-001 (LOCKED:
+ *    Completed + Paid). Legacy no-Order entries stay recognized by BR-002
+ *    (LOCKED), so `recognizedRevenue` keeps the same BR-001 + BR-002
+ *    semantics as before and as the Dashboard's "Doanh thu đã ghi nhận".
+ *    Sold scope is narrower than the Dashboard's "Tổng giá trị đơn hàng"
+ *    (Completed, or Reserved with a deposit - not Draft / Reserved-unpaid),
+ *    so soldValue is intentionally NOT that figure.
+ *  - unrecognizedValue is soldValue - recognizedRevenue, so the identity
+ *    cannot drift.
+ *  - Total Orders groups lines by Order; a legacy entry with no Order is
+ *    counted as its own single-item "order" (unchanged from this report's
+ *    pre-existing behavior). recognizedOrders/unrecognizedOrders split that
+ *    same count. Total Customers is a distinct count over the filtered set.
+ *
+ * Profit/Loss = recognizedRevenue - Product Cost - Partner Compensation -
+ * Staff Commission - Operating Expenses (Finance Project #1, Phase D, Product
+ * Owner Approval 2026-08-21). It is deliberately still computed on
+ * RECOGNIZED revenue only: cost and commission are gated to recognized lines
+ * (never deduct an expense for a sale whose revenue is not recognized), and
+ * both commission sources stay accrual-basis and scoped to the recognized
+ * order/purchase set (lib/reports/commissionExpense.ts). Operating Expenses
+ * is the period's total from the Expense Management module, by date range
+ * only. Profit Margin (%) = Profit/Loss / recognizedRevenue x 100. `cogs` is
+ * the same productCost value, exposed as its own field.
  *
  * cogs/profitLoss/profitMargin are gated to the same Owner/Manager-only
- * visibility this report's Gross Profit column already uses
- * (canViewCostAndProfit) - all three are cost-derived figures, so this
- * reuses that existing rule rather than inventing a new one. Total Revenue/
- * Customers/Orders/Operating Expenses stay visible to everyone, unchanged. */
+ * visibility this report's Gross Profit column uses (canViewCostAndProfit).
+ * The sold/recognized/unrecognized figures and counts stay visible to everyone
+ * with reports.view. */
 export async function getMonthlySoldProductsSummary(
   filters: MonthlySoldProductsFilters,
   client?: SupabaseClient,
   staff?: Staff | null
 ): Promise<MonthlySoldProductsSummary> {
-  const { source, derivedByPurchaseId } = await repo.getMonthlySoldProductsAggregateRows(filters, client, staff);
+  const lines = await repo.getSoldLines(filters, client, staff);
 
-  const totalRevenue = source.reduce(
-    (sum, r) => sum + (r.is_revenue_recognized ? Number(r.sale_amount) || 0 : 0),
-    0
-  );
-
-  const totalCustomers = new Set(source.map((r) => r.customer_id)).size;
-
-  const distinctOrderIds = new Set<string>();
-  let singletonCount = 0;
-  for (const r of source) {
-    const orderId = derivedByPurchaseId.get(r.purchase_id)?.order_id ?? null;
-    if (orderId) distinctOrderIds.add(orderId);
-    else singletonCount += 1;
+  let recognizedRevenue = 0;
+  let legacyRecognizedValue = 0;
+  let unrecognizedValue = 0;
+  for (const l of lines) {
+    if (l.recognition === "recognized") {
+      recognizedRevenue += l.final_sale_price;
+      if (l.is_legacy) legacyRecognizedValue += l.final_sale_price;
+    } else unrecognizedValue += l.final_sale_price;
   }
-  const totalOrders = distinctOrderIds.size + singletonCount;
+  const soldValue = recognizedRevenue + unrecognizedValue;
 
-  const productCost = source.reduce((sum, r) => {
-    if (!r.is_revenue_recognized) return sum;
-    const costPrice = derivedByPurchaseId.get(r.purchase_id)?.cost_price;
-    return sum + (costPrice ?? 0);
-  }, 0);
+  const totalCustomers = new Set(lines.map((l) => l.customer_id)).size;
+
+  const recognizedOrderIds = new Set<string>();
+  const unrecognizedOrderIds = new Set<string>();
+  let legacyCount = 0;
+  for (const l of lines) {
+    if (l.order_id === null) legacyCount += 1;
+    else if (l.recognition === "recognized") recognizedOrderIds.add(l.order_id);
+    else unrecognizedOrderIds.add(l.order_id);
+  }
+  const recognizedOrders = recognizedOrderIds.size + legacyCount;
+  const unrecognizedOrders = unrecognizedOrderIds.size;
+  const totalOrders = recognizedOrders + unrecognizedOrders;
+
+  const productCost = lines.reduce((sum, l) => (l.recognition === "recognized" ? sum + (l.cost_price ?? 0) : sum), 0);
 
   const operatingExpenses = await getOperatingExpensesTotal(
     { dateFrom: filters.dateFrom, dateTo: filters.dateTo, month: filters.month },
     client
   );
 
-  const permitted = await canViewCostAndProfit(staff, client);
+  const permitted = await canViewCostAndProfit(staff);
 
-  // Finance Project #1, Phase D — same recognized-revenue gate as
-  // productCost above (never deduct commission for a sale whose revenue
-  // wasn't counted), scoped to exactly these Orders/purchases so Partner
-  // Compensation/Staff Commission can never be pulled in from an
-  // unrelated date-range match. Skipped entirely (no DB round trip) for a
-  // viewer who can't see cost-derived figures anyway.
+  // Same recognized-revenue gate as productCost above, scoped to exactly
+  // these Orders/purchases so Partner Compensation/Staff Commission can
+  // never be pulled in from an unrelated date-range match. Skipped entirely
+  // (no DB round trip) for a viewer who can't see cost-derived figures.
   let partnerCompensation: number | null = null;
   let staffCommission: number | null = null;
   if (permitted) {
     const recognizedPurchaseIds: string[] = [];
-    const recognizedOrderIds = new Set<string>();
-    for (const r of source) {
-      if (!r.is_revenue_recognized) continue;
-      recognizedPurchaseIds.push(r.purchase_id);
-      const orderId = derivedByPurchaseId.get(r.purchase_id)?.order_id ?? null;
-      if (orderId) recognizedOrderIds.add(orderId);
+    for (const l of lines) {
+      if (l.recognition === "recognized" && l.purchase_id) recognizedPurchaseIds.push(l.purchase_id);
     }
     const commissionExpense = await getAccrualCommissionExpense(
       { orderIds: [...recognizedOrderIds], purchaseIds: recognizedPurchaseIds },
@@ -152,14 +153,21 @@ export async function getMonthlySoldProductsSummary(
 
   const cogs = permitted ? productCost : null;
   const profitLoss = permitted
-    ? totalRevenue - productCost - (partnerCompensation as number) - (staffCommission as number) - operatingExpenses
+    ? recognizedRevenue - productCost - (partnerCompensation as number) - (staffCommission as number) - operatingExpenses
     : null;
-  const profitMargin = permitted ? (totalRevenue > 0 ? ((profitLoss as number) / totalRevenue) * 100 : 0) : null;
+  const profitMargin = permitted ? (recognizedRevenue > 0 ? ((profitLoss as number) / recognizedRevenue) * 100 : 0) : null;
 
   return {
-    totalRevenue,
+    soldValue,
+    recognizedRevenue,
+    legacyRecognizedValue,
+    unrecognizedValue,
+    soldLines: lines.length,
     totalCustomers,
     totalOrders,
+    recognizedOrders,
+    unrecognizedOrders,
+    recognizedRatio: soldValue > 0 ? recognizedRevenue / soldValue : 0,
     operatingExpenses,
     cogs,
     partnerCompensation,

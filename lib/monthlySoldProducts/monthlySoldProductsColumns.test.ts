@@ -4,12 +4,19 @@ import {
   MONTHLY_SOLD_PRODUCTS_COLUMNS,
   DEFAULT_VISIBLE_MONTHLY_SOLD_PRODUCTS_COLUMNS,
   getAvailableMonthlySoldProductsColumns,
+  recognitionLabel,
 } from "./monthlySoldProductsColumns";
 import { MonthlySoldProductRow } from "@/types/monthlySoldProducts";
 
 function baseRow(overrides: Partial<MonthlySoldProductRow> = {}): MonthlySoldProductRow {
   return {
+    line_key: "p1",
     purchase_id: "p1",
+    order_id: "o1",
+    order_status: "Completed",
+    payment_status: "Paid",
+    recognition: "recognized",
+    is_legacy: false,
     sale_date: "2026-08-01",
     order_number: "000123",
     product_id: "prod1",
@@ -81,4 +88,17 @@ test("export: null Payment Details (no linked Order) export as empty string, not
     const col = MONTHLY_SOLD_PRODUCTS_COLUMNS.find((c) => c.key === key)!;
     assert.equal(col.exportValue(row), "");
   }
+});
+
+test("recognitionLabel: recognized, legacy-recognized, deposit and not-fully-paid lines are told apart", () => {
+  assert.equal(recognitionLabel(baseRow()), "Đã ghi nhận");
+  assert.equal(recognitionLabel(baseRow({ is_legacy: true, order_id: null, order_status: null, payment_status: null })), "Đã ghi nhận (dữ liệu cũ)");
+  assert.equal(
+    recognitionLabel(baseRow({ recognition: "unrecognized", order_status: "Reserved", payment_status: "PartiallyPaid" })),
+    "Chưa ghi nhận — đang cọc"
+  );
+  assert.equal(
+    recognitionLabel(baseRow({ recognition: "unrecognized", order_status: "Completed", payment_status: "PartiallyPaid" })),
+    "Chưa ghi nhận — chưa Paid đầy đủ"
+  );
 });

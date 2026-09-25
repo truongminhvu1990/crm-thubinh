@@ -1,195 +1,125 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
-import {
-  MonthlySoldProductsFilters,
-  MonthlySoldProductRow,
-  MonthlySoldProductsPage,
-  MONTHLY_SOLD_PRODUCTS_PAGE_SIZE,
-} from "@/types/monthlySoldProducts";
+import { MonthlySoldProductsFilters, MonthlySoldProductRow } from "@/types/monthlySoldProducts";
 import { Staff } from "@/types/staff";
 import { getCurrentStaff } from "@/lib/permission";
-import { applyDataScopeWithFallback } from "@/lib/permission/dataScope";
+import { applyDataScopeByName, applyDataScopeWithFallback } from "@/lib/permission/dataScope";
 import { deriveOrderPaymentSummary } from "@/lib/reports/orderPaymentSummary";
+import { isOrderRecognized, isSoldOrder } from "@/lib/reports/revenueDefinition";
 
-// Raw data access only, against the same read-only `sales_ledger` view
-// Sales Ledger reads (see supabase/migrations/20260723_sales_ledger_view.sql) -
-// no new view, no schema change. Order Number / Original Price / Discount /
-// Gross Profit aren't on that view, so they're resolved by a second,
-// batched enrichment pass (customer_purchases -> order_items -> orders,
-// and products for cost_price/Gross Profit only) - the same "fetch the
-// page, then batch-enrich" shape already used for Sales Ledger's own
-// product-image lookup (salesLedger.repository.ts's
-// getPrimaryImagesByProductIds).
+// Revenue & Sales Reporting Unification (Product Owner decision) - this
+// report is a SOLD PRODUCTS report, not a Recognized Revenue report. Its
+// rows are every product line of a "sold" Order (Completed with any Payment
+// Status, or Reserved with a deposit - see lib/reports/revenueDefinition.ts
+// isSoldOrder), dated by the Order's own `order_date` (the same date basis
+// as the Dashboard), plus legacy `customer_purchases` entries that have no
+// linked Order (manual/historical - BR-002, recognized by exception, dated
+// by their own sale_date). Each line carries whether it is recognized
+// revenue (BR-001: Completed + Paid) or sold-but-unrecognized, decided by
+// the same shared `isOrderRecognized` the Dashboard uses.
+//
+// Why Orders and not `sales_ledger` any more: customer_purchases (and so
+// sales_ledger) rows are only written when an Order is COMPLETED, so a
+// Reserved order with a deposit has no purchase row at all and could never
+// appear there. Reads are still plain table reads (orders, order_items,
+// customer_purchases, payments, products) - no new view, no schema change.
+// For Completed orders the frozen customer_purchases snapshot
+// (sale_price, salesperson) is used when present; a line with no snapshot
+// yet falls back to the order item's own line total
+// (snapshot_sale_price x quantity - discount, docs/03_ORDER_SPEC.md §7).
 
-interface SalesLedgerViewRow {
-  purchase_id: string;
+/** One report row plus the fields only summary/cost logic needs. */
+export interface SoldLine extends MonthlySoldProductRow {
+  cost_price: number | null;
+  /** Salesperson filter inputs: salesperson_id lives only on the
+   * customer_purchases snapshot; a line without one matches by the Order's
+   * sales_owner (text) instead. */
+  salesperson_id: string | null;
+  sales_owner: string | null;
+}
+
+interface CustomerRelation {
+  full_name: string;
+  customer_code: string;
+}
+
+interface ProductRelation {
+  product_code: string | null;
+  product_name: string | null;
+  category: string | null;
+  jade_type: string | null;
+  cost_price: number | null;
+}
+
+interface OrderRow {
+  id: string;
+  order_number: string;
+  order_status: string;
+  payment_status: string;
+  order_date: string;
+  total_amount: number;
+  customer_id: string;
+  sales_owner: string | null;
+  customer: CustomerRelation | CustomerRelation[] | null;
+}
+
+interface OrderItemRow {
+  id: string;
+  order_id: string;
+  product_id: string | null;
+  snapshot_sale_price: number;
+  discount: number;
+  quantity: number;
+  product: ProductRelation | ProductRelation[] | null;
+}
+
+interface PurchaseSnapshotRow {
+  id: string;
+  order_item_id: string;
+  sale_price: number;
+  salesperson: string | null;
+  salesperson_id: string | null;
+}
+
+interface LegacyPurchaseRow {
+  id: string;
   customer_id: string;
   product_id: string | null;
-  sale_amount: number;
+  sale_price: number;
   sale_date: string;
   salesperson: string | null;
   salesperson_id: string | null;
-  customer_name: string;
-  customer_code: string;
-  product_code: string | null;
-  product_name: string | null;
-  product_category: string | null;
+  customer: CustomerRelation | CustomerRelation[] | null;
+  product: ProductRelation | ProductRelation[] | null;
 }
 
-export interface AggregateSourceRow {
-  purchase_id: string;
-  product_id: string | null;
-  customer_id: string;
-  sale_amount: number;
-  is_revenue_recognized: boolean;
+function first<T>(value: T | T[] | null): T | null {
+  if (!value) return null;
+  return Array.isArray(value) ? value[0] ?? null : value;
 }
 
-interface DerivedFields {
-  order_id: string | null;
-  order_number: string | null;
-  original_price: number | null;
-  discount: number | null;
-  cost_price: number | null;
-  /** Column Customization (2026-08-12) - Jade Type, resolved via this same
-   * products join (see types/monthlySoldProducts.ts's MonthlySoldProductRow
-   * doc comment). */
-  jade_type: string | null;
-  /** Payment Details (2026-08-14) - see types/monthlySoldProducts.ts's
-   * MonthlySoldProductRow doc comment: Order-level, null when there's no
-   * linked Order. */
-  amount_paid: number | null;
-  remaining_balance: number | null;
-  payment_methods: string | null;
-}
+const IN_CHUNK = 200;
 
-interface OrderRelation {
-  order_number: string;
-  total_amount: number;
-}
-
-interface OrderItemRelation {
-  id: string;
-  order_id: string;
-  snapshot_sale_price: number;
-  discount: number;
-  orders: OrderRelation | OrderRelation[] | null;
-}
-
-function firstOrder(orders: OrderItemRelation["orders"]): OrderRelation | null {
-  if (!orders) return null;
-  return Array.isArray(orders) ? orders[0] ?? null : orders;
-}
-
-/** Batched, keyed by purchase_id - shared by both the paginated page (full
- * display row) and the unpaginated summary aggregate, so the two can never
- * disagree on how Order Number / Original Price / Discount / Gross Profit
- * are derived. Order-linked purchases (order_item_id set) use the order
- * item's own snapshot_sale_price/discount (the values actually recorded at
- * sale time). Purchases with no linked Order (manual/historical entries)
- * have no stored historical snapshot - Product Owner Review (2026-07-27,
- * Fix 1): this report must show historical sales data only, so those rows
- * get `null` ("-") for Original Price/Discount rather than the product's
- * current catalog price, which would misrepresent a historical figure.
- * `products` is still read for `cost_price` (Gross Profit), which is a
- * current-cost-basis calculation, not a historical-price display field -
- * unaffected by this rule. */
-async function getDerivedFieldsByPurchaseId(
-  rows: { purchase_id: string; product_id: string | null }[],
-  client: SupabaseClient
-): Promise<Map<string, DerivedFields>> {
-  const result = new Map<string, DerivedFields>();
-  if (rows.length === 0) return result;
-
-  const purchaseIds = rows.map((r) => r.purchase_id);
-  const { data: links, error: linkError } = await client
-    .from("customer_purchases")
-    .select("id, order_item_id")
-    .in("id", purchaseIds);
-  if (linkError) console.error("Error fetching order links for monthly sold products:", linkError);
-
-  const orderItemIdByPurchaseId = new Map<string, string>();
-  for (const l of (links as { id: string; order_item_id: string | null }[]) || []) {
-    if (l.order_item_id) orderItemIdByPurchaseId.set(l.id, l.order_item_id);
-  }
-
-  const orderItemIds = [...orderItemIdByPurchaseId.values()];
-  const orderItemById = new Map<
-    string,
-    { order_id: string; order_number: string | null; total_amount: number | null; snapshot_sale_price: number; discount: number }
-  >();
-  if (orderItemIds.length > 0) {
-    const { data: items, error: itemError } = await client
-      .from("order_items")
-      .select("id, order_id, snapshot_sale_price, discount, orders(order_number, total_amount)")
-      .in("id", orderItemIds);
-    if (itemError) console.error("Error fetching order items for monthly sold products:", itemError);
-    for (const item of (items as unknown as OrderItemRelation[]) || []) {
-      const order = firstOrder(item.orders);
-      orderItemById.set(item.id, {
-        order_id: item.order_id,
-        order_number: order?.order_number ?? null,
-        total_amount: order ? Number(order.total_amount) || 0 : null,
-        snapshot_sale_price: Number(item.snapshot_sale_price) || 0,
-        discount: Number(item.discount) || 0,
-      });
+async function selectIn<T>(
+  client: SupabaseClient,
+  table: string,
+  columns: string,
+  column: string,
+  values: string[]
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let i = 0; i < values.length; i += IN_CHUNK) {
+    const { data, error } = await client
+      .from(table)
+      .select(columns)
+      .in(column, values.slice(i, i + IN_CHUNK));
+    if (error) {
+      console.error(`Error fetching ${table} for monthly sold products:`, error);
+      continue;
     }
+    rows.push(...((data as unknown as T[]) || []));
   }
-
-  // Payment Details (2026-08-14) - batched, keyed by order_id (payments are
-  // recorded against the Order, not the order_item), same "fetch once,
-  // group in memory" shape the products join below already uses for
-  // cost_price/jade_type.
-  const orderIds = [...new Set([...orderItemById.values()].map((oi) => oi.order_id))];
-  const paymentsByOrderId = new Map<string, { amount: number; payment_method: string }[]>();
-  if (orderIds.length > 0) {
-    const { data: paymentRows, error: paymentError } = await client
-      .from("payments")
-      .select("order_id, amount, payment_method")
-      .in("order_id", orderIds);
-    if (paymentError) console.error("Error fetching payments for monthly sold products:", paymentError);
-    for (const p of (paymentRows as { order_id: string; amount: number; payment_method: string }[]) || []) {
-      const list = paymentsByOrderId.get(p.order_id) ?? [];
-      list.push({ amount: Number(p.amount) || 0, payment_method: p.payment_method });
-      paymentsByOrderId.set(p.order_id, list);
-    }
-  }
-
-  const productIds = [...new Set(rows.map((r) => r.product_id).filter((id): id is string => !!id))];
-  const productById = new Map<string, { cost_price: number | null; jade_type: string | null }>();
-  if (productIds.length > 0) {
-    const { data: products, error: productError } = await client
-      .from("products")
-      .select("id, cost_price, jade_type")
-      .in("id", productIds);
-    if (productError) console.error("Error fetching products for monthly sold products:", productError);
-    for (const p of (products as { id: string; cost_price: number | null; jade_type: string | null }[]) || []) {
-      productById.set(p.id, { cost_price: p.cost_price, jade_type: p.jade_type });
-    }
-  }
-
-  for (const r of rows) {
-    const orderItemId = orderItemIdByPurchaseId.get(r.purchase_id);
-    const orderItem = orderItemId ? orderItemById.get(orderItemId) : undefined;
-    const product = r.product_id ? productById.get(r.product_id) : undefined;
-
-    const paymentSummary =
-      orderItem && orderItem.total_amount !== null
-        ? deriveOrderPaymentSummary(orderItem.total_amount, paymentsByOrderId.get(orderItem.order_id) ?? [])
-        : null;
-
-    result.set(r.purchase_id, {
-      order_id: orderItem?.order_id ?? null,
-      order_number: orderItem?.order_number ?? null,
-      original_price: orderItem ? orderItem.snapshot_sale_price : null,
-      discount: orderItem ? orderItem.discount : null,
-      cost_price: product?.cost_price ?? null,
-      jade_type: product?.jade_type ?? null,
-      amount_paid: paymentSummary?.amountPaid ?? null,
-      remaining_balance: paymentSummary?.remainingBalance ?? null,
-      payment_methods: paymentSummary?.paymentMethods ?? null,
-    });
-  }
-  return result;
+  return rows;
 }
 
 /** Month (YYYY-MM) shortcut - resolves to the same [start, end) shape as
@@ -203,122 +133,246 @@ function resolveMonthRange(month: string): { start: string; end: string } {
   return { start, end };
 }
 
-// Returns `Promise<{ query }>`, not `Promise<Q>` - `query` here is a Supabase
-// PostgrestFilterBuilder, which is itself thenable. An async function that
-// `return`s a thenable doesn't wrap it as the resolved value; JS adopts the
-// thenable's own resolution instead, firing the query early and collapsing
-// the awaited result to `{data, error, count}` rather than the builder -
-// exactly the trap lib/permission/dataScope.ts's applyDataScope() comment
-// documents (and wraps around) for the same reason. Callers must unwrap
-// `.query`.
-async function applyFilters(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  query: any,
-  filters: MonthlySoldProductsFilters,
-  staff?: Staff | null,
-  client?: SupabaseClient
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): Promise<{ query: any }> {
+function resolveRange(filters: MonthlySoldProductsFilters): { from?: string; to?: string } {
   const monthRange = filters.month ? resolveMonthRange(filters.month) : null;
-  const dateFrom = monthRange?.start ?? filters.dateFrom;
-  const dateTo = monthRange?.end ?? filters.dateTo;
-
-  if (dateFrom) query = query.gte("sale_date", dateFrom);
-  if (dateTo) query = query.lt("sale_date", dateTo);
-
-  if (filters.customer) {
-    const term = filters.customer.replace(/[%,]/g, "");
-    query = query.or(`customer_name.ilike.%${term}%,customer_code.ilike.%${term}%`);
-  }
-  if (filters.salespersonId) query = query.eq("salesperson_id", filters.salespersonId);
-  if (filters.productCategory) query = query.eq("product_category", filters.productCategory);
-
-  // Data Scope (same "revenue" resource / salesperson_id-with-text-fallback
-  // mechanism Sales Ledger already applies) - this report exposes the same
-  // per-sale revenue detail, so it gets the same enforcement, not a second
-  // unscoped surface.
-  const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
-  if (resolvedStaff) {
-    query = (await applyDataScopeWithFallback(query, resolvedStaff, "revenue", "salesperson_id", "salesperson", client)).query;
-  }
-
-  return { query };
+  return { from: monthRange?.start ?? filters.dateFrom, to: monthRange?.end ?? filters.dateTo };
 }
 
-const PAGE_COLUMNS =
-  "purchase_id, customer_id, product_id, sale_amount, sale_date, salesperson, salesperson_id, customer_name, customer_code, product_code, product_name, product_category";
+const PRODUCT_COLUMNS = "product:products(product_code, product_name, category, jade_type, cost_price)";
 
-export async function getMonthlySoldProductsPage(
-  filters: MonthlySoldProductsFilters,
-  client: SupabaseClient = supabase,
-  staff?: Staff | null
-): Promise<MonthlySoldProductsPage> {
-  let query = client.from("sales_ledger").select(PAGE_COLUMNS, { count: "exact" });
-  query = (await applyFilters(query, filters, staff, client)).query;
-  query = query.order("sale_date", { ascending: false });
+async function fetchOrderLines(
+  range: { from?: string; to?: string },
+  client: SupabaseClient,
+  staff: Staff | null
+): Promise<SoldLine[]> {
+  // Sold scope is decided by the shared isSoldOrder() below (using real
+  // payment RECORDS, not payment_status); the query only narrows to the two
+  // statuses that can ever qualify.
+  let query = client
+    .from("orders")
+    .select(
+      "id, order_number, order_status, payment_status, order_date, total_amount, customer_id, sales_owner, customer:customers(full_name, customer_code)"
+    )
+    .in("order_status", ["Completed", "Reserved"]);
+  if (range.from) query = query.gte("order_date", range.from);
+  if (range.to) query = query.lt("order_date", range.to);
 
-  const from = (filters.page - 1) * MONTHLY_SOLD_PRODUCTS_PAGE_SIZE;
-  const to = from + MONTHLY_SOLD_PRODUCTS_PAGE_SIZE - 1;
-  query = query.range(from, to);
-
-  const { data, error, count } = await query;
-  if (error) {
-    console.error("Error fetching monthly sold products page:", error);
-    return { rows: [], totalCount: 0 };
-  }
-
-  const viewRows = (data as SalesLedgerViewRow[]) || [];
-  const derivedByPurchaseId = await getDerivedFieldsByPurchaseId(viewRows, client);
-
-  const rows: MonthlySoldProductRow[] = viewRows.map((r) => {
-    const derived = derivedByPurchaseId.get(r.purchase_id);
-    return {
-      purchase_id: r.purchase_id,
-      sale_date: r.sale_date,
-      order_number: derived?.order_number ?? null,
-      product_id: r.product_id,
-      product_code: r.product_code,
-      product_name: r.product_name,
-      product_category: r.product_category,
-      jade_type: derived?.jade_type ?? null,
-      customer_id: r.customer_id,
-      customer_name: r.customer_name,
-      customer_code: r.customer_code,
-      salesperson: r.salesperson,
-      original_price: derived?.original_price ?? null,
-      discount: derived?.discount ?? null,
-      final_sale_price: Number(r.sale_amount) || 0,
-      gross_profit:
-        derived?.cost_price !== null && derived?.cost_price !== undefined
-          ? (Number(r.sale_amount) || 0) - derived.cost_price
-          : null,
-      amount_paid: derived?.amount_paid ?? null,
-      remaining_balance: derived?.remaining_balance ?? null,
-      payment_methods: derived?.payment_methods ?? null,
-    };
-  });
-
-  return { rows, totalCount: count ?? 0 };
-}
-
-/** Every filtered row's sale_amount/is_revenue_recognized plus enough to
- * derive discount/order grouping - backs the Summary cards, which must
- * reflect the whole filtered set, not just the current page. */
-export async function getMonthlySoldProductsAggregateRows(
-  filters: MonthlySoldProductsFilters,
-  client: SupabaseClient = supabase,
-  staff?: Staff | null
-): Promise<{ source: AggregateSourceRow[]; derivedByPurchaseId: Map<string, DerivedFields> }> {
-  let query = client.from("sales_ledger").select("purchase_id, product_id, customer_id, sale_amount, is_revenue_recognized");
-  query = (await applyFilters(query, filters, staff, client)).query;
+  // Data Scope - same "orders" resource / sales_owner-by-name mechanism
+  // /orders and the Dashboard's Order Value cards already use.
+  if (staff) query = (await applyDataScopeByName(query, staff, "orders", "sales_owner", client)).query;
 
   const { data, error } = await query;
   if (error) {
-    console.error("Error fetching monthly sold products summary rows:", error);
-    return { source: [], derivedByPurchaseId: new Map() };
+    console.error("Error fetching sold orders for monthly sold products:", error);
+    return [];
   }
 
-  const source = (data as AggregateSourceRow[]) || [];
-  const derivedByPurchaseId = await getDerivedFieldsByPurchaseId(source, client);
-  return { source, derivedByPurchaseId };
+  const candidates = (data as unknown as OrderRow[]) || [];
+  if (candidates.length === 0) return [];
+
+  // "Reserved counts as Sold only with at least one ACTUAL payment": decided
+  // from the payments table (a row keyed to this order_id; amount is
+  // CHECK > 0), never from orders.payment_status, which is derived and can
+  // read "Paid" for a zero-total order that has no payment at all. Payments
+  // are recorded against the Order, not the item (see orderPaymentSummary.ts)
+  // - fetched once for every candidate Order, grouped in memory, and reused
+  // for the Payment Details columns below.
+  const paymentRows = await selectIn<{ order_id: string; amount: number; payment_method: string }>(
+    client,
+    "payments",
+    "order_id, amount, payment_method",
+    "order_id",
+    candidates.map((o) => o.id)
+  );
+  const paymentsByOrderId = new Map<string, { amount: number; payment_method: string }[]>();
+  for (const p of paymentRows) {
+    const list = paymentsByOrderId.get(p.order_id) ?? [];
+    list.push({ amount: Number(p.amount) || 0, payment_method: p.payment_method });
+    paymentsByOrderId.set(p.order_id, list);
+  }
+
+  const orders = candidates.filter((o) => isSoldOrder(o, paymentsByOrderId.get(o.id)?.length ?? 0));
+  if (orders.length === 0) return [];
+  const orderById = new Map(orders.map((o) => [o.id, o]));
+  const orderIds = orders.map((o) => o.id);
+
+  const items = await selectIn<OrderItemRow>(
+    client,
+    "order_items",
+    `id, order_id, product_id, snapshot_sale_price, discount, quantity, ${PRODUCT_COLUMNS}`,
+    "order_id",
+    orderIds
+  );
+  const itemIds = items.map((i) => i.id);
+
+  const snapshots = itemIds.length
+    ? await selectIn<PurchaseSnapshotRow>(
+        client,
+        "customer_purchases",
+        "id, order_item_id, sale_price, salesperson, salesperson_id",
+        "order_item_id",
+        itemIds
+      )
+    : [];
+  const snapshotByItemId = new Map(snapshots.map((s) => [s.order_item_id, s]));
+
+  const lines: SoldLine[] = [];
+  for (const item of items) {
+    const order = orderById.get(item.order_id);
+    if (!order) continue;
+    const product = first(item.product);
+    const customer = first(order.customer);
+    const snapshot = snapshotByItemId.get(item.id);
+    const lineTotal = (Number(item.snapshot_sale_price) || 0) * (Number(item.quantity) || 1) - (Number(item.discount) || 0);
+    const amount = snapshot ? Number(snapshot.sale_price) || 0 : lineTotal;
+    const paymentSummary = deriveOrderPaymentSummary(Number(order.total_amount) || 0, paymentsByOrderId.get(order.id) ?? []);
+    const costPrice = product?.cost_price ?? null;
+
+    lines.push({
+      line_key: item.id,
+      purchase_id: snapshot?.id ?? null,
+      order_id: order.id,
+      order_status: order.order_status,
+      payment_status: order.payment_status,
+      recognition: isOrderRecognized(order) ? "recognized" : "unrecognized",
+      is_legacy: false,
+      sale_date: order.order_date,
+      order_number: order.order_number,
+      product_id: item.product_id,
+      product_code: product?.product_code ?? null,
+      product_name: product?.product_name ?? null,
+      product_category: product?.category ?? null,
+      jade_type: product?.jade_type ?? null,
+      customer_id: order.customer_id,
+      customer_name: customer?.full_name ?? "",
+      customer_code: customer?.customer_code ?? "",
+      salesperson: snapshot?.salesperson ?? order.sales_owner,
+      original_price: Number(item.snapshot_sale_price) || 0,
+      discount: Number(item.discount) || 0,
+      final_sale_price: amount,
+      gross_profit: costPrice !== null ? amount - costPrice : null,
+      amount_paid: paymentSummary.amountPaid,
+      remaining_balance: paymentSummary.remainingBalance,
+      payment_methods: paymentSummary.paymentMethods,
+      cost_price: costPrice,
+      salesperson_id: snapshot?.salesperson_id ?? null,
+      sales_owner: order.sales_owner,
+    });
+  }
+  return lines;
 }
+
+/** Legacy entries: customer_purchases with no linked order_item (manual /
+ * pre-Orders sales). BR-002 (LOCKED) treats them as recognized by
+ * exception, and they were already listed by this report - they stay,
+ * dated by their own sale_date, since they have no Order and so no
+ * order_date. */
+async function fetchLegacyLines(
+  range: { from?: string; to?: string },
+  client: SupabaseClient,
+  staff: Staff | null
+): Promise<SoldLine[]> {
+  let query = client
+    .from("customer_purchases")
+    .select(
+      `id, customer_id, product_id, sale_price, sale_date, salesperson, salesperson_id, customer:customers(full_name, customer_code), ${PRODUCT_COLUMNS}`
+    )
+    .is("order_item_id", null);
+  if (range.from) query = query.gte("sale_date", range.from);
+  if (range.to) query = query.lt("sale_date", range.to);
+
+  // Data Scope - same "revenue" resource / salesperson_id-with-text-fallback
+  // mechanism Sales Ledger and the Dashboard's revenue widget apply.
+  if (staff) query = (await applyDataScopeWithFallback(query, staff, "revenue", "salesperson_id", "salesperson", client)).query;
+
+  const { data, error } = await query;
+  if (error) {
+    console.error("Error fetching legacy purchases for monthly sold products:", error);
+    return [];
+  }
+
+  return ((data as unknown as LegacyPurchaseRow[]) || []).map((r) => {
+    const product = first(r.product);
+    const customer = first(r.customer);
+    const amount = Number(r.sale_price) || 0;
+    const costPrice = product?.cost_price ?? null;
+    return {
+      line_key: r.id,
+      purchase_id: r.id,
+      order_id: null,
+      order_status: null,
+      payment_status: null,
+      recognition: "recognized" as const,
+      is_legacy: true,
+      sale_date: r.sale_date,
+      order_number: null,
+      product_id: r.product_id,
+      product_code: product?.product_code ?? null,
+      product_name: product?.product_name ?? null,
+      product_category: product?.category ?? null,
+      jade_type: product?.jade_type ?? null,
+      customer_id: r.customer_id,
+      customer_name: customer?.full_name ?? "",
+      customer_code: customer?.customer_code ?? "",
+      salesperson: r.salesperson,
+      original_price: null,
+      discount: null,
+      final_sale_price: amount,
+      gross_profit: costPrice !== null ? amount - costPrice : null,
+      amount_paid: null,
+      remaining_balance: null,
+      payment_methods: null,
+      cost_price: costPrice,
+      salesperson_id: r.salesperson_id,
+      sales_owner: null,
+    };
+  });
+}
+
+/** Every sold line in range (Order lines + legacy entries), filtered and
+ * newest first. Both the paginated page and the unpaginated Summary derive
+ * from this single list, so the rows and the Summary cards can never
+ * disagree on scope or on the recognized/unrecognized split. */
+export async function getSoldLines(
+  filters: MonthlySoldProductsFilters,
+  client: SupabaseClient = supabase,
+  staff?: Staff | null
+): Promise<SoldLine[]> {
+  const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
+  const range = resolveRange(filters);
+
+  const [orderLines, legacyLines] = await Promise.all([
+    fetchOrderLines(range, client, resolvedStaff),
+    fetchLegacyLines(range, client, resolvedStaff),
+  ]);
+  let lines = [...orderLines, ...legacyLines];
+
+  if (filters.customer) {
+    const term = filters.customer.replace(/[%,]/g, "").toLowerCase();
+    lines = lines.filter(
+      (l) => l.customer_name.toLowerCase().includes(term) || l.customer_code.toLowerCase().includes(term)
+    );
+  }
+  if (filters.productCategory) lines = lines.filter((l) => l.product_category === filters.productCategory);
+  if (filters.salespersonId) {
+    // salesperson_id is only stored on the purchase snapshot; a line with no
+    // snapshot yet matches by the Order's sales_owner name instead - same
+    // "id wins, name as fallback" rule as staff.service.ts's matchesStaff().
+    const { data: staffRow } = await client.from("staff").select("full_name").eq("id", filters.salespersonId).maybeSingle();
+    const name = ((staffRow as { full_name?: string } | null)?.full_name ?? "").trim().toLowerCase();
+    lines = lines.filter((l) => {
+      if (l.salesperson_id) return l.salesperson_id === filters.salespersonId;
+      const owner = (l.sales_owner ?? l.salesperson ?? "").trim().toLowerCase();
+      return name !== "" && owner === name;
+    });
+  }
+
+  return lines.sort((a, b) => {
+    if (a.sale_date !== b.sale_date) return a.sale_date < b.sale_date ? 1 : -1;
+    const an = a.order_number ?? "";
+    const bn = b.order_number ?? "";
+    if (an !== bn) return an < bn ? 1 : -1;
+    return a.line_key < b.line_key ? -1 : 1;
+  });
+}
+

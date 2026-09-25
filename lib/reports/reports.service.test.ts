@@ -106,6 +106,20 @@ test("getPurchaseReportData: legacy row with no linked order always counts (BR-0
   assert.equal(result.totalRevenue, 1_000_000);
 });
 
+test("getPurchaseReportData: legacyRecognizedRevenue = only the BR-002 (no linked order) part of totalRevenue", async () => {
+  const { getPurchaseReportData } = await import("./reports.service");
+  const client = fakeClient([
+    row({ order_status: "Completed", payment_status: "Paid" }, { sale_price: 300, order_item_id: "oi-1" }),
+    row({ order_status: "Completed", payment_status: "Partially Paid" }, { sale_price: 50, order_item_id: "oi-2" }),
+    row(null, { sale_price: 25 }),
+  ]);
+
+  const result = await getPurchaseReportData(null, client, null);
+
+  assert.equal(result.totalRevenue, 325);
+  assert.equal(result.legacyRecognizedRevenue, 25, "surfaced separately, never dropped");
+});
+
 test("getPurchaseReportData: mixed rows sum only the recognized subset, transactions count every row", async () => {
   const { getPurchaseReportData } = await import("./reports.service");
   const client = fakeClient([

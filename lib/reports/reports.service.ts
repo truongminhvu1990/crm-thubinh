@@ -65,6 +65,13 @@ export interface MonthlyRevenueRow {
 
 export interface PurchaseReportData {
   totalRevenue: number;
+  /** Revenue & Sales Reporting Unification - the part of `totalRevenue`
+   * that comes from BR-002 legacy customer_purchases rows with NO linked
+   * Order (recognized by exception). The Dashboard's order-based
+   * Total/Recognized/Unrecognized split (getOrderValueSummary) cannot see
+   * these, so they are surfaced separately rather than silently dropped -
+   * historical recognition is never changed to make a report tidier. */
+  legacyRecognizedRevenue: number;
   /** Simple Profit Calculation Package, Part 3 - Σ cost_price of each sold
    * item's product, looked up from the products table (existing values
    * only, no new column, nothing persisted). 0 for rows whose product no
@@ -265,6 +272,7 @@ export async function getPurchaseReportData(
 
   const empty: PurchaseReportData = {
     totalRevenue: 0,
+    legacyRecognizedRevenue: 0,
     totalCost: 0,
     totalProfit: 0,
     bySource: [],
@@ -306,6 +314,7 @@ export async function getPurchaseReportData(
   const customerMap = new Map<string, { name: string; count: number; revenue: number }>();
   const monthMap = new Map<string, number>();
   let totalRevenue = 0;
+  let legacyRecognizedRevenue = 0;
   let totalCost = 0;
 
   for (const row of rows) {
@@ -314,6 +323,7 @@ export async function getPurchaseReportData(
     const recognized = isRevenueRecognized(row);
     const price = recognized ? Number(row.sale_price) || 0 : 0;
     totalRevenue += price;
+    if (!row.order_item_id) legacyRecognizedRevenue += price;
     if (recognized && row.product_id) totalCost += costByProductId.get(row.product_id) ?? 0;
 
     const sourceKey = row.source || UNSPECIFIED;
@@ -343,6 +353,7 @@ export async function getPurchaseReportData(
 
   return {
     totalRevenue,
+    legacyRecognizedRevenue,
     totalCost,
     totalProfit: totalRevenue - totalCost,
     bySource: Array.from(sourceMap, ([source, v]) => ({ source, ...v })).sort((a, b) => b.revenue - a.revenue),

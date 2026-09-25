@@ -144,6 +144,7 @@ export default function Dashboard() {
   // + Paid) is unchanged.
   const monthRevenue = purchaseData?.totalRevenue ?? 0;
   const totalOrderValue = orderValue?.totalOrderValue ?? 0;
+  const legacyRecognizedRevenue = purchaseData?.legacyRecognizedRevenue ?? 0;
 
   const currency = new Intl.NumberFormat("vi-VN", {
     style: "currency",
@@ -195,7 +196,7 @@ export default function Dashboard() {
           testId="dashboard-total-order-value-card"
           title="Tổng giá trị đơn hàng"
           value={currency.format(totalOrderValue)}
-          hint="Tổng giá trị các đơn phát sinh trong kỳ (Đơn hàng)"
+          hint={`Tổng giá trị các đơn phát sinh trong kỳ (Đơn hàng, không tính Lost) · ${orderValue?.totalOrderCount ?? 0} đơn`}
           icon={<ClipboardList className="w-8 h-8 text-blue-600" />}
           color="bg-blue-100"
           badge={<ScopeIndicator resource="orders" />}
@@ -215,10 +216,30 @@ export default function Dashboard() {
           testId="dashboard-unrecognized-order-value-card"
           title="Giá trị đơn chưa ghi nhận"
           value={currency.format(unrecognizedOrderValue)}
-          hint="Tính riêng từ Đơn hàng — không phải hiệu số của hai chỉ số trên"
+          hint={`${orderValue?.unrecognizedOrderCount ?? 0} đơn · Tính riêng từ Đơn hàng — không phải hiệu số của hai chỉ số trên`}
           icon={<PiggyBank className="w-8 h-8 text-amber-600" />}
           color="bg-amber-100"
         />
+      </div>
+      {/* Revenue & Sales Reporting Unification (revised) - the two groups of
+          cards have DIFFERENT scopes and are deliberately not forced into
+          one identity: (1) Orders view, by order date: every non-Lost Order
+          = its Completed + Paid part + Giá trị đơn chưa ghi nhận (exact, one
+          query); (2) Recognized Revenue, by purchase sale date, BR-001 +
+          BR-002 unchanged: purchases linked to Completed + Paid Orders plus
+          BR-002 legacy purchases with no Order. Each line says which scope
+          it describes. */}
+      <div className="mb-4 space-y-1 text-xs text-muted-foreground" data-testid="dashboard-revenue-scope-notes">
+        <p data-testid="dashboard-orders-view-line">
+          Theo Đơn hàng (ngày đơn): Tổng giá trị đơn hàng {currency.format(totalOrderValue)} = Completed + Paid{" "}
+          {currency.format(orderValue?.orderBasedRecognizedValue ?? 0)} + Giá trị đơn chưa ghi nhận{" "}
+          {currency.format(unrecognizedOrderValue)}
+        </p>
+        <p data-testid="dashboard-recognized-breakdown-line">
+          Doanh thu đã ghi nhận (ngày bán, BR-001 + BR-002): gắn Đơn hàng Completed + Paid{" "}
+          {currency.format(monthRevenue - legacyRecognizedRevenue)} + dữ liệu cũ không gắn Đơn hàng (BR-002){" "}
+          {currency.format(legacyRecognizedRevenue)} = {currency.format(monthRevenue)}
+        </p>
       </div>
 
       {/* Simple Profit Calculation Package, Final Revision: Owner/Manager

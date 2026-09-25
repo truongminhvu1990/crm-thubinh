@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { DateRange } from "@/lib/dateFilter";
 import { applyDataScopeByName } from "@/lib/permission/dataScope";
 import type { ScopingStaff } from "./order.repository";
+import { isOrderRecognized, summarizeRevenue } from "@/lib/reports/revenueDefinition";
 
 /** Revenue Management Visibility (2026-08-29), Order Revenue Visibility
  * Semantic Gap fix (2026-08-29 follow-up) — this module owns BOTH figures
@@ -57,6 +58,14 @@ export interface OrderValueSummary {
    * (never nets out B2's legacy BR-002 revenue). Equals the sum of
    * `breakdown` below, by construction. */
   orderBasedUnrecognizedValue: number;
+  /** Revenue & Sales Reporting Unification - order counts for the same
+   * populations (`totalOrderCount` = recognized + unrecognized) and the
+   * recognized share of Total Order Value in [0, 1]. All derived by
+   * `summarizeRevenue()` (lib/reports/revenueDefinition.ts), the single
+   * shared definition. */
+  recognizedOrderCount: number;
+  unrecognizedOrderCount: number;
+  recognizedRatio: number;
   /** Every non-Lost order in range EXCEPT Completed+Paid ones, grouped by
    * (order_status, payment_status) — dynamically computed, never hardcoded.
    * Sum of this array's `total` fields = orderBasedUnrecognizedValue
@@ -70,6 +79,9 @@ const EMPTY_SUMMARY: OrderValueSummary = {
   totalOrderCount: 0,
   orderBasedRecognizedValue: 0,
   orderBasedUnrecognizedValue: 0,
+  recognizedOrderCount: 0,
+  unrecognizedOrderCount: 0,
+  recognizedRatio: 0,
   breakdown: [],
 };
 
@@ -107,20 +119,13 @@ export async function getOrderValueSummary(
   }
 
   const rows = data as unknown as OrderValueRow[];
-  let totalOrderValue = 0;
-  let orderBasedRecognizedValue = 0;
+  const revenue = summarizeRevenue(rows.map((row) => ({ ...row, amount: row.total_amount })));
   const breakdownMap = new Map<string, OrderValueBreakdownRow>();
 
   for (const row of rows) {
+    if (isOrderRecognized(row)) continue;
+
     const amount = Number(row.total_amount) || 0;
-    totalOrderValue += amount;
-
-    const isCompletedPaid = row.order_status === "Completed" && row.payment_status === "Paid";
-    if (isCompletedPaid) {
-      orderBasedRecognizedValue += amount;
-      continue;
-    }
-
     const key = `${row.order_status}|${row.payment_status}`;
     const entry = breakdownMap.get(key) ?? { order_status: row.order_status, payment_status: row.payment_status, count: 0, total: 0 };
     entry.count += 1;
@@ -129,10 +134,13 @@ export async function getOrderValueSummary(
   }
 
   return {
-    totalOrderValue,
-    totalOrderCount: rows.length,
-    orderBasedRecognizedValue,
-    orderBasedUnrecognizedValue: totalOrderValue - orderBasedRecognizedValue,
+    totalOrderValue: revenue.total,
+    totalOrderCount: revenue.orderCount,
+    orderBasedRecognizedValue: revenue.recognized,
+    orderBasedUnrecognizedValue: revenue.unrecognized,
+    recognizedOrderCount: revenue.recognizedOrderCount,
+    unrecognizedOrderCount: revenue.unrecognizedOrderCount,
+    recognizedRatio: revenue.recognizedRatio,
     breakdown: Array.from(breakdownMap.values()).sort((a, b) => b.total - a.total),
   };
 }
