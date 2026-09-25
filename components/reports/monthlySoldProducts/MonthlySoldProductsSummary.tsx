@@ -19,8 +19,9 @@ export default function MonthlySoldProductsSummary({ summary }: Props) {
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       <StatCard
-        title="Tổng doanh thu"
+        title="Doanh thu đã ghi nhận"
         value={currency.format(summary.totalRevenue)}
+        hint="Completed + Paid"
         icon={<Wallet className="w-6 h-6 text-emerald-600" />}
         color="bg-emerald-100"
       />
