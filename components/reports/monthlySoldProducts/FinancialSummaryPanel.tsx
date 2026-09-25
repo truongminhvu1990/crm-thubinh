@@ -75,7 +75,7 @@ export default function FinancialSummaryPanel({
     <Card testId="financial-summary-panel">
       <h3 className="text-base font-semibold text-foreground mb-1">Tóm tắt tài chính</h3>
       <div className="divide-y divide-border">
-        <Row label="Doanh thu" value={currency.format(revenue)} muted />
+        <Row label="Doanh thu đã ghi nhận" value={currency.format(revenue)} muted />
         <Row label="Giá vốn hàng bán (COGS)" value={cogsKnown ? currency.format(cogs as number) : "—"} muted />
         <Row
           label="Hoa hồng đối tác"
