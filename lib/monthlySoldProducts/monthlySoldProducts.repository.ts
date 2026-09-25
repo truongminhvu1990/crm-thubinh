@@ -145,8 +145,9 @@ async function fetchOrderLines(
   client: SupabaseClient,
   staff: Staff | null
 ): Promise<SoldLine[]> {
-  // Sold scope is decided by the shared isSoldOrder() below; the query only
-  // narrows to the two statuses that can ever qualify.
+  // Sold scope is decided by the shared isSoldOrder() below (using real
+  // payment RECORDS, not payment_status); the query only narrows to the two
+  // statuses that can ever qualify.
   let query = client
     .from("orders")
     .select(
@@ -166,7 +167,31 @@ async function fetchOrderLines(
     return [];
   }
 
-  const orders = ((data as unknown as OrderRow[]) || []).filter(isSoldOrder);
+  const candidates = (data as unknown as OrderRow[]) || [];
+  if (candidates.length === 0) return [];
+
+  // "Reserved counts as Sold only with at least one ACTUAL payment": decided
+  // from the payments table (a row keyed to this order_id; amount is
+  // CHECK > 0), never from orders.payment_status, which is derived and can
+  // read "Paid" for a zero-total order that has no payment at all. Payments
+  // are recorded against the Order, not the item (see orderPaymentSummary.ts)
+  // - fetched once for every candidate Order, grouped in memory, and reused
+  // for the Payment Details columns below.
+  const paymentRows = await selectIn<{ order_id: string; amount: number; payment_method: string }>(
+    client,
+    "payments",
+    "order_id, amount, payment_method",
+    "order_id",
+    candidates.map((o) => o.id)
+  );
+  const paymentsByOrderId = new Map<string, { amount: number; payment_method: string }[]>();
+  for (const p of paymentRows) {
+    const list = paymentsByOrderId.get(p.order_id) ?? [];
+    list.push({ amount: Number(p.amount) || 0, payment_method: p.payment_method });
+    paymentsByOrderId.set(p.order_id, list);
+  }
+
+  const orders = candidates.filter((o) => isSoldOrder(o, paymentsByOrderId.get(o.id)?.length ?? 0));
   if (orders.length === 0) return [];
   const orderById = new Map(orders.map((o) => [o.id, o]));
   const orderIds = orders.map((o) => o.id);
@@ -190,22 +215,6 @@ async function fetchOrderLines(
       )
     : [];
   const snapshotByItemId = new Map(snapshots.map((s) => [s.order_item_id, s]));
-
-  // Payments are recorded against the Order, not the item (see
-  // orderPaymentSummary.ts) - fetched once per Order, grouped in memory.
-  const paymentRows = await selectIn<{ order_id: string; amount: number; payment_method: string }>(
-    client,
-    "payments",
-    "order_id, amount, payment_method",
-    "order_id",
-    orderIds
-  );
-  const paymentsByOrderId = new Map<string, { amount: number; payment_method: string }[]>();
-  for (const p of paymentRows) {
-    const list = paymentsByOrderId.get(p.order_id) ?? [];
-    list.push({ amount: Number(p.amount) || 0, payment_method: p.payment_method });
-    paymentsByOrderId.set(p.order_id, list);
-  }
 
   const lines: SoldLine[] = [];
   for (const item of items) {

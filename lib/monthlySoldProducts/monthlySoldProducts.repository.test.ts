@@ -111,3 +111,59 @@ test("salesperson filter: purchase snapshot matches by salesperson_id, a deposit
   const other = await getSoldLines({ ...SEPT, salespersonId: "staff-zzz" }, client(), null);
   assert.equal(other.length, 0);
 });
+
+// ---------------------------------------------------------------------------
+// "Reserved counts as Sold only with at least one ACTUAL payment": decided
+// from payment RECORDS keyed to the order, never from orders.payment_status.
+// ---------------------------------------------------------------------------
+
+function withReservedEdgeCases(): FakeData {
+  const data: FakeData = JSON.parse(JSON.stringify(SEPTEMBER_SCENARIO));
+  const base = data.orders.find((o) => o.id === "O4")!;
+  const item = data.orderItems.find((i) => i.id === "I4")!;
+  const order = (id: string, status: string, pay: string, total: number) => ({ ...base, id, order_number: `ORD-${id}`, order_status: status, payment_status: pay, total_amount: total });
+  const line = (id: string, orderId: string, price: number) => ({ ...item, id, order_id: orderId, snapshot_sale_price: price });
+
+  data.orders.push(
+    order("R1", "Reserved", "PartiallyPaid", 70), // status SAYS deposit, but no payment record exists
+    order("R2", "Reserved", "Paid", 80), // status says Paid, no payment record
+    order("R3", "Reserved", "Unpaid", 90) // status says Unpaid, but a real payment record exists
+  );
+  data.orderItems.push(line("IR1", "R1", 70), line("IR2", "R2", 80), line("IR3", "R3", 90));
+  data.payments.push({ order_id: "R3", amount: 10, payment_method: "Tiền mặt" });
+  return data;
+}
+
+test("Reserved + payment_status that merely SAYS PartiallyPaid/Paid but has NO payment record is NOT Sold", async () => {
+  const lines = await getSoldLines(SEPT, client(withReservedEdgeCases()), null);
+  const keys = lines.map((l) => l.line_key);
+  assert.equal(keys.includes("IR1"), false, "PartiallyPaid status without a payment record");
+  assert.equal(keys.includes("IR2"), false, "Paid status without a payment record");
+});
+
+test("Reserved with a real payment record IS Sold and Unrecognized, even if payment_status reads Unpaid — the record, not the derived status, is the evidence", async () => {
+  const lines = await getSoldLines(SEPT, client(withReservedEdgeCases()), null);
+  const l = lines.find((x) => x.line_key === "IR3");
+  assert.ok(l, "Reserved order R3 has a payment row");
+  assert.equal(l!.recognition, "unrecognized");
+  assert.equal(l!.amount_paid, 10);
+});
+
+test("a payment record on ANOTHER order never makes a Reserved order Sold (payments are matched by order_id)", async () => {
+  const lines = await getSoldLines(SEPT, client(withReservedEdgeCases()), null);
+  // O4's payments (50) and R3's payment (10) exist; R1/R2 have none of their own.
+  assert.equal(lines.some((l) => l.order_id === "R1" || l.order_id === "R2"), false);
+  assert.equal(lines.find((l) => l.line_key === "I4")!.amount_paid, 50, "O4 keeps only its own payment");
+});
+
+test("Reserved-unpaid (no payment record), Draft and Lost stay out; Completed with no payment record at all is still Sold (unrecognized)", async () => {
+  const data = withReservedEdgeCases();
+  data.orders.push({ ...data.orders.find((o) => o.id === "O3")!, id: "C9", order_number: "ORD-C9", payment_status: "Unpaid", total_amount: 33 });
+  data.orderItems.push({ ...data.orderItems.find((i) => i.id === "I3")!, id: "IC9", order_id: "C9", snapshot_sale_price: 33 });
+  const lines = await getSoldLines(SEPT, client(data), null);
+  const keys = lines.map((l) => l.line_key);
+  for (const excluded of ["I5", "I6", "I7"]) assert.equal(keys.includes(excluded), false, excluded);
+  const c9 = lines.find((l) => l.line_key === "IC9")!;
+  assert.equal(c9.recognition, "unrecognized");
+  assert.equal(c9.amount_paid, 0);
+});

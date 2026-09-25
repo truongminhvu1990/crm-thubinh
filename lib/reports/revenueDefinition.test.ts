@@ -14,17 +14,22 @@ test("isOrderRecognized: BR-001 — only Completed + Paid; Completed alone never
   assert.equal(isOrderRecognized(o("Lost", "Paid")), false);
 });
 
-test("isSoldOrder: Completed (any payment) and Reserved with a deposit are sold; Draft, Reserved-unpaid and Lost are not", () => {
-  assert.equal(isSoldOrder(o("Completed", "Paid")), true);
-  assert.equal(isSoldOrder(o("Completed", "PartiallyPaid")), true);
-  assert.equal(isSoldOrder(o("Completed", "Unpaid")), true, "payment status never removes a Completed order from the sold set");
-  assert.equal(isSoldOrder(o("Reserved", "PartiallyPaid")), true);
-  assert.equal(isSoldOrder(o("Reserved", "Partially Paid")), true);
-  assert.equal(isSoldOrder(o("Reserved", "Paid")), true);
-  assert.equal(isSoldOrder(o("Reserved", "Unpaid")), false);
-  assert.equal(isSoldOrder(o("Draft", "PartiallyPaid")), false);
-  assert.equal(isSoldOrder(o("Draft", "Unpaid")), false);
-  assert.equal(isSoldOrder(o("Lost", "Paid")), false);
+test("isSoldOrder: Completed (any payment) and Reserved with >= 1 payment RECORD are sold; Draft, Reserved without a payment record and Lost are not", () => {
+  assert.equal(isSoldOrder(o("Completed", "Paid"), 1), true);
+  assert.equal(isSoldOrder(o("Completed", "PartiallyPaid"), 1), true);
+  assert.equal(isSoldOrder(o("Completed", "Unpaid"), 0), true, "payment status never removes a Completed order from the sold set");
+  assert.equal(isSoldOrder(o("Reserved", "PartiallyPaid"), 1), true);
+  assert.equal(isSoldOrder(o("Reserved", "Unpaid"), 2), true);
+  assert.equal(isSoldOrder(o("Reserved", "Unpaid"), 0), false);
+  assert.equal(isSoldOrder(o("Draft", "PartiallyPaid"), 1), false);
+  assert.equal(isSoldOrder(o("Draft", "Unpaid"), 0), false);
+  assert.equal(isSoldOrder(o("Lost", "Paid"), 1), false);
+});
+
+test("isSoldOrder: payment_status is NEVER used as evidence of a payment — a Reserved order whose status reads Paid/PartiallyPaid but has no payment record is not sold", () => {
+  assert.equal(isSoldOrder(o("Reserved", "Paid"), 0), false, "derivePaymentStatus reads Paid for a zero-total order with no payments");
+  assert.equal(isSoldOrder(o("Reserved", "PartiallyPaid"), 0), false);
+  assert.equal(isSoldOrder(o("Reserved", "Partially Paid"), 0), false);
 });
 
 test("isLostOrder", () => {
@@ -55,7 +60,10 @@ test("summarizeRevenue (default = SALES VALUE): Lost excluded, TOTAL = RECOGNIZE
 });
 
 test("summarizeRevenue (sold population): deposits are in the sold total but not in recognized; identity still holds", () => {
-  const r = summarizeRevenue(rows, isSoldOrder);
+  // Payment counts as recorded in `payments`: only the Reserved/PartiallyPaid order has one.
+  const paymentCount = (order: { order_status: string; payment_status: string }) =>
+    order.order_status === "Reserved" && order.payment_status === "PartiallyPaid" ? 1 : 0;
+  const r = summarizeRevenue(rows, (order) => isSoldOrder(order, paymentCount(order)));
   assert.equal(r.total, 350, "Completed/Paid 100 + Completed/Partial 50 + Reserved/Partial 200");
   assert.equal(r.recognized, 100);
   assert.equal(r.unrecognized, 250);

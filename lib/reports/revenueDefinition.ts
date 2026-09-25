@@ -20,12 +20,20 @@
  *
  *  - SOLD ORDER (Sold Products scope, Product Owner answer): a narrower
  *    population than TOTAL - Order Status = Completed (any Payment Status),
- *    OR Order Status = Reserved with at least one payment recorded
- *    (Payment Status other than Unpaid, i.e. a deposit). Draft orders,
- *    Reserved orders with no payment, and Lost orders are not sold. Sold
- *    orders split into recognized / unrecognized by the SAME BR-001 check
- *    above; Payment Status never removes a sold order from the sold set,
- *    it only decides recognition.
+ *    OR Order Status = Reserved with at least one ACTUAL payment record
+ *    (a row in `payments` for that Order - a deposit). Draft orders,
+ *    Reserved orders with no payment record, and Lost orders are not sold.
+ *    Sold orders split into recognized / unrecognized by the SAME BR-001
+ *    check above; Payment Status never removes a sold order from the sold
+ *    set, it only decides recognition.
+ *
+ *    "At least one payment" is deliberately decided from payment RECORDS,
+ *    never inferred from `orders.payment_status`: that column is derived
+ *    (derivePaymentStatus) and reads "Paid" for a zero-total order with no
+ *    payment at all (paymentsSum 0 >= total 0). `payments.amount` is
+ *    CHECK (amount > 0) and `payments.order_id` is a NOT NULL FK to the
+ *    Order, so a matching row is by construction a real payment against
+ *    exactly that Order.
  */
 
 export interface OrderStatusFields {
@@ -42,10 +50,12 @@ export function isOrderRecognized(order: OrderStatusFields): boolean {
   return order.order_status === "Completed" && order.payment_status === "Paid";
 }
 
-/** Sold Products scope: Completed (any payment) or Reserved with a deposit. */
-export function isSoldOrder(order: OrderStatusFields): boolean {
+/** Sold Products scope: Completed (any payment), or Reserved with at least
+ * one payment record. `paymentCount` = number of `payments` rows recorded
+ * against THIS order - never derived from payment_status. */
+export function isSoldOrder(order: Pick<OrderStatusFields, "order_status">, paymentCount: number): boolean {
   if (order.order_status === "Completed") return true;
-  return order.order_status === "Reserved" && order.payment_status !== "Unpaid";
+  return order.order_status === "Reserved" && paymentCount > 0;
 }
 
 export interface RevenueAmountRow extends OrderStatusFields {
@@ -76,8 +86,8 @@ export const EMPTY_REVENUE_BREAKDOWN: RevenueBreakdown = {
 
 /** Splits already-scoped Orders into Total / Recognized / Unrecognized.
  * `include` decides which Orders are part of the population (default: every
- * non-Lost Order = SALES VALUE; pass `isSoldOrder` for the Sold Products
- * population). Unrecognized is derived as total - recognized so the identity
+ * non-Lost Order = SALES VALUE; pass a predicate built on `isSoldOrder` for
+ * the Sold Products population). Unrecognized is derived as total - recognized so the identity
  * total = recognized + unrecognized can never break. */
 export function summarizeRevenue(
   rows: RevenueAmountRow[],
