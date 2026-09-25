@@ -60,6 +60,7 @@ export function makeFakeReportingClient(data: FakeData) {
   return {
     from(table: string) {
       const f: Filters = { in: {}, neq: {}, eq: {}, isNull: [], gte: {}, lt: {} };
+      let selected = "";
 
       const inRange = (value: string | undefined, col: string) =>
         (f.gte[col] === undefined || (value ?? "") >= f.gte[col]) && (f.lt[col] === undefined || (value ?? "") < f.lt[col]);
@@ -76,12 +77,38 @@ export function makeFakeReportingClient(data: FakeData) {
           case "order_items":
             return data.orderItems.filter((i) => !f.in.order_id || f.in.order_id.includes(i.order_id));
           case "customer_purchases":
+            // Dashboard's getPurchaseReportData shape: every purchase in the
+            // sale_date range (linked AND legacy) with its order status embedded.
+            if (selected.includes("order_items(")) {
+              return data.purchases
+                .filter((p) => inRange(p.sale_date, "sale_date"))
+                .map((p) => {
+                  const oi = p.order_item_id ? data.orderItems.find((i) => i.id === p.order_item_id) : undefined;
+                  const ord = oi ? data.orders.find((o) => o.id === oi.order_id) : undefined;
+                  return {
+                    customer_id: p.customer_id,
+                    product_id: p.product_id,
+                    sale_price: p.sale_price,
+                    sale_date: p.sale_date,
+                    source: null,
+                    salesperson: p.salesperson,
+                    order_item_id: p.order_item_id,
+                    order_items: ord ? { orders: { order_status: ord.order_status, payment_status: ord.payment_status } } : null,
+                    customer: { full_name: p.customer.full_name },
+                  };
+                });
+            }
             if (f.isNull.includes("order_item_id")) {
               return data.purchases.filter((p) => p.order_item_id === null && inRange(p.sale_date, "sale_date"));
             }
             return data.purchases.filter((p) => p.order_item_id !== null && (!f.in.order_item_id || f.in.order_item_id.includes(p.order_item_id)));
           case "payments":
             return data.payments.filter((p) => !f.in.order_id || f.in.order_id.includes(p.order_id));
+          case "products": {
+            const known = new Map<string, number | null>();
+            for (const p of data.purchases) if (p.product_id) known.set(p.product_id, p.product?.cost_price ?? null);
+            return [...known].filter(([id]) => !f.in.id || f.in.id.includes(id)).map(([id, cost_price]) => ({ id, cost_price }));
+          }
           case "staff":
             return (data.staff ?? []).filter((s) => f.eq.id === undefined || s.id === f.eq.id);
           default:
@@ -90,7 +117,7 @@ export function makeFakeReportingClient(data: FakeData) {
       };
 
       const builder: Record<string, unknown> = {
-        select: () => builder,
+        select: (cols?: string) => ((selected = cols ?? ""), builder),
         in: (col: string, vals: unknown[]) => ((f.in[col] = vals), builder),
         neq: (col: string, val: unknown) => ((f.neq[col] = val), builder),
         eq: (col: string, val: unknown) => ((f.eq[col] = val), builder),

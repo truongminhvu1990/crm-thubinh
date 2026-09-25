@@ -9,14 +9,15 @@ interface Props {
   summary: Summary;
 }
 
-// Revenue & Sales Reporting Unification (Product Owner decision): the
-// revenue cards read as TOTAL = RECOGNIZED + UNRECOGNIZED, the same
-// structure the Dashboard uses (definitions live in
-// lib/reports/revenueDefinition.ts). "Total" here is the value of the SOLD
-// products (Completed orders, and Reserved orders with a deposit) - a
-// narrower population than the Dashboard's every-non-Lost-Order total, so
-// the two "Tổng" figures are related but intentionally not the same.
-// Profit/Loss is still computed on recognized revenue only.
+// Revenue & Sales Reporting Unification (Product Owner decision, revised):
+// within THIS report's Sold scope, SOLD = RECOGNIZED + UNRECOGNIZED
+// (definitions in lib/reports/revenueDefinition.ts). Sold scope = Completed
+// orders, and Reserved orders with a deposit - a narrower population than
+// the Dashboard's "Tổng giá trị đơn hàng" (every non-Lost Order, incl. Draft
+// / Reserved-unpaid), so the two "total" figures are related but
+// intentionally NOT the same dataset. "Recognized" keeps BR-001 + BR-002
+// semantics (BR-002 legacy entries included), same as the Dashboard's
+// "Doanh thu đã ghi nhận". Profit/Loss stays on recognized revenue only.
 export default function MonthlySoldProductsSummary({ summary }: Props) {
   const profitLossKnown = summary.profitLoss !== null;
   const isLoss = profitLossKnown && (summary.profitLoss as number) < 0;
@@ -36,7 +37,11 @@ export default function MonthlySoldProductsSummary({ summary }: Props) {
           testId="monthly-sold-products-recognized-card"
           title="Doanh thu đã ghi nhận"
           value={currency.format(summary.recognizedRevenue)}
-          hint="Completed + Paid"
+          hint={
+            summary.legacyRecognizedValue > 0
+              ? `Completed + Paid, gồm ${currency.format(summary.legacyRecognizedValue)} dữ liệu cũ (BR-002)`
+              : "Completed + Paid"
+          }
           icon={<CheckCircle2 className="w-6 h-6 text-emerald-600" />}
           color="bg-emerald-100"
         />
@@ -50,8 +55,10 @@ export default function MonthlySoldProductsSummary({ summary }: Props) {
         />
       </div>
       <p className="text-xs text-muted-foreground" data-testid="monthly-sold-products-reconciliation-line">
-        Đã ghi nhận {currency.format(summary.recognizedRevenue)} + Chưa ghi nhận {currency.format(summary.unrecognizedValue)} ={" "}
-        {currency.format(summary.soldValue)} · Tỷ lệ đã ghi nhận {formatPercent(summary.recognizedRatio * 100)}
+        Trong phạm vi sản phẩm bán: Đã ghi nhận {currency.format(summary.recognizedRevenue)} + Chưa ghi nhận{" "}
+        {currency.format(summary.unrecognizedValue)} = {currency.format(summary.soldValue)} · Tỷ lệ đã ghi nhận{" "}
+        {formatPercent(summary.recognizedRatio * 100)}. Khác với &ldquo;Tổng giá trị đơn hàng&rdquo; trên Dashboard (gồm cả đơn Draft và
+        Reserved chưa cọc).
       </p>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

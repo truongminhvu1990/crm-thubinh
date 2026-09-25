@@ -62,9 +62,13 @@ function toRow(line: repo.SoldLine): MonthlySoldProductRow {
  *
  *  - Sold scope, and the recognized/unrecognized split of a line, come from
  *    the repository (getSoldLines), which applies the shared definitions in
- *    lib/reports/revenueDefinition.ts - the same isOrderRecognized (BR-001,
- *    LOCKED: Completed + Paid) the Dashboard uses. Legacy no-Order entries
- *    are recognized by BR-002 (LOCKED), unchanged.
+ *    lib/reports/revenueDefinition.ts - isOrderRecognized is BR-001 (LOCKED:
+ *    Completed + Paid). Legacy no-Order entries stay recognized by BR-002
+ *    (LOCKED), so `recognizedRevenue` keeps the same BR-001 + BR-002
+ *    semantics as before and as the Dashboard's "Doanh thu đã ghi nhận".
+ *    Sold scope is narrower than the Dashboard's "Tổng giá trị đơn hàng"
+ *    (Completed, or Reserved with a deposit - not Draft / Reserved-unpaid),
+ *    so soldValue is intentionally NOT that figure.
  *  - unrecognizedValue is soldValue - recognizedRevenue, so the identity
  *    cannot drift.
  *  - Total Orders groups lines by Order; a legacy entry with no Order is
@@ -95,10 +99,13 @@ export async function getMonthlySoldProductsSummary(
   const lines = await repo.getSoldLines(filters, client, staff);
 
   let recognizedRevenue = 0;
+  let legacyRecognizedValue = 0;
   let unrecognizedValue = 0;
   for (const l of lines) {
-    if (l.recognition === "recognized") recognizedRevenue += l.final_sale_price;
-    else unrecognizedValue += l.final_sale_price;
+    if (l.recognition === "recognized") {
+      recognizedRevenue += l.final_sale_price;
+      if (l.is_legacy) legacyRecognizedValue += l.final_sale_price;
+    } else unrecognizedValue += l.final_sale_price;
   }
   const soldValue = recognizedRevenue + unrecognizedValue;
 
@@ -153,6 +160,7 @@ export async function getMonthlySoldProductsSummary(
   return {
     soldValue,
     recognizedRevenue,
+    legacyRecognizedValue,
     unrecognizedValue,
     soldLines: lines.length,
     totalCustomers,

@@ -31,7 +31,7 @@ export default function UnrecognizedOrderValueBreakdown({ rows }: Props) {
   if (rows.length === 0) {
     return (
       <Card testId="dashboard-unrecognized-breakdown-card">
-        <h2 className="text-base font-semibold text-foreground mb-1">Doanh thu chưa ghi nhận — chi tiết</h2>
+        <h2 className="text-base font-semibold text-foreground mb-1">Giá trị đơn chưa ghi nhận — chi tiết</h2>
         <p className="text-sm text-muted-foreground">Không có đơn nào chưa đủ điều kiện ghi nhận doanh thu trong kỳ đã chọn.</p>
       </Card>
     );
@@ -41,7 +41,7 @@ export default function UnrecognizedOrderValueBreakdown({ rows }: Props) {
 
   return (
     <Card testId="dashboard-unrecognized-breakdown-card">
-      <h2 className="text-base font-semibold text-foreground mb-1">Doanh thu chưa ghi nhận — chi tiết</h2>
+      <h2 className="text-base font-semibold text-foreground mb-1">Giá trị đơn chưa ghi nhận — chi tiết</h2>
       <p className="text-sm text-muted-foreground mb-4">
         Tính riêng từ Đơn hàng — vì sao các đơn này chưa đủ điều kiện ghi nhận doanh thu (Completed + Paid)
       </p>

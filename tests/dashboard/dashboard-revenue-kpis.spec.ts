@@ -6,8 +6,8 @@ import { loginAsOwner, loginAsSales } from "../shared/utils";
 /**
  * Revenue Management Visibility (2026-08-29) + Order Revenue Visibility
  * Semantic Gap fix (2026-08-29 follow-up) - Dashboard shows three distinct,
- * clearly-labeled metrics (Tổng doanh thu / Doanh thu đã ghi nhận /
- * Doanh thu chưa ghi nhận). "Giá trị đơn chưa ghi nhận" (B3) is computed
+ * clearly-labeled metrics (Tổng giá trị đơn hàng / Doanh thu đã ghi nhận /
+ * Giá trị đơn chưa ghi nhận). "Giá trị đơn chưa ghi nhận" (B3) is computed
  * entirely from the Orders population (getOrderValueSummary's own
  * Completed+Paid complement), NOT as Total Order Value minus Recognized
  * Revenue - Recognized Revenue can include BR-002 legacy customer_purchases
@@ -35,16 +35,14 @@ test.describe("Dashboard revenue management KPIs", () => {
     const unrecognizedCard = page.getByTestId("dashboard-unrecognized-order-value-card");
 
     await expect(totalCard).toBeVisible();
-    await expect(totalCard).toContainText("Tổng doanh thu");
+    await expect(totalCard).toContainText("Tổng giá trị đơn hàng");
     await expect(recognizedCard).toBeVisible();
     await expect(recognizedCard).toContainText("Doanh thu đã ghi nhận");
     await expect(recognizedCard).toContainText("Completed + Paid");
     await expect(unrecognizedCard).toBeVisible();
-    await expect(unrecognizedCard).toContainText("Doanh thu chưa ghi nhận");
-    // Revenue & Sales Reporting Unification: the three cards read as
-    // TOTAL = RECOGNIZED + UNRECOGNIZED, with the identity spelled out.
-    await expect(page.getByTestId("dashboard-revenue-reconciliation-line")).toContainText("Đã ghi nhận");
-    await expect(page.getByTestId("dashboard-revenue-reconciliation-line")).toContainText("Chưa ghi nhận");
+    await expect(unrecognizedCard).toContainText("Giá trị đơn chưa ghi nhận");
+    // Semantic gap fix: the hint must not let the user infer B3 = B1 - B2.
+    await expect(unrecognizedCard).toContainText("không phải hiệu số");
 
     // The ambiguous bare label must not appear anywhere on the page — every
     // revenue-shaped card must be qualified (this task's own UI requirement).

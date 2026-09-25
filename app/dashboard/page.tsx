@@ -6,7 +6,6 @@ import { Users, Gem, Package, TrendingUp, Calendar, Wallet, Coins, ClipboardList
 import { FollowUpSummaryCounts } from "@/lib/customer.service";
 import { ProductReportData, BatchStaticReportData, PurchaseReportData } from "@/lib/reports/reports.service";
 import { OrderValueSummary } from "@/lib/orders/orderValueSummary.service";
-import { formatPercent } from "@/lib/reports/format";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
 import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
 import { TopSalesStaffEntry } from "@/lib/staff.service";
@@ -35,6 +34,7 @@ export default function Dashboard() {
   const [batchTotal, setBatchTotal] = useState(0);
   const [purchaseData, setPurchaseData] = useState<PurchaseReportData | null>(null);
   const [orderValue, setOrderValue] = useState<OrderValueSummary | null>(null);
+  const [unrecognizedOrderValue, setUnrecognizedOrderValue] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [followUpCounts, setFollowUpCounts] = useState<FollowUpSummaryCounts>({
     overdue: 0,
@@ -75,6 +75,7 @@ export default function Dashboard() {
         setBatchTotal(overview.batches.totalBatches);
         setPurchaseData(overview.purchases);
         setOrderValue(overview.orderValue);
+        setUnrecognizedOrderValue(overview.unrecognizedOrderValue);
       })
       .catch((error) => console.error("Failed to load dashboard stats:", error))
       .finally(() => {
@@ -132,18 +133,17 @@ export default function Dashboard() {
     };
   }, [range]);
 
-  // Revenue & Sales Reporting Unification (Product Owner decision) - the
-  // three revenue cards read as TOTAL = RECOGNIZED + UNRECOGNIZED, all three
-  // from the same Orders query (getOrderValueSummary, order_date basis,
-  // definitions in lib/reports/revenueDefinition.ts), so the identity holds
-  // by construction. Recognized keeps BR-001 (Completed + Paid) unchanged.
-  // BR-002 legacy customer_purchases revenue with no linked Order cannot be
-  // part of an Orders-based split; it is shown as its own line instead of
-  // being dropped (historical recognition is never changed).
+  // Revenue label now follows the Global Date Filter (Sprint v1.0.2)
+  // instead of always saying "this month".
+  const revenueLabel = `Doanh thu đã ghi nhận (${label})`;
+  // Single source of truth: customer_purchases (via getPurchaseReportData) -
+  // no Orders dependency for Dashboard revenue. Revenue Management
+  // Visibility (2026-08-29) - relabeled from the ambiguous "Doanh thu" to
+  // "Doanh thu đã ghi nhận" now that Total Order Value / Unrecognized
+  // Order Value sit next to it - the underlying BR-001 formula (Completed
+  // + Paid) is unchanged.
+  const monthRevenue = purchaseData?.totalRevenue ?? 0;
   const totalOrderValue = orderValue?.totalOrderValue ?? 0;
-  const recognizedValue = orderValue?.orderBasedRecognizedValue ?? 0;
-  const unrecognizedValue = orderValue?.orderBasedUnrecognizedValue ?? 0;
-  const recognizedRatio = orderValue?.recognizedRatio ?? 0;
   const legacyRecognizedRevenue = purchaseData?.legacyRecognizedRevenue ?? 0;
 
   const currency = new Intl.NumberFormat("vi-VN", {
@@ -176,16 +176,27 @@ export default function Dashboard() {
         <GlobalDateFilter />
       </div>
 
-      {/* Revenue & Sales Reporting Unification - Tổng doanh thu = Đã ghi nhận
-          + Chưa ghi nhận. "Tổng doanh thu" is the value of every non-Lost
-          Order in the period; "Đã ghi nhận" is its Completed + Paid subset
-          (BR-001); "Chưa ghi nhận" is the rest. */}
-      <div className="mb-2 grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {/* Revenue Management Visibility (2026-08-29) - three distinct
+          management metrics, deliberately never merged into one "Doanh
+          thu" figure (Production read-only audit, 2026-08-29, confirmed
+          management was comparing Orders' total order value against
+          Recognized Revenue as if they were the same number).
+          Order Revenue Visibility Semantic Gap fix (2026-08-29 follow-up):
+          Giá trị đơn chưa ghi nhận is NOT "Tổng giá trị đơn hàng minus
+          Doanh thu đã ghi nhận" - Doanh thu đã ghi nhận (B2) can include
+          BR-002 legacy customer_purchases revenue with no linked Order at
+          all (confirmed present on Dev), outside the Orders population
+          Tổng giá trị đơn hàng/Giá trị đơn chưa ghi nhận describe. Giá trị
+          đơn chưa ghi nhận is computed entirely from Orders instead
+          (getOrderValueSummary's own Completed+Paid complement) - each
+          card's hint below says so explicitly so the two numbers are never
+          read as directly subtractable. */}
+      <div className="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard
           testId="dashboard-total-order-value-card"
-          title="Tổng doanh thu"
+          title="Tổng giá trị đơn hàng"
           value={currency.format(totalOrderValue)}
-          hint={`${orderValue?.totalOrderCount ?? 0} đơn phát sinh trong kỳ (không tính đơn Lost)`}
+          hint={`Tổng giá trị các đơn phát sinh trong kỳ (Đơn hàng, không tính Lost) · ${orderValue?.totalOrderCount ?? 0} đơn`}
           icon={<ClipboardList className="w-8 h-8 text-blue-600" />}
           color="bg-blue-100"
           badge={<ScopeIndicator resource="orders" />}
@@ -193,29 +204,43 @@ export default function Dashboard() {
         <Link href="/reports">
           <StatCard
             testId="dashboard-revenue-card"
-            title="Doanh thu đã ghi nhận"
-            value={currency.format(recognizedValue)}
-            hint={`Completed + Paid · ${orderValue?.recognizedOrderCount ?? 0} đơn · ${formatPercent(recognizedRatio * 100)} tổng doanh thu`}
+            title={revenueLabel}
+            value={currency.format(monthRevenue)}
+            hint="Completed + Paid — có thể gồm doanh thu ghi nhận ngoài Đơn hàng"
             icon={<Wallet className="w-8 h-8 text-emerald-600" />}
             color="bg-emerald-100"
-            badge={<ScopeIndicator resource="orders" />}
+            badge={<ScopeIndicator resource="revenue" />}
           />
         </Link>
         <StatCard
           testId="dashboard-unrecognized-order-value-card"
-          title="Doanh thu chưa ghi nhận"
-          value={currency.format(unrecognizedValue)}
-          hint={`${orderValue?.unrecognizedOrderCount ?? 0} đơn chưa đủ điều kiện Completed + Paid`}
+          title="Giá trị đơn chưa ghi nhận"
+          value={currency.format(unrecognizedOrderValue)}
+          hint={`${orderValue?.unrecognizedOrderCount ?? 0} đơn · Tính riêng từ Đơn hàng — không phải hiệu số của hai chỉ số trên`}
           icon={<PiggyBank className="w-8 h-8 text-amber-600" />}
           color="bg-amber-100"
         />
       </div>
-      <p className="mb-4 text-xs text-muted-foreground" data-testid="dashboard-revenue-reconciliation-line">
-        Đã ghi nhận {currency.format(recognizedValue)} + Chưa ghi nhận {currency.format(unrecognizedValue)} ={" "}
-        {currency.format(totalOrderValue)}
-        {legacyRecognizedRevenue > 0 &&
-          ` · Ngoài ra ${currency.format(legacyRecognizedRevenue)} doanh thu dữ liệu cũ không gắn Đơn hàng (BR-002), không nằm trong các số trên`}
-      </p>
+      {/* Revenue & Sales Reporting Unification (revised) - the two groups of
+          cards have DIFFERENT scopes and are deliberately not forced into
+          one identity: (1) Orders view, by order date: every non-Lost Order
+          = its Completed + Paid part + Giá trị đơn chưa ghi nhận (exact, one
+          query); (2) Recognized Revenue, by purchase sale date, BR-001 +
+          BR-002 unchanged: purchases linked to Completed + Paid Orders plus
+          BR-002 legacy purchases with no Order. Each line says which scope
+          it describes. */}
+      <div className="mb-4 space-y-1 text-xs text-muted-foreground" data-testid="dashboard-revenue-scope-notes">
+        <p data-testid="dashboard-orders-view-line">
+          Theo Đơn hàng (ngày đơn): Tổng giá trị đơn hàng {currency.format(totalOrderValue)} = Completed + Paid{" "}
+          {currency.format(orderValue?.orderBasedRecognizedValue ?? 0)} + Giá trị đơn chưa ghi nhận{" "}
+          {currency.format(unrecognizedOrderValue)}
+        </p>
+        <p data-testid="dashboard-recognized-breakdown-line">
+          Doanh thu đã ghi nhận (ngày bán, BR-001 + BR-002): gắn Đơn hàng Completed + Paid{" "}
+          {currency.format(monthRevenue - legacyRecognizedRevenue)} + dữ liệu cũ không gắn Đơn hàng (BR-002){" "}
+          {currency.format(legacyRecognizedRevenue)} = {currency.format(monthRevenue)}
+        </p>
+      </div>
 
       {/* Simple Profit Calculation Package, Final Revision: Owner/Manager
           additionally see Giá vốn/Lãi / Lỗ - nothing is hidden or replaced

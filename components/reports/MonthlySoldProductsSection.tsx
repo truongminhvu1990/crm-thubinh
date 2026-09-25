@@ -33,6 +33,7 @@ const DEFAULT_FILTERS: Filters = { page: 1 };
 const EMPTY_SUMMARY: Summary = {
   soldValue: 0,
   recognizedRevenue: 0,
+  legacyRecognizedValue: 0,
   unrecognizedValue: 0,
   soldLines: 0,
   totalCustomers: 0,

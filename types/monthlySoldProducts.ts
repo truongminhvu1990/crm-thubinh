@@ -150,6 +150,11 @@ export interface MonthlySoldProductsSummary {
   /** BR-001 recognized revenue of the sold lines (Completed + Paid, plus
    * BR-002 legacy entries). Formerly `totalRevenue`. */
   recognizedRevenue: number;
+  /** The part of `recognizedRevenue` that is BR-002 (LOCKED) legacy entries
+   * with no linked Order - already INCLUDED in recognizedRevenue, exposed
+   * only so the recognized total can be reconciled to the Dashboard's
+   * "Doanh thu đã ghi nhận" (which includes the same BR-002 revenue). */
+  legacyRecognizedValue: number;
   unrecognizedValue: number;
   /** Number of sold product lines (rows). */
   soldLines: number;
