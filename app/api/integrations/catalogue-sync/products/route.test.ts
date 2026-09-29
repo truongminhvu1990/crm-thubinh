@@ -6,7 +6,7 @@ import { NextRequest } from "next/server";
 /**
  * Mini Catalogue -> CRM inventory sync (V1) integration surface. See the
  * route file for the locked contract this proves: token auth (fail closed
- * when unconfigured, 401 when wrong/missing), and a strict 4-field
+ * when unconfigured, 401 when wrong/missing), and a strict 3-field
  * whitelist projection that never leaks internal columns.
  */
 
@@ -77,17 +77,16 @@ test("401s with a non-Bearer scheme", async () => {
   assert.equal(res.status, 401);
 });
 
-test("200s with the correct token and returns only the 4 whitelisted fields per product - no cost_price/supplier/location/salesperson/source/notes", async () => {
+test("200s with the correct token and returns only the 3 whitelisted fields per product - no cost_price/supplier/location/salesperson/source/notes", async () => {
   const res = await GET(req({ authorization: `Bearer ${TOKEN}` }));
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.products.length, 2);
   for (const p of body.products) {
-    assert.deepEqual(Object.keys(p).sort(), ["id", "name", "product_code", "status"]);
+    assert.deepEqual(Object.keys(p).sort(), ["product_code", "product_name", "status"]);
   }
-  assert.equal(body.products[0].id, PRODUCTS[0].id);
   assert.equal(body.products[0].product_code, PRODUCTS[0].product_code);
-  assert.equal(body.products[0].name, PRODUCTS[0].product_name);
+  assert.equal(body.products[0].product_name, PRODUCTS[0].product_name);
   assert.equal(body.products[0].status, PRODUCTS[0].status);
   const raw = JSON.stringify(body);
   for (const leaked of ["cost_price", "5000000", "Supplier X", "Kho A", "staff-1", "wholesale", "internal note"]) {
@@ -101,9 +100,9 @@ test("an unrecognized/garbage status string is passed through verbatim, not reje
   assert.equal(body.products[1].status, "SomeUnrecognizedStatus");
 });
 
-test("only the 4 whitelisted columns are ever requested from the database (never select(\"*\"))", async () => {
+test("only the 3 whitelisted columns are ever requested from the database (never select(\"*\"))", async () => {
   await GET(req({ authorization: `Bearer ${TOKEN}` }));
-  assert.equal(selectedColumns, "id, product_code, product_name, status");
+  assert.equal(selectedColumns, "product_code, product_name, status");
 });
 
 test("the response disables caching so a poll always sees fresh state", async () => {

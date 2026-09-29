@@ -9,7 +9,7 @@ import { createAdminClient, AdminClientConfigError } from "@/lib/supabase/admin"
  * RBAC system (requirePermission) - there is no logged-in staff member on
  * the other end, so auth here is a single shared bearer token instead.
  *
- * Whitelisted projection only: id / product_code / product_name / status.
+ * Whitelisted projection only: product_code / product_name / status (the V1 contract, exactly 3 fields).
  * Never cost_price, supplier, location, salesperson, source, notes, or any
  * other internal column - selected explicitly by name, never `select("*")`.
  * `status` is passed through verbatim, unvalidated: Mini Catalogue's own
@@ -17,7 +17,7 @@ import { createAdminClient, AdminClientConfigError } from "@/lib/supabase/admin"
  * this endpoint.
  */
 
-type ProductRow = { id: string; product_code: string; product_name: string; status: string };
+type ProductRow = { product_code: string; product_name: string; status: string };
 
 function tokenMatches(presented: string, expected: string): boolean {
   const presentedBuf = Buffer.from(presented);
@@ -49,13 +49,13 @@ export async function GET(request: NextRequest) {
     throw err;
   }
 
-  const { data, error } = await client.from("products").select("id, product_code, product_name, status").returns<ProductRow[]>();
+  const { data, error } = await client.from("products").select("product_code, product_name, status").returns<ProductRow[]>();
   if (error) {
     return NextResponse.json({ error: "Could not read products" }, { status: 500 });
   }
 
   return NextResponse.json(
-    { products: (data ?? []).map((p) => ({ id: p.id, product_code: p.product_code, name: p.product_name, status: p.status })) },
+    { products: (data ?? []).map((p) => ({ product_code: p.product_code, product_name: p.product_name, status: p.status })) },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
