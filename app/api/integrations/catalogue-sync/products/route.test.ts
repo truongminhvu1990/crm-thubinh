@@ -81,13 +81,14 @@ test("200s with the correct token and returns only the 3 whitelisted fields per 
   const res = await GET(req({ authorization: `Bearer ${TOKEN}` }));
   assert.equal(res.status, 200);
   const body = await res.json();
-  assert.equal(body.products.length, 2);
-  for (const p of body.products) {
+  assert.ok(Array.isArray(body), "top-level body must be an array, not a { products } wrapper");
+  assert.equal(body.length, 2);
+  for (const p of body) {
     assert.deepEqual(Object.keys(p).sort(), ["product_code", "product_name", "status"]);
   }
-  assert.equal(body.products[0].product_code, PRODUCTS[0].product_code);
-  assert.equal(body.products[0].product_name, PRODUCTS[0].product_name);
-  assert.equal(body.products[0].status, PRODUCTS[0].status);
+  assert.equal(body[0].product_code, PRODUCTS[0].product_code);
+  assert.equal(body[0].product_name, PRODUCTS[0].product_name);
+  assert.equal(body[0].status, PRODUCTS[0].status);
   const raw = JSON.stringify(body);
   for (const leaked of ["cost_price", "5000000", "Supplier X", "Kho A", "staff-1", "wholesale", "internal note"]) {
     assert.ok(!raw.includes(leaked), `response must not leak ${leaked}`);
@@ -97,7 +98,7 @@ test("200s with the correct token and returns only the 3 whitelisted fields per 
 test("an unrecognized/garbage status string is passed through verbatim, not rejected or coerced", async () => {
   const res = await GET(req({ authorization: `Bearer ${TOKEN}` }));
   const body = await res.json();
-  assert.equal(body.products[1].status, "SomeUnrecognizedStatus");
+  assert.equal(body[1].status, "SomeUnrecognizedStatus");
 });
 
 test("only the 3 whitelisted columns are ever requested from the database (never select(\"*\"))", async () => {

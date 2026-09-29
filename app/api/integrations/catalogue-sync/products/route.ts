@@ -9,6 +9,8 @@ import { createAdminClient, AdminClientConfigError } from "@/lib/supabase/admin"
  * RBAC system (requirePermission) - there is no logged-in staff member on
  * the other end, so auth here is a single shared bearer token instead.
  *
+ * The 200 body is a top-level JSON array (no wrapper object).
+ *
  * Whitelisted projection only: product_code / product_name / status (the V1 contract, exactly 3 fields).
  * Never cost_price, supplier, location, salesperson, source, notes, or any
  * other internal column - selected explicitly by name, never `select("*")`.
@@ -55,7 +57,7 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json(
-    { products: (data ?? []).map((p) => ({ product_code: p.product_code, product_name: p.product_name, status: p.status })) },
+    (data ?? []).map((p) => ({ product_code: p.product_code, product_name: p.product_name, status: p.status })),
     { headers: { "Cache-Control": "no-store" } },
   );
 }
