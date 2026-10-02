@@ -5,6 +5,8 @@ import { Staff } from "@/types/staff";
 import { getCurrentStaff } from "@/lib/permission";
 import { applyDataScopeWithFallback } from "@/lib/permission/dataScope";
 import { BusinessTime } from "@/lib/businessTime";
+import { isPurchaseRecognized, purchaseRecognitionRule, RECOGNITION_RULE_LABEL, RecognitionRule } from "@/lib/reports/revenueDefinition";
+import { fetchAllRows, selectIn } from "@/lib/reports/selectIn";
 
 // This module intentionally reads Supabase tables directly rather than
 // importing customer.service.ts / product.service.ts / purchase.service.ts /
@@ -197,32 +199,36 @@ export async function getProductReportData(client: SupabaseClient = supabase): P
 }
 
 interface PurchaseRow {
+  /** Phase 1 - Reporting Foundation: the optional identifying fields below
+   * are selected ONLY so the recognized-revenue drill-down can explain each
+   * row; they never enter any calculation. */
+  id?: string;
   customer_id: string;
   product_id: string | null;
   sale_price: number;
   sale_date: string;
   source: string | null;
   salesperson: string | null;
-  customer: { full_name: string } | null;
+  customer: { full_name: string; customer_code?: string } | null;
+  product?: { product_code: string | null; product_name: string | null } | null;
   order_item_id: string | null;
-  order_items: { orders: { order_status: string; payment_status: string } | null } | null;
+  order_items: {
+    id?: string;
+    order_id?: string;
+    orders: { order_number?: string; order_status: string; payment_status: string } | null;
+  } | null;
 }
 
-/** BR-001 Revenue Recognition (docs/ORDERS_SPEC.md "Business Rule Lock",
- * LOCKED): revenue counts only when Order Status = Completed AND Payment
- * Status = Paid. A row with no linked Order (order_item_id NULL - predates
- * the Orders module, or entered manually) has no Order to check and
- * counts as recognized, same as it always has. Local to this module by
- * design (REPORTS_SPEC.md Decision 5, LOCKED - no shared business logic
- * with lib/orders/*). */
-function isRevenueRecognized(row: {
-  order_item_id: string | null;
-  order_items: { orders: { order_status: string; payment_status: string } | null } | null;
-}): boolean {
-  if (!row.order_item_id) return true;
-  const order = row.order_items?.orders;
-  return order?.order_status === "Completed" && order?.payment_status === "Paid";
-}
+/** BR-001 / BR-002 Revenue Recognition (both LOCKED) - Phase 1 Reporting
+ * Foundation: the private copy of this rule that used to live here is now
+ * `isPurchaseRecognized` in lib/reports/revenueDefinition.ts, the single
+ * canonical implementation (verbatim rule, proven equal by
+ * revenueDefinition.regression.test.ts). Semantics are unchanged: a row with
+ * no linked Order (order_item_id NULL - legacy/manual, BR-002) is recognized;
+ * a linked row is recognized only when its Order is Completed AND Paid
+ * (BR-001). revenueDefinition.ts is itself part of lib/reports, so this
+ * module still shares nothing with lib/orders (REPORTS_SPEC.md Decision 5). */
+const isRevenueRecognized = isPurchaseRecognized;
 
 /**
  * Revenue by Source/Salesperson/Top Customers/Period - all four are Date
@@ -254,21 +260,7 @@ export async function getPurchaseReportData(
   client: SupabaseClient = supabase,
   staff?: Staff | null
 ): Promise<PurchaseReportData> {
-  let query = client
-    .from("customer_purchases")
-    .select(
-      "customer_id, product_id, sale_price, sale_date, source, salesperson, order_item_id, order_items(orders(order_status, payment_status)), customer:customers(full_name)"
-    );
-  if (range) {
-    query = query.gte("sale_date", range.start).lt("sale_date", range.end);
-  }
-
-  const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
-  if (resolvedStaff) {
-    query = (await applyDataScopeWithFallback(query, resolvedStaff, "revenue", "salesperson_id", "salesperson", client)).query;
-  }
-
-  const { data, error } = await query;
+  const { data, error } = await fetchPurchaseRows(range, client, staff);
 
   const empty: PurchaseReportData = {
     totalRevenue: 0,
@@ -296,16 +288,11 @@ export async function getPurchaseReportData(
   const productIds = Array.from(new Set(rows.map((r) => r.product_id).filter((id): id is string => !!id)));
   const costByProductId = new Map<string, number>();
   if (productIds.length > 0) {
-    const { data: productRows, error: productError } = await client
-      .from("products")
-      .select("id, cost_price")
-      .in("id", productIds);
-    if (productError) {
-      console.error("Error fetching product cost prices for purchase report:", productError);
-    } else {
-      for (const p of productRows as { id: string; cost_price: number | null }[]) {
-        if (typeof p.cost_price === "number") costByProductId.set(p.id, p.cost_price);
-      }
+    // Phase 1.2: chunked AND paged (was one unbounded .in() over every
+    // distinct product id, which both overruns the URL and can exceed max-rows).
+    const productRows = await selectIn<{ id: string; cost_price: number | null }>(client, "products", "id, cost_price", "id", productIds);
+    for (const p of productRows) {
+      if (typeof p.cost_price === "number") costByProductId.set(p.id, p.cost_price);
     }
   }
 
@@ -313,8 +300,6 @@ export async function getPurchaseReportData(
   const salespersonMap = new Map<string, { count: number; revenue: number }>();
   const customerMap = new Map<string, { name: string; count: number; revenue: number }>();
   const monthMap = new Map<string, number>();
-  let totalRevenue = 0;
-  let legacyRecognizedRevenue = 0;
   let totalCost = 0;
 
   for (const row of rows) {
@@ -322,8 +307,6 @@ export async function getPurchaseReportData(
     // recognition status; only money (revenue/cost/profit) is gated.
     const recognized = isRevenueRecognized(row);
     const price = recognized ? Number(row.sale_price) || 0 : 0;
-    totalRevenue += price;
-    if (!row.order_item_id) legacyRecognizedRevenue += price;
     if (recognized && row.product_id) totalCost += costByProductId.get(row.product_id) ?? 0;
 
     const sourceKey = row.source || UNSPECIFIED;
@@ -350,6 +333,11 @@ export async function getPurchaseReportData(
     const month = row.sale_date ? row.sale_date.slice(0, 7) : UNSPECIFIED;
     monthMap.set(month, (monthMap.get(month) || 0) + price);
   }
+
+  // Phase 1 - Reporting Foundation: Recognized Revenue is summed by the SAME
+  // function the recognized-revenue drill-down uses, so the Dashboard figure
+  // and the detail total cannot drift apart.
+  const { total: totalRevenue, legacyTotal: legacyRecognizedRevenue } = summarizeRecognizedPurchases(rows);
 
   return {
     totalRevenue,
@@ -381,6 +369,149 @@ interface ProductBatchLinkRow {
    * product was returned to supplier; the retired "Returned" status value
    * is never checked (see the Remaining/Returned split below). */
   returned_at: string | null;
+}
+
+/** Phase 1 - Reporting Foundation. The ONE query behind Recognized Revenue:
+ * every customer_purchases row in the `sale_date` range (linked AND legacy),
+ * Data-Scoped by the "revenue" resource, with its linked Order embedded.
+ * getPurchaseReportData (the Dashboard figure) and
+ * getRecognizedRevenueDetail (its drill-down) BOTH read through this, so the
+ * two can never describe different populations. The extra embedded columns
+ * (id, order number, product, customer code) exist only for the drill-down;
+ * every one of those embeds is already used by the Monthly Sold Products
+ * repository against this same table. `staff` keeps the existing sentinel:
+ * `undefined` = resolve the signed-in staff yourself, explicit
+ * `Staff | null` = use it.
+ *
+ * Phase 1.2: read through fetchAllRows (paged, ordered by the unique `id`), so a
+ * range holding more purchase rows than PostgREST's max-rows cap (default
+ * 1000) is still read COMPLETELY. Same filters, same "revenue" data scope,
+ * same `sale_date` basis. */
+export const PURCHASE_ROW_SELECT =
+  "id, customer_id, product_id, sale_price, sale_date, source, salesperson, order_item_id, order_items(id, order_id, orders(order_number, order_status, payment_status)), customer:customers(full_name, customer_code), product:products(product_code, product_name)";
+
+export async function fetchPurchaseRows(
+  range: DateRange | null,
+  client: SupabaseClient = supabase,
+  staff?: Staff | null
+) {
+  const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
+
+  return await fetchAllRows<PurchaseRow>(client, "customer_purchases", PURCHASE_ROW_SELECT, async (base) => {
+    let query = base;
+    if (range) {
+      query = query.gte("sale_date", range.start).lt("sale_date", range.end);
+    }
+    if (resolvedStaff) {
+      query = (await applyDataScopeWithFallback(query, resolvedStaff, "revenue", "salesperson_id", "salesperson", client)).query;
+    }
+    return { query };
+  });
+}
+
+export interface RecognizedPurchasesSummary {
+  /** Sum of sale_price over every recognized row (BR-001 + BR-002) = the
+   * Dashboard's "Doanh thu đã ghi nhận". */
+  total: number;
+  /** The BR-002 part (legacy rows with no linked Order) of `total`. */
+  legacyTotal: number;
+  /** The BR-001 part of `total` (rows linked to a Completed + Paid Order). */
+  linkedTotal: number;
+  count: number;
+}
+
+/** Sum over recognized rows, in row order. The only place Recognized Revenue
+ * is added up - used by getPurchaseReportData and the drill-down alike. */
+export function summarizeRecognizedPurchases(
+  rows: { sale_price: number; order_item_id: string | null; order_items: PurchaseRow["order_items"] }[]
+): RecognizedPurchasesSummary {
+  let total = 0;
+  let legacyTotal = 0;
+  let count = 0;
+  for (const row of rows) {
+    if (!isRevenueRecognized(row)) continue;
+    const amount = Number(row.sale_price) || 0;
+    total += amount;
+    if (!row.order_item_id) legacyTotal += amount;
+    count += 1;
+  }
+  return { total, legacyTotal, linkedTotal: total - legacyTotal, count };
+}
+
+export interface RecognizedRevenueRow {
+  purchase_id: string | null;
+  /** The Dashboard's date basis for this metric: customer_purchases.sale_date. */
+  recognition_date: string;
+  amount: number;
+  order_id: string | null;
+  order_number: string | null;
+  order_item_id: string | null;
+  order_status: string | null;
+  payment_status: string | null;
+  product_id: string | null;
+  product_code: string | null;
+  product_name: string | null;
+  customer_id: string;
+  customer_name: string;
+  customer_code: string | null;
+  salesperson: string | null;
+  rule: RecognitionRule;
+  rule_label: string;
+}
+
+export interface RecognizedRevenueDetail extends RecognizedPurchasesSummary {
+  rows: RecognizedRevenueRow[];
+}
+
+const EMPTY_RECOGNIZED_DETAIL: RecognizedRevenueDetail = { total: 0, legacyTotal: 0, linkedTotal: 0, count: 0, rows: [] };
+
+/** Drill-down for "Doanh thu đã ghi nhận": one row per recognized
+ * customer_purchases row, newest first. `total` is computed by
+ * summarizeRecognizedPurchases over the SAME rows fetchPurchaseRows returns
+ * to the Dashboard, so it reconciles exactly (BR-001 + BR-002 included;
+ * neither rule is changed). */
+export async function getRecognizedRevenueDetail(
+  range: DateRange | null,
+  client: SupabaseClient = supabase,
+  staff?: Staff | null
+): Promise<RecognizedRevenueDetail> {
+  const { data, error } = await fetchPurchaseRows(range, client, staff);
+  if (error || !data) {
+    if (error) console.error("Error fetching recognized revenue detail:", error);
+    return EMPTY_RECOGNIZED_DETAIL;
+  }
+
+  const purchaseRows = data as unknown as PurchaseRow[];
+  const summary = summarizeRecognizedPurchases(purchaseRows);
+
+  const rows: RecognizedRevenueRow[] = [];
+  for (const row of purchaseRows) {
+    const rule = purchaseRecognitionRule(row);
+    if (!rule) continue;
+    const order = row.order_items?.orders ?? null;
+    rows.push({
+      purchase_id: row.id ?? null,
+      recognition_date: row.sale_date,
+      amount: Number(row.sale_price) || 0,
+      order_id: row.order_items?.order_id ?? null,
+      order_number: order?.order_number ?? null,
+      order_item_id: row.order_item_id,
+      order_status: order?.order_status ?? null,
+      payment_status: order?.payment_status ?? null,
+      product_id: row.product_id,
+      product_code: row.product?.product_code ?? null,
+      product_name: row.product?.product_name ?? null,
+      customer_id: row.customer_id,
+      customer_name: row.customer?.full_name ?? "",
+      customer_code: row.customer?.customer_code ?? null,
+      salesperson: row.salesperson,
+      rule,
+      rule_label: RECOGNITION_RULE_LABEL[rule],
+    });
+  }
+  rows.sort((a, b) => (a.recognition_date === b.recognition_date ? 0 : a.recognition_date < b.recognition_date ? 1 : -1));
+
+  return { ...summary, rows };
 }
 
 interface BatchPurchaseRow {

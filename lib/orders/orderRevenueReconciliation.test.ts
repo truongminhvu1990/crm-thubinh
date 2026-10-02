@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mock } from "node:test";
+import { applyWindow, WindowState } from "@/lib/reports/postgrestFake.testutil";
 
 /**
  * Order Revenue Visibility Semantic Gap fix (2026-08-29 follow-up).
@@ -52,21 +53,29 @@ interface FakePurchaseRow {
  * `range: null, staff: null`, product_id null on every row skipping the
  * second `products` query). */
 function combinedFakeClient(orderRows: FakeOrderRow[], purchaseRows: FakePurchaseRow[]) {
+  // Phase 1.2: both loaders page, so each fake answers .order() / .range() / count and
+  // applies the PostgREST max-rows cap (lib/reports/postgrestFake.testutil.ts).
+  const chain = <T,>(table: string, rows: T[], filters: string[]) => {
+    const w: WindowState = {};
+    const builder: Record<string, unknown> = {
+      select: (_cols?: string, opts?: { count?: string }) => {
+        if (opts?.count === "exact") w.countExact = true;
+        return builder;
+      },
+      order: (col: string, o?: { ascending?: boolean }) => ((w.order = { col, ascending: o?.ascending ?? true }), builder),
+      range: (from: number, to: number) => ((w.range = [from, to]), builder),
+      then: (ok: (v: unknown) => unknown, fail?: (e: unknown) => unknown) => {
+        const { data, count } = applyWindow(rows, w, undefined, table);
+        return Promise.resolve({ data, error: null, count }).then(ok, fail);
+      },
+    };
+    for (const f of filters) builder[f] = () => builder;
+    return builder;
+  };
   return {
     from: (table: string) => {
-      if (table === "orders") {
-        const builder = {
-          select: () => builder,
-          neq: () => builder,
-          gte: () => builder,
-          lt: () => builder,
-          then: (resolve: (r: { data: FakeOrderRow[]; error: null }) => void) => resolve({ data: orderRows, error: null }),
-        };
-        return builder;
-      }
-      if (table === "customer_purchases") {
-        return { select: async () => ({ data: purchaseRows, error: null }) };
-      }
+      if (table === "orders") return chain("orders", orderRows, ["neq", "gte", "lt"]);
+      if (table === "customer_purchases") return chain("customer_purchases", purchaseRows, ["gte", "lt"]);
       throw new Error(`Unexpected table: ${table}`);
     },
   } as never;

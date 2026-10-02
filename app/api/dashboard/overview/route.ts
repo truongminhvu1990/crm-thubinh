@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProductReportData, getBatchStaticReportData, getPurchaseReportData } from "@/lib/reports/reports.service";
 import { getOrderValueSummary } from "@/lib/orders/orderValueSummary.service";
+import { getOverviewMetrics } from "@/lib/reports/overviewMetrics.service";
 import { getCustomerStats } from "@/lib/customer.service";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentStaffFromRequest } from "@/lib/permission/serverAuth";
+import { createRequestClient, getCurrentStaffFromRequest } from "@/lib/permission/serverAuth";
+import { staffHasPermission } from "@/lib/permission/permissionCenter.service";
 import { DateRange } from "@/lib/dateFilter";
+import type { Staff } from "@/types/staff";
 
 /** Backend API Foundation (Package 4C, Wave 5, revised) - Dashboard's
  * server-side read endpoint for the four widgets its main effect fetches
@@ -39,7 +42,36 @@ import { DateRange } from "@/lib/dateFilter";
  * `orderValue.totalOrderValue = orderValue.orderBasedRecognizedValue +
  * orderValue.orderBasedUnrecognizedValue` holds exactly regardless of any
  * legacy revenue. `purchases.totalRevenue` (B2) remains the one and only
- * Recognized Revenue source of truth for this endpoint - untouched. */
+ * Recognized Revenue source of truth for this endpoint - untouched.
+ *
+ * Reporting Foundation, Phase 1: the revenue/order/sold/inventory figures are
+ * now produced by `getOverviewMetrics` (lib/reports/overviewMetrics.service.ts),
+ * which calls the SAME canonical functions the drill-down endpoints under
+ * /api/reports/overview/* are built on. `purchases`, `orderValue` and
+ * `unrecognizedOrderValue` keep their exact previous shapes and values so the
+ * current Dashboard UI is unaffected; `overview` is the new additive block
+ * carrying all six Overview metrics (Tổng giá trị đơn hàng, Doanh thu đã ghi
+ * nhận, Giá trị chưa ghi nhận, Hàng đang giữ, Hàng còn lại, Đã bán).
+ *
+ * Phase 1.4.2 - authorization boundary (Release Control, pre-approval): the
+ * `overview` block is reporting data (Sold, and Held / Remaining inventory value
+ * across ALL staff), so it requires `reports.view` - the same key every
+ * /api/reports/* route enforces. A caller WITHOUT it receives exactly the
+ * pre-Phase-1 response (customers, products, batches, purchases, orderValue,
+ * unrecognizedOrderValue; no `overview`), computed by the same two functions as
+ * before, and Sold / inventory are never even calculated for them. The legacy
+ * keys' own authorization policy is deliberately NOT changed here. */
+/** Fail closed: no staff row, or any error while resolving the grant, means NOT permitted. */
+async function canViewReporting(request: NextRequest, staff: Staff | null): Promise<boolean> {
+  if (!staff) return false;
+  try {
+    return await staffHasPermission(staff, "reports.view", createRequestClient(request));
+  } catch (error) {
+    console.error("Dashboard overview: reports.view check failed, treating as not permitted:", error);
+    return false;
+  }
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const start = searchParams.get("start");
@@ -48,16 +80,30 @@ export async function GET(request: NextRequest) {
 
   const client = await createClient();
   const staff = await getCurrentStaffFromRequest(request);
+  const permitted = await canViewReporting(request, staff);
 
-  const [customers, products, batches, purchases, orderValue] = await Promise.all([
+  const [customers, products, batches, revenue] = await Promise.all([
     getCustomerStats(client, staff),
     getProductReportData(client),
     getBatchStaticReportData(client),
-    getPurchaseReportData(range, client, staff),
-    getOrderValueSummary(range, staff, client),
+    permitted
+      ? getOverviewMetrics(range, client, staff)
+      : Promise.all([getPurchaseReportData(range, client, staff), getOrderValueSummary(range, staff, client)]).then(
+          ([purchases, orderValue]) => ({ metrics: null, purchases, orderValue })
+        ),
   ]);
+  const { metrics, purchases, orderValue } = revenue;
 
+  // Identical to metrics.unrecognizedValue.value (same field, one definition).
   const unrecognizedOrderValue = orderValue.orderBasedUnrecognizedValue;
 
-  return NextResponse.json({ customers, products, batches, purchases, orderValue, unrecognizedOrderValue });
+  return NextResponse.json({
+    customers,
+    products,
+    batches,
+    purchases,
+    orderValue,
+    unrecognizedOrderValue,
+    ...(metrics ? { overview: metrics } : {}),
+  });
 }

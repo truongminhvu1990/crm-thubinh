@@ -6,6 +6,7 @@ import { getCurrentStaff } from "@/lib/permission";
 import { applyDataScopeByName, applyDataScopeWithFallback } from "@/lib/permission/dataScope";
 import { deriveOrderPaymentSummary } from "@/lib/reports/orderPaymentSummary";
 import { isOrderRecognized, isSoldOrder } from "@/lib/reports/revenueDefinition";
+import { fetchAllRows, selectIn } from "@/lib/reports/selectIn";
 
 // Revenue & Sales Reporting Unification (Product Owner decision) - this
 // report is a SOLD PRODUCTS report, not a Recognized Revenue report. Its
@@ -98,30 +99,10 @@ function first<T>(value: T | T[] | null): T | null {
   return Array.isArray(value) ? value[0] ?? null : value;
 }
 
-const IN_CHUNK = 200;
-
-async function selectIn<T>(
-  client: SupabaseClient,
-  table: string,
-  columns: string,
-  column: string,
-  values: string[]
-): Promise<T[]> {
-  const rows: T[] = [];
-  for (let i = 0; i < values.length; i += IN_CHUNK) {
-    const { data, error } = await client
-      .from(table)
-      .select(columns)
-      .in(column, values.slice(i, i + IN_CHUNK));
-    if (error) {
-      console.error(`Error fetching ${table} for monthly sold products:`, error);
-      continue;
-    }
-    rows.push(...((data as unknown as T[]) || []));
-  }
-  return rows;
-}
-
+// Phase 1.2: id-keyed lookups use the shared selectIn (lib/reports/selectIn.ts), which
+// chunks the id list AND pages within each chunk - this file's former private copy
+// only chunked, so a chunk owning more than PostgREST's max-rows cap (e.g. 200
+// orders with 6+ payments each) was silently truncated.
 /** Month (YYYY-MM) shortcut - resolves to the same [start, end) shape as
  * every other date range in this codebase, without a second calendar-math
  * implementation. */
@@ -148,26 +129,30 @@ async function fetchOrderLines(
   // Sold scope is decided by the shared isSoldOrder() below (using real
   // payment RECORDS, not payment_status); the query only narrows to the two
   // statuses that can ever qualify.
-  let query = client
-    .from("orders")
-    .select(
-      "id, order_number, order_status, payment_status, order_date, total_amount, customer_id, sales_owner, customer:customers(full_name, customer_code)"
-    )
-    .in("order_status", ["Completed", "Reserved"]);
-  if (range.from) query = query.gte("order_date", range.from);
-  if (range.to) query = query.lt("order_date", range.to);
+  // Phase 1.2: read through fetchAllRows (paged, ordered by the unique `id`) so a
+  // range holding more candidate orders than PostgREST's max-rows cap (default
+  // 1000) is read completely. Same filters, scope and date basis as before.
+  const { data, error } = await fetchAllRows<OrderRow>(
+    client,
+    "orders",
+    "id, order_number, order_status, payment_status, order_date, total_amount, customer_id, sales_owner, customer:customers(full_name, customer_code)",
+    async (base) => {
+      let query = base.in("order_status", ["Completed", "Reserved"]);
+      if (range.from) query = query.gte("order_date", range.from);
+      if (range.to) query = query.lt("order_date", range.to);
 
-  // Data Scope - same "orders" resource / sales_owner-by-name mechanism
-  // /orders and the Dashboard's Order Value cards already use.
-  if (staff) query = (await applyDataScopeByName(query, staff, "orders", "sales_owner", client)).query;
-
-  const { data, error } = await query;
+      // Data Scope - same "orders" resource / sales_owner-by-name mechanism
+      // /orders and the Dashboard's Order Value cards already use.
+      if (staff) query = (await applyDataScopeByName(query, staff, "orders", "sales_owner", client)).query;
+      return { query };
+    }
+  );
   if (error) {
     console.error("Error fetching sold orders for monthly sold products:", error);
     return [];
   }
 
-  const candidates = (data as unknown as OrderRow[]) || [];
+  const candidates = data || [];
   if (candidates.length === 0) return [];
 
   // "Reserved counts as Sold only with at least one ACTUAL payment": decided
@@ -272,26 +257,28 @@ async function fetchLegacyLines(
   client: SupabaseClient,
   staff: Staff | null
 ): Promise<SoldLine[]> {
-  let query = client
-    .from("customer_purchases")
-    .select(
-      `id, customer_id, product_id, sale_price, sale_date, salesperson, salesperson_id, customer:customers(full_name, customer_code), ${PRODUCT_COLUMNS}`
-    )
-    .is("order_item_id", null);
-  if (range.from) query = query.gte("sale_date", range.from);
-  if (range.to) query = query.lt("sale_date", range.to);
+  // Phase 1.2: paged like the other Sold reads (see fetchOrderLines).
+  const { data, error } = await fetchAllRows<LegacyPurchaseRow>(
+    client,
+    "customer_purchases",
+    `id, customer_id, product_id, sale_price, sale_date, salesperson, salesperson_id, customer:customers(full_name, customer_code), ${PRODUCT_COLUMNS}`,
+    async (base) => {
+      let query = base.is("order_item_id", null);
+      if (range.from) query = query.gte("sale_date", range.from);
+      if (range.to) query = query.lt("sale_date", range.to);
 
-  // Data Scope - same "revenue" resource / salesperson_id-with-text-fallback
-  // mechanism Sales Ledger and the Dashboard's revenue widget apply.
-  if (staff) query = (await applyDataScopeWithFallback(query, staff, "revenue", "salesperson_id", "salesperson", client)).query;
-
-  const { data, error } = await query;
+      // Data Scope - same "revenue" resource / salesperson_id-with-text-fallback
+      // mechanism Sales Ledger and the Dashboard's revenue widget apply.
+      if (staff) query = (await applyDataScopeWithFallback(query, staff, "revenue", "salesperson_id", "salesperson", client)).query;
+      return { query };
+    }
+  );
   if (error) {
     console.error("Error fetching legacy purchases for monthly sold products:", error);
     return [];
   }
 
-  return ((data as unknown as LegacyPurchaseRow[]) || []).map((r) => {
+  return (data || []).map((r) => {
     const product = first(r.product);
     const customer = first(r.customer);
     const amount = Number(r.sale_price) || 0;

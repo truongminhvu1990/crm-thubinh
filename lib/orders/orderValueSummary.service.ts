@@ -3,7 +3,15 @@ import { supabase } from "@/lib/supabase";
 import { DateRange } from "@/lib/dateFilter";
 import { applyDataScopeByName } from "@/lib/permission/dataScope";
 import type { ScopingStaff } from "./order.repository";
-import { isOrderRecognized, summarizeRevenue } from "@/lib/reports/revenueDefinition";
+import {
+  getUnrecognizedReason,
+  isOrderRecognized,
+  isSoldOrder,
+  summarizeRevenue,
+  UnrecognizedReason,
+} from "@/lib/reports/revenueDefinition";
+import { deriveOrderPaymentSummary } from "@/lib/reports/orderPaymentSummary";
+import { fetchAllRows, selectIn } from "@/lib/reports/selectIn";
 
 /** Revenue Management Visibility (2026-08-29), Order Revenue Visibility
  * Semantic Gap fix (2026-08-29 follow-up) — this module owns BOTH figures
@@ -85,40 +93,57 @@ const EMPTY_SUMMARY: OrderValueSummary = {
   breakdown: [],
 };
 
+/** One scoped, non-Lost order as the canonical loader returns it. Only
+ * order_status / payment_status / total_amount feed any figure; the rest
+ * identifies the order in the drill-down views. */
 interface OrderValueRow {
+  id?: string;
+  order_number?: string;
+  order_date?: string;
+  customer_id?: string;
+  customer?: { full_name: string; customer_code: string } | { full_name: string; customer_code: string }[] | null;
   order_status: string;
   payment_status: string;
   total_amount: number;
 }
 
-/** Total Order Value + its non-recognized breakdown for the Orders table
- * directly (`order_date`-based — B1's own explicit instruction: use the
- * Order model's own date, never `sale_date`, and never silently switch
- * either side's date semantics). Lost orders are excluded at the query
- * level (B1: "Exclude Lost orders unless the existing LOCKED specification
- * explicitly requires otherwise" — no such requirement was found in
- * `docs/03_ORDER_SPEC.md`). `staff` is optional and, when provided, scopes
- * to Own/Team/All via the same `applyDataScopeByName(..., "orders",
- * "sales_owner", ...)` call `findAllOrders()` (order.repository.ts)
- * already uses — the exact same resource key and ownership field, so this
- * widget's visibility never diverges from `/orders`' own. */
-export async function getOrderValueSummary(
+/** Phase 1 - Reporting Foundation. The ONE query behind "Tổng giá trị đơn
+ * hàng" and "Giá trị đơn chưa ghi nhận": every non-Lost order whose
+ * `order_date` falls in the range, Data-Scoped exactly as /orders is.
+ * getOrderValueSummary (the Dashboard figures) and both drill-down datasets
+ * below read through this, so their totals cannot disagree. Returns null on a
+ * query error (callers degrade to the empty result, as before).
+ *
+ * Phase 1.2: read through fetchAllRows (paged, ordered by the unique `id`), so
+ * a range holding more orders than PostgREST's max-rows cap (default 1000) is
+ * still summed COMPLETELY instead of being silently truncated. Filters, data
+ * scope and date basis are exactly what they were. */
+async function loadOrderValueOrders(
   range: DateRange | null,
-  staff?: ScopingStaff | null,
-  client: SupabaseClient = supabase
-): Promise<OrderValueSummary> {
-  let query = client.from("orders").select("order_status, payment_status, total_amount").neq("order_status", "Lost");
-
-  if (range) query = query.gte("order_date", range.start).lt("order_date", range.end);
-  if (staff) query = (await applyDataScopeByName(query, staff, "orders", "sales_owner", client)).query;
-
-  const { data, error } = await query;
+  staff: ScopingStaff | null | undefined,
+  client: SupabaseClient
+): Promise<OrderValueRow[] | null> {
+  const { data, error } = await fetchAllRows<OrderValueRow>(
+    client,
+    "orders",
+    "id, order_number, order_date, order_status, payment_status, total_amount, customer_id, customer:customers(full_name, customer_code)",
+    async (base) => {
+      let query = base.neq("order_status", "Lost");
+      if (range) query = query.gte("order_date", range.start).lt("order_date", range.end);
+      if (staff) query = (await applyDataScopeByName(query, staff, "orders", "sales_owner", client)).query;
+      return { query };
+    }
+  );
   if (error || !data) {
     if (error) console.error("Error fetching order value summary:", error);
-    return EMPTY_SUMMARY;
+    return null;
   }
+  return data;
+}
 
-  const rows = data as unknown as OrderValueRow[];
+/** Pure: Total / Recognized / Unrecognized / breakdown from already-loaded
+ * orders. The only place these figures are computed. */
+export function summarizeOrderValueRows(rows: OrderValueRow[]): OrderValueSummary {
   const revenue = summarizeRevenue(rows.map((row) => ({ ...row, amount: row.total_amount })));
   const breakdownMap = new Map<string, OrderValueBreakdownRow>();
 
@@ -143,4 +168,158 @@ export async function getOrderValueSummary(
     recognizedRatio: revenue.recognizedRatio,
     breakdown: Array.from(breakdownMap.values()).sort((a, b) => b.total - a.total),
   };
+}
+
+/** Total Order Value + its non-recognized breakdown for the Orders table
+ * directly (`order_date`-based — B1's own explicit instruction: use the
+ * Order model's own date, never `sale_date`, and never silently switch
+ * either side's date semantics). Lost orders are excluded at the query
+ * level (B1: "Exclude Lost orders unless the existing LOCKED specification
+ * explicitly requires otherwise" — no such requirement was found in
+ * `docs/03_ORDER_SPEC.md`). `staff` is optional and, when provided, scopes
+ * to Own/Team/All via the same `applyDataScopeByName(..., "orders",
+ * "sales_owner", ...)` call `findAllOrders()` (order.repository.ts)
+ * already uses — the exact same resource key and ownership field, so this
+ * widget's visibility never diverges from `/orders`' own. */
+export async function getOrderValueSummary(
+  range: DateRange | null,
+  staff?: ScopingStaff | null,
+  client: SupabaseClient = supabase
+): Promise<OrderValueSummary> {
+  const rows = await loadOrderValueOrders(range, staff, client);
+  return rows ? summarizeOrderValueRows(rows) : EMPTY_SUMMARY;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1 - Reporting Foundation: drill-down datasets. Both are built from
+// the SAME rows getOrderValueSummary summarizes, plus the Order's real
+// payment records for the paid / remaining / "is there a payment" columns.
+// ---------------------------------------------------------------------------
+
+export interface OrderValueDetailRow {
+  order_id: string;
+  order_number: string;
+  order_date: string;
+  customer_id: string;
+  customer_name: string;
+  customer_code: string | null;
+  order_status: string;
+  payment_status: string;
+  order_total: number;
+  /** Sum of the Order's real `payments` rows (payments.amount > 0). */
+  paid_amount: number;
+  remaining_amount: number;
+  payment_count: number;
+  /** BR-001 (Completed + Paid) - the SAME check the summary applies. */
+  recognized: boolean;
+  /** LOCKED Sold definition (Completed, or Reserved with >= 1 payment
+   * record). Informational on this view - Total Order Value is NOT Sold. */
+  sold: boolean;
+  /** null for a recognized order. */
+  unrecognized_reason: UnrecognizedReason | null;
+}
+
+export interface OrderValueDetail {
+  /** The identical object getOrderValueSummary returns for the same inputs. */
+  summary: OrderValueSummary;
+  /** = summary.totalOrderValue, and also = the sum of `rows[].order_total`. */
+  total: number;
+  count: number;
+  rows: OrderValueDetailRow[];
+}
+
+export interface UnrecognizedOrderDetail {
+  summary: OrderValueSummary;
+  /** = summary.orderBasedUnrecognizedValue, and also = the sum of
+   * `rows[].order_total`. NOT "total minus recognized revenue": it is the
+   * Completed+Paid complement inside the Orders population only. */
+  total: number;
+  count: number;
+  rows: OrderValueDetailRow[];
+}
+
+function firstCustomer(c: OrderValueRow["customer"]): { full_name: string; customer_code: string } | null {
+  if (!c) return null;
+  return Array.isArray(c) ? c[0] ?? null : c;
+}
+
+async function buildDetailRows(rows: OrderValueRow[], client: SupabaseClient): Promise<OrderValueDetailRow[]> {
+  const orderIds = rows.map((r) => r.id).filter((id): id is string => !!id);
+  const paymentRows = orderIds.length
+    ? await selectIn<{ order_id: string; amount: number; payment_method: string }>(
+        client,
+        "payments",
+        "order_id, amount, payment_method",
+        "order_id",
+        orderIds
+      )
+    : [];
+  const paymentsByOrderId = new Map<string, { amount: number; payment_method: string }[]>();
+  for (const p of paymentRows) {
+    const list = paymentsByOrderId.get(p.order_id) ?? [];
+    list.push({ amount: Number(p.amount) || 0, payment_method: p.payment_method });
+    paymentsByOrderId.set(p.order_id, list);
+  }
+
+  const detail = rows.map((row): OrderValueDetailRow => {
+    const total = Number(row.total_amount) || 0;
+    const payments = (row.id && paymentsByOrderId.get(row.id)) || [];
+    const paid = deriveOrderPaymentSummary(total, payments);
+    const customer = firstCustomer(row.customer);
+    return {
+      order_id: row.id ?? "",
+      order_number: row.order_number ?? "",
+      order_date: row.order_date ?? "",
+      customer_id: row.customer_id ?? "",
+      customer_name: customer?.full_name ?? "",
+      customer_code: customer?.customer_code ?? null,
+      order_status: row.order_status,
+      payment_status: row.payment_status,
+      order_total: total,
+      paid_amount: paid.amountPaid,
+      remaining_amount: paid.remainingBalance,
+      payment_count: payments.length,
+      recognized: isOrderRecognized(row),
+      sold: isSoldOrder(row, payments.length),
+      unrecognized_reason: getUnrecognizedReason(row, payments.length),
+    };
+  });
+
+  return detail.sort((a, b) => {
+    if (a.order_date !== b.order_date) return a.order_date < b.order_date ? 1 : -1;
+    return a.order_number < b.order_number ? 1 : a.order_number > b.order_number ? -1 : 0;
+  });
+}
+
+/** Drill-down for "Tổng giá trị đơn hàng": every non-Lost order in range.
+ * `total` reconciles exactly to getOrderValueSummary().totalOrderValue. */
+export async function getOrderValueDetail(
+  range: DateRange | null,
+  staff?: ScopingStaff | null,
+  client: SupabaseClient = supabase
+): Promise<OrderValueDetail> {
+  const orders = await loadOrderValueOrders(range, staff, client);
+  if (!orders) return { summary: EMPTY_SUMMARY, total: 0, count: 0, rows: [] };
+  const summary = summarizeOrderValueRows(orders);
+  const rows = await buildDetailRows(orders, client);
+  return { summary, total: summary.totalOrderValue, count: summary.totalOrderCount, rows };
+}
+
+/** Drill-down for "Giá trị đơn chưa ghi nhận": exactly the orders that are
+ * not Completed + Paid. `total` reconciles exactly to
+ * getOrderValueSummary().orderBasedUnrecognizedValue (same rows, same
+ * check). Payment records are only fetched for these orders. */
+export async function getUnrecognizedOrderDetail(
+  range: DateRange | null,
+  staff?: ScopingStaff | null,
+  client: SupabaseClient = supabase
+): Promise<UnrecognizedOrderDetail> {
+  const orders = await loadOrderValueOrders(range, staff, client);
+  if (!orders) return { summary: EMPTY_SUMMARY, total: 0, count: 0, rows: [] };
+  const summary = summarizeOrderValueRows(orders);
+  const rows = await buildDetailRows(
+    orders.filter((o) => !isOrderRecognized(o)),
+    client
+  );
+  return { summary, total: summary.orderBasedUnrecognizedValue, count: summary.unrecognizedOrderCount, rows };
 }
