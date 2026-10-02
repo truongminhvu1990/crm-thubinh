@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Users, Gem, Package, TrendingUp, Calendar, Wallet, Coins, ClipboardList, PiggyBank } from "lucide-react";
+import { Users, Gem, Package, TrendingUp, Calendar, Wallet, Coins, ClipboardList, PiggyBank, PackageCheck, Hourglass, PackageOpen } from "lucide-react";
 import { FollowUpSummaryCounts } from "@/lib/customer.service";
 import { ProductReportData, BatchStaticReportData, PurchaseReportData } from "@/lib/reports/reports.service";
 import { OrderValueSummary } from "@/lib/orders/orderValueSummary.service";
+import type { OverviewMetrics } from "@/lib/reports/overviewMetrics.service";
+import { METRIC_LABELS, inventoryPageHref, salesPageHref } from "@/lib/reports/overviewUi";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
 import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
 import { TopSalesStaffEntry } from "@/lib/staff.service";
@@ -35,6 +37,7 @@ export default function Dashboard() {
   const [purchaseData, setPurchaseData] = useState<PurchaseReportData | null>(null);
   const [orderValue, setOrderValue] = useState<OrderValueSummary | null>(null);
   const [unrecognizedOrderValue, setUnrecognizedOrderValue] = useState(0);
+  const [overview, setOverview] = useState<OverviewMetrics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [followUpCounts, setFollowUpCounts] = useState<FollowUpSummaryCounts>({
     overdue: 0,
@@ -65,6 +68,7 @@ export default function Dashboard() {
               purchases: PurchaseReportData;
               orderValue: OrderValueSummary;
               unrecognizedOrderValue: number;
+              overview: OverviewMetrics;
             }>)
           : null
       )
@@ -76,6 +80,7 @@ export default function Dashboard() {
         setPurchaseData(overview.purchases);
         setOrderValue(overview.orderValue);
         setUnrecognizedOrderValue(overview.unrecognizedOrderValue);
+        setOverview(overview.overview ?? null);
       })
       .catch((error) => console.error("Failed to load dashboard stats:", error))
       .finally(() => {
@@ -192,16 +197,18 @@ export default function Dashboard() {
           card's hint below says so explicitly so the two numbers are never
           read as directly subtractable. */}
       <div className="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard
-          testId="dashboard-total-order-value-card"
-          title="Tổng giá trị đơn hàng"
-          value={currency.format(totalOrderValue)}
-          hint={`Tổng giá trị các đơn phát sinh trong kỳ (Đơn hàng, không tính Lost) · ${orderValue?.totalOrderCount ?? 0} đơn`}
-          icon={<ClipboardList className="w-8 h-8 text-blue-600" />}
-          color="bg-blue-100"
-          badge={<ScopeIndicator resource="orders" />}
-        />
-        <Link href="/reports">
+        <Link href={salesPageHref("order-value")}>
+          <StatCard
+            testId="dashboard-total-order-value-card"
+            title={METRIC_LABELS.totalOrderValue}
+            value={currency.format(totalOrderValue)}
+            hint={`Tổng giá trị các đơn phát sinh trong kỳ (Đơn hàng, không tính Lost) · ${orderValue?.totalOrderCount ?? 0} đơn`}
+            icon={<ClipboardList className="w-8 h-8 text-blue-600" />}
+            color="bg-blue-100"
+            badge={<ScopeIndicator resource="orders" />}
+          />
+        </Link>
+        <Link href={salesPageHref("recognized-revenue")}>
           <StatCard
             testId="dashboard-revenue-card"
             title={revenueLabel}
@@ -212,15 +219,58 @@ export default function Dashboard() {
             badge={<ScopeIndicator resource="revenue" />}
           />
         </Link>
-        <StatCard
-          testId="dashboard-unrecognized-order-value-card"
-          title="Giá trị đơn chưa ghi nhận"
-          value={currency.format(unrecognizedOrderValue)}
-          hint={`${orderValue?.unrecognizedOrderCount ?? 0} đơn · Tính riêng từ Đơn hàng — không phải hiệu số của hai chỉ số trên`}
-          icon={<PiggyBank className="w-8 h-8 text-amber-600" />}
-          color="bg-amber-100"
-        />
+        <Link href={salesPageHref("unrecognized")}>
+          <StatCard
+            testId="dashboard-unrecognized-order-value-card"
+            title={METRIC_LABELS.unrecognizedValue}
+            value={currency.format(unrecognizedOrderValue)}
+            hint={`${orderValue?.unrecognizedOrderCount ?? 0} đơn · Tính riêng từ Đơn hàng — không phải hiệu số của hai chỉ số trên`}
+            icon={<PiggyBank className="w-8 h-8 text-amber-600" />}
+            color="bg-amber-100"
+          />
+        </Link>
       </div>
+
+      {/* Phase 1.4 - the other three canonical Overview metrics (Đã bán,
+          Hàng đang giữ, Hàng còn lại). Values come from the same
+          /api/dashboard/overview response; each opens its drill-down.
+          Held/Remaining are current inventory, not date-filtered.
+          Phase 1.4.2: rendered only when the server returned `overview`,
+          which it does only for callers holding reports.view. */}
+      {overview && (
+      <div className="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Link href={salesPageHref("sold")}>
+          <StatCard
+            testId="dashboard-sold-card"
+            title={METRIC_LABELS.sold}
+            value={overview?.sold ? currency.format(overview.sold.value) : "—"}
+            hint={overview?.sold ? `${overview.sold.orderCount} đơn · ${overview.sold.lineCount} sản phẩm` : undefined}
+            icon={<PackageCheck className="w-8 h-8 text-emerald-600" />}
+            color="bg-emerald-100"
+          />
+        </Link>
+        <Link href={inventoryPageHref("held")}>
+          <StatCard
+            testId="dashboard-held-card"
+            title={METRIC_LABELS.held}
+            value={overview?.held ? currency.format(overview.held.value) : "—"}
+            hint={overview?.held ? `${overview.held.count} sản phẩm${overview.held.missingPriceCount ? ` · ${overview.held.missingPriceCount} chưa định giá` : ""} · hiện tại` : undefined}
+            icon={<Hourglass className="w-8 h-8 text-blue-600" />}
+            color="bg-blue-100"
+          />
+        </Link>
+        <Link href={inventoryPageHref("remaining")}>
+          <StatCard
+            testId="dashboard-remaining-card"
+            title={METRIC_LABELS.remaining}
+            value={overview?.remaining ? currency.format(overview.remaining.value) : "—"}
+            hint={overview?.remaining ? `${overview.remaining.count} sản phẩm${overview.remaining.missingPriceCount ? ` · ${overview.remaining.missingPriceCount} chưa định giá` : ""} · hiện tại` : undefined}
+            icon={<PackageOpen className="w-8 h-8 text-primary" />}
+            color="bg-primary/10"
+          />
+        </Link>
+      </div>
+      )}
       {/* Revenue & Sales Reporting Unification (revised) - the two groups of
           cards have DIFFERENT scopes and are deliberately not forced into
           one identity: (1) Orders view, by order date: every non-Lost Order
@@ -232,7 +282,7 @@ export default function Dashboard() {
       <div className="mb-4 space-y-1 text-xs text-muted-foreground" data-testid="dashboard-revenue-scope-notes">
         <p data-testid="dashboard-orders-view-line">
           Theo Đơn hàng (ngày đơn): Tổng giá trị đơn hàng {currency.format(totalOrderValue)} = Completed + Paid{" "}
-          {currency.format(orderValue?.orderBasedRecognizedValue ?? 0)} + Giá trị đơn chưa ghi nhận{" "}
+          {currency.format(orderValue?.orderBasedRecognizedValue ?? 0)} + {METRIC_LABELS.unrecognizedValue}{" "}
           {currency.format(unrecognizedOrderValue)}
         </p>
         <p data-testid="dashboard-recognized-breakdown-line">
@@ -249,14 +299,14 @@ export default function Dashboard() {
         <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
           <StatCard
             testId="dashboard-cost-card"
-            title="Giá vốn"
+            title={METRIC_LABELS.cost}
             value={currency.format(purchaseData?.totalCost ?? 0)}
             icon={<Coins className="w-8 h-8 text-amber-600" />}
             color="bg-amber-100"
           />
           <StatCard
             testId="dashboard-profit-card"
-            title="Lãi / Lỗ"
+            title={METRIC_LABELS.grossProfit}
             value={currency.format(purchaseData?.totalProfit ?? 0)}
             icon={<TrendingUp className="w-8 h-8 text-primary" />}
             color="bg-primary/10"

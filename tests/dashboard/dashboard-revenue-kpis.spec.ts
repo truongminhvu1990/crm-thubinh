@@ -40,7 +40,7 @@ test.describe("Dashboard revenue management KPIs", () => {
     await expect(recognizedCard).toContainText("Doanh thu đã ghi nhận");
     await expect(recognizedCard).toContainText("Completed + Paid");
     await expect(unrecognizedCard).toBeVisible();
-    await expect(unrecognizedCard).toContainText("Giá trị đơn chưa ghi nhận");
+    await expect(unrecognizedCard).toContainText("Giá trị chưa ghi nhận");
     // Semantic gap fix: the hint must not let the user infer B3 = B1 - B2.
     await expect(unrecognizedCard).toContainText("không phải hiệu số");
 

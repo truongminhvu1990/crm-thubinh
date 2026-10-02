@@ -56,6 +56,7 @@ import {
   PurchaseReportData,
 } from "@/lib/reports/reports.service";
 import { DateRange } from "@/lib/dateFilter";
+import { METRIC_LABELS } from "@/lib/reports/overviewUi";
 
 const currency = new Intl.NumberFormat("vi-VN", {
   style: "currency",
@@ -269,6 +270,24 @@ export default function ReportsPage() {
           this change - only decluttered.
           ============================================================ */}
 
+      {/* Phase 1.4 - the simplified entry points. Each opens one screen whose
+          numbers come from the canonical Overview; the BI Center below is
+          unchanged. */}
+      <section aria-label="Báo cáo chính" className="grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="reports-primary-entries">
+        <Link href="/reports/sales" className="block rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:border-primary/40" data-testid="reports-entry-sales">
+          <span className="block text-sm font-semibold text-foreground">Bán hàng</span>
+          <span className="mt-1 block text-xs text-muted-foreground">{METRIC_LABELS.totalOrderValue} · {METRIC_LABELS.recognizedRevenue} · {METRIC_LABELS.unrecognizedValue} · {METRIC_LABELS.sold}</span>
+        </Link>
+        <Link href="/reports/inventory" className="block rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:border-primary/40" data-testid="reports-entry-inventory">
+          <span className="block text-sm font-semibold text-foreground">Hàng hóa</span>
+          <span className="mt-1 block text-xs text-muted-foreground">{METRIC_LABELS.held} · {METRIC_LABELS.remaining}</span>
+        </Link>
+        <Link href="/reports/money-profit" className="block rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:border-primary/40" data-testid="reports-entry-money-profit">
+          <span className="block text-sm font-semibold text-foreground">Tiền &amp; Lợi nhuận</span>
+          <span className="mt-1 block text-xs text-muted-foreground">{METRIC_LABELS.recognizedRevenue} · {METRIC_LABELS.cost} · {METRIC_LABELS.grossProfit}</span>
+        </Link>
+      </section>
+
       <div key={refreshToken} className="space-y-6">
         {/* Revenue Reporting (07_REPORTING_SPEC.md §5) */}
         <ReportGroupSection title="Doanh thu" description="Tổng quan, KPI, xu hướng và lợi nhuận doanh thu" icon={Wallet}>
@@ -303,7 +322,7 @@ export default function ReportsPage() {
               <ScopeIndicator resource="revenue" />
             </h2>
             <StatCard
-              title="Tổng doanh thu"
+              title={METRIC_LABELS.recognizedRevenue}
               value={purchaseData !== null ? currency.format(purchaseData.totalRevenue) : "—"}
               icon={<Wallet className="w-5 h-5 text-primary" />}
               placeholder={purchaseData === null}
