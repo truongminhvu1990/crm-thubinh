@@ -6,6 +6,7 @@ import { ArrowLeft } from "lucide-react";
 import { Product } from "@/types/product";
 import { ProductImage } from "@/types/productImage";
 import { updateProduct, findProductByCode, findProductBySku } from "@/lib/product.service";
+import { validateProductDimension } from "@/lib/productDimension";
 import { coverImageUrl } from "@/lib/productImage.service";
 import { formatDate } from "@/lib/utils";
 import Button from "@/components/ui/Button";
@@ -63,6 +64,8 @@ export default function ProductDetailPage() {
       nextErrors.size = "Kích thước không được âm";
     if (product.discount !== undefined && (product.discount < 0 || product.discount > 100))
       nextErrors.discount = "Giảm giá phải trong khoảng 0-100%";
+    const dimensionProblem = validateProductDimension(product);
+    if (dimensionProblem) nextErrors.dimension = dimensionProblem;
     return nextErrors;
   }
 
@@ -73,6 +76,7 @@ export default function ProductDetailPage() {
       "cost_price",
       "sale_price",
       "size",
+      "dimension",
       "weight",
       "discount",
     ].find((f) => fieldErrors[f]);

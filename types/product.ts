@@ -12,6 +12,12 @@ export interface Product {
   color?: string;
   /** Numeric only (e.g. 54, 17.5) - never "Ni 54"/"Ring 17". Label ("Ni tay"/"Ni nhẫn"/"Kích thước") is derived from category in the UI. */
   size?: number;
+  /** Ni-Chột-Dày (mm), Vòng/Nhẫn only - see lib/productDimension.ts. Nullable; the combined string is never stored. */
+  dimension_ni_mm?: number | null;
+  dimension_chot_mm?: number | null;
+  dimension_day_mm?: number | null;
+  /** UI-only: raw text of the single Ni-Chột-Dày input while editing. Not a column; never in a writable-field allowlist. */
+  dimension_input?: string;
   weight?: number;
   jade_grade?: string;
   notes?: string;
