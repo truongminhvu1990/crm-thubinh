@@ -4,6 +4,7 @@ import { Product } from "@/types/product";
 import { Customer } from "@/types/customer";
 import { parseMultiValue } from "./utils";
 import { logStatusChange } from "./auditLog.service";
+import { DIMENSION_FIELDS, isDimensionCategory, validateProductDimension } from "./productDimension";
 
 /** Extracts a [min, max] VND range from a free-text budget string like
  * "10-20 triệu" or "dưới 5tr". Returns null if no number can be parsed -
@@ -203,6 +204,10 @@ const WRITABLE_FIELDS: (keyof Product)[] = [
   "jade_grade",
   "color",
   "size",
+  // Ni-Chột-Dày (lib/productDimension.ts). dimension_input is UI-only and deliberately NOT here.
+  "dimension_ni_mm",
+  "dimension_chot_mm",
+  "dimension_day_mm",
   "weight",
   "notes",
   "cost_price",
@@ -240,6 +245,23 @@ function pickWritableFields(
     filteredData[field] = value;
   });
   return filteredData as Partial<Product>;
+}
+
+/** Ni-Chột-Dày is only ever written for Vòng/Nhẫn: for any other known
+ * category the three columns are dropped from the payload (never validated,
+ * never written). A payload with no category at all is left alone - an
+ * update that doesn't touch the category must not erase or invent values. */
+function dropDimensionsForNonTargetCategory(row: Partial<Product>): Partial<Product> {
+  if (row.category !== undefined && !isDimensionCategory(row.category)) {
+    const copy = { ...row } as Record<string, unknown>;
+    DIMENSION_FIELDS.forEach((f) => delete copy[f]);
+    return copy as Partial<Product>;
+  }
+  return row;
+}
+
+function dimensionError(message: string) {
+  return { data: null, error: new Error(message) };
 }
 
 function buildProductsQuery(
@@ -361,7 +383,13 @@ export async function findProductBySku(
 }
 
 export async function addProduct(product: Partial<Product>) {
-  const filteredData = pickWritableFields(product, { skipEmpty: true, fields: CREATE_WRITABLE_FIELDS });
+  // Manual Product save rule (Vòng/Nhẫn + Available => Ni-Chột-Dày required).
+  const dimensionProblem = validateProductDimension(product);
+  if (dimensionProblem) return dimensionError(dimensionProblem);
+
+  const filteredData = dropDimensionsForNonTargetCategory(
+    pickWritableFields(product, { skipEmpty: true, fields: CREATE_WRITABLE_FIELDS })
+  );
 
   const { data, error } = await supabase
     .from("products")
@@ -378,7 +406,27 @@ export async function addProduct(product: Partial<Product>) {
 }
 
 export async function updateProduct(id: string, product: Partial<Product>) {
-  const filteredData = pickWritableFields(product);
+  // Manual Product save rule. The Product form pages send the full product,
+  // but this must not trust that: when category or status is absent from the
+  // payload the stored row supplies it, so a partial update can't dodge the rule.
+  let ruleInput: Partial<Product> = product;
+  if (product.category === undefined || product.status === undefined) {
+    const { data: existing, error: existingError } = await supabase
+      .from("products")
+      .select("category, status, dimension_ni_mm, dimension_chot_mm, dimension_day_mm")
+      .eq("id", id)
+      .maybeSingle();
+    if (existingError) {
+      console.error("Error loading product for dimension validation:", existingError);
+      return { data: null, error: existingError };
+    }
+    const definedOnly = Object.fromEntries(Object.entries(product).filter(([, v]) => v !== undefined));
+    ruleInput = { ...(existing as Partial<Product> | null), ...definedOnly };
+  }
+  const dimensionProblem = validateProductDimension(ruleInput);
+  if (dimensionProblem) return dimensionError(dimensionProblem);
+
+  const filteredData = dropDimensionsForNonTargetCategory(pickWritableFields(product));
 
   const { data, error } = await supabase
     .from("products")
@@ -533,7 +581,12 @@ export async function findExistingProductCodes(codes: string[]): Promise<Set<str
 export async function bulkAddProducts(products: Partial<Product>[]) {
   if (products.length === 0) return { data: [], error: null };
 
-  const rows = products.map((p) => pickWritableFields(p, { skipEmpty: true }));
+  for (const p of products) {
+    const dimensionProblem = validateProductDimension(p);
+    if (dimensionProblem) return dimensionError(`${p.product_code ?? "?"}: ${dimensionProblem}`);
+  }
+
+  const rows = products.map((p) => dropDimensionsForNonTargetCategory(pickWritableFields(p, { skipEmpty: true })));
 
   const { data, error } = await supabase.from("products").insert(rows).select();
 

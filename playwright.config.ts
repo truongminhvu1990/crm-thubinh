@@ -43,6 +43,15 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
     },
+    // Opt-in only (QA_CROSS_BROWSER=1): the default run stays Chromium-only.
+    // Added for Ni-Chột-Dày, whose text input exists precisely because
+    // <input type="number"> mangles "54.5-9.4-6.6" differently per engine.
+    ...(process.env.QA_CROSS_BROWSER
+      ? [
+          { name: "firefox", use: { ...devices["Desktop Firefox"] } },
+          { name: "webkit", use: { ...devices["Desktop Safari"] } },
+        ]
+      : []),
   ],
 
   // Uncomment once there is a scripted way to boot the app for CI:

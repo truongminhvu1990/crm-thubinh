@@ -10,6 +10,7 @@ import { PRODUCT_STATUS } from "@/lib/product.constants";
 import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
 import { useTagOptions } from "@/lib/hooks/useTagOptions";
 import { useBatchOptions } from "@/lib/hooks/useBatchOptions";
+import { dimensionLabelFor, formatProductDimension, parseNiChotDay } from "@/lib/productDimension";
 
 interface Props {
   product: Partial<Product>;
@@ -44,6 +45,27 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
     setProduct({ ...product, [field]: value === "" ? undefined : Number(value) });
   };
 
+  /** Single Ni-Chột-Dày text input (Vòng/Nhẫn only). Keeps the raw text in
+   * dimension_input (UI-only) so half-typed values survive re-renders; the
+   * three numeric columns are updated only when the text parses (or is
+   * cleared, which nulls them). Validation lives in lib/productDimension.ts. */
+  const updateDimensionInput = (text: string) => {
+    const next: Partial<Product> = { ...product, dimension_input: text };
+    if (text.trim() === "") {
+      next.dimension_ni_mm = null;
+      next.dimension_chot_mm = null;
+      next.dimension_day_mm = null;
+    } else {
+      const parsed = parseNiChotDay(text);
+      if (parsed.ok) {
+        next.dimension_ni_mm = parsed.value.ni;
+        next.dimension_chot_mm = parsed.value.chot;
+        next.dimension_day_mm = parsed.value.day;
+      }
+    }
+    setProduct(next);
+  };
+
   const categoryOptions = useMasterDataOptions("product_category", product.category);
   const sourceOptions = useMasterDataOptions("product_source", product.source);
   const salespersonOptions = useMasterDataOptions("salesperson", product.salesperson);
@@ -52,6 +74,7 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
   const jadeGrade = useTagOptions("product_jade_grade", product.jade_grade);
 
   const sizeLabel = sizeLabelFor(product.category);
+  const dimensionLabel = dimensionLabelFor(product.category);
 
   return (
     <div className="space-y-4">
@@ -226,17 +249,37 @@ export default function ProductForm({ product, setProduct, errors = {} }: Props)
           value={product.color || ""}
           onChange={(e) => updateField("color", e.target.value)}
         />
-        <Input
-          id="product-size"
-          data-testid="product-size-input"
-          label={sizeLabel}
-          type="number"
-          placeholder="VD: 54 hoặc 17.5"
-          min={0}
-          value={product.size ?? ""}
-          onChange={(e) => updateNumberField("size", e.target.value)}
-          error={errors.size}
-        />
+        {dimensionLabel ? (
+          <div>
+            <Input
+              id="product-dimension"
+              data-testid="product-dimension-input"
+              label={dimensionLabel}
+              type="text"
+              inputMode="text"
+              autoComplete="off"
+              placeholder="54.5-9.4-6.6"
+              value={product.dimension_input ?? formatProductDimension(product) ?? ""}
+              onChange={(e) => updateDimensionInput(e.target.value)}
+              error={errors.dimension}
+            />
+            <p data-testid="product-dimension-helper" className="text-muted-foreground text-xs mt-1">
+              Ni-Chột-Dày, đơn vị mm. Dùng dấu chấm cho số thập phân.
+            </p>
+          </div>
+        ) : (
+          <Input
+            id="product-size"
+            data-testid="product-size-input"
+            label={sizeLabel}
+            type="number"
+            placeholder="VD: 54 hoặc 17.5"
+            min={0}
+            value={product.size ?? ""}
+            onChange={(e) => updateNumberField("size", e.target.value)}
+            error={errors.size}
+          />
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-4">

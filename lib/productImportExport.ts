@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { Product } from "@/types/product";
+import { DIMENSION_FIELDS, isValidDimensionComponentText, validateProductDimension } from "@/lib/productDimension";
 
 /** Quick Import field list - the writable Product fields a spreadsheet can
  * realistically carry. Excludes batch_id (internal FK, not spreadsheet
@@ -14,6 +15,10 @@ export const PRODUCT_IMPORT_FIELDS: (keyof Product)[] = [
   "status",
   "color",
   "size",
+  // Ni-Chột-Dày: three optional columns (never one combined string). See lib/productDimension.ts.
+  "dimension_ni_mm",
+  "dimension_chot_mm",
+  "dimension_day_mm",
   "weight",
   "jade_grade",
   "cost_price",
@@ -28,6 +33,8 @@ export const PRODUCT_IMPORT_FIELDS: (keyof Product)[] = [
   "notes",
 ];
 
+const DIMENSION_FIELD_SET = new Set<keyof Product>(DIMENSION_FIELDS);
+
 const NUMERIC_FIELDS = new Set<keyof Product>(["size", "weight", "cost_price", "sale_price", "discount"]);
 
 const FIELD_LABELS: Record<string, string> = {
@@ -37,6 +44,9 @@ const FIELD_LABELS: Record<string, string> = {
   status: "Trạng thái",
   color: "Màu sắc",
   size: "Kích thước",
+  dimension_ni_mm: "Ni (mm)",
+  dimension_chot_mm: "Chột (mm)",
+  dimension_day_mm: "Dày (mm)",
   weight: "Trọng lượng",
   jade_grade: "Chất lượng đá",
   cost_price: "Giá vốn",
@@ -120,7 +130,7 @@ function cellToString(value: ExcelJS.CellValue): string {
 /** Row-level validation - same rules already enforced in app/products/page.tsx's
  * own validateProduct(), reused rather than restated with different
  * thresholds. */
-function validateRow(data: Partial<Product>, rawInvalidNumeric: string[]): string[] {
+function validateRow(data: Partial<Product>, rawInvalidNumeric: string[], dimensionCellInvalid = false): string[] {
   const errors: string[] = [...rawInvalidNumeric];
   if (!data.product_code) errors.push("Thiếu mã sản phẩm");
   if (!data.product_name) errors.push("Thiếu tên sản phẩm");
@@ -130,6 +140,13 @@ function validateRow(data: Partial<Product>, rawInvalidNumeric: string[]): strin
   if (data.size !== undefined && data.size < 0) errors.push("Kích thước không được âm");
   if (data.discount !== undefined && (data.discount < 0 || data.discount > 100))
     errors.push("Giảm giá phải trong khoảng 0-100%");
+  // Vòng/Nhẫn + Available rows need all three Ni-Chột-Dày columns. Skipped
+  // when a dimension cell was already reported invalid, to avoid a second,
+  // redundant "required" message for the same cell.
+  if (!dimensionCellInvalid) {
+    const dimensionProblem = validateProductDimension(data);
+    if (dimensionProblem) errors.push(dimensionProblem);
+  }
   return errors;
 }
 
@@ -169,9 +186,20 @@ export async function parseProductImportFile(file: File): Promise<ParsedProductR
 
     const data: Partial<Product> = {};
     const rawInvalidNumeric: string[] = [];
+    let dimensionCellInvalid = false;
 
     for (const [field, value] of Object.entries(raw) as [keyof Product, string][]) {
-      if (NUMERIC_FIELDS.has(field)) {
+      if (DIMENSION_FIELD_SET.has(field)) {
+        // Same component rule as the form input: >= 0, one decimal digit max, "." separator.
+        if (!isValidDimensionComponentText(value)) {
+          dimensionCellInvalid = true;
+          rawInvalidNumeric.push(
+            `${FIELD_LABELS[field]}: giá trị "${value}" không hợp lệ (số không âm, dùng dấu chấm, tối đa 1 chữ số thập phân)`
+          );
+          continue;
+        }
+        (data as Record<string, number>)[field] = Number(value);
+      } else if (NUMERIC_FIELDS.has(field)) {
         const num = Number(value);
         if (!Number.isFinite(num)) {
           rawInvalidNumeric.push(`${FIELD_LABELS[field]}: giá trị "${value}" không phải là số`);
@@ -183,7 +211,7 @@ export async function parseProductImportFile(file: File): Promise<ParsedProductR
       }
     }
 
-    rows.push({ rowNumber: r, data, errors: validateRow(data, rawInvalidNumeric) });
+    rows.push({ rowNumber: r, data, errors: validateRow(data, rawInvalidNumeric, dimensionCellInvalid) });
   }
 
   return rows;
