@@ -7,6 +7,7 @@ import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import InfoItem from "@/components/ui/InfoItem";
 import Badge from "@/components/ui/Badge";
+import { dimensionLabelFor, formatProductDimension } from "@/lib/productDimension";
 
 interface Props {
   product: Product;
@@ -76,10 +77,18 @@ export default function ProductProfileHeader({ product, onEdit, coverImageUrl }:
           </InfoItem>
         )}
 
-        {product.size !== undefined && product.size !== null && (
-          <InfoItem icon={<Ruler className="w-4 h-4" />} label={sizeLabelFor(product.category)}>
-            {product.size}
+        {dimensionLabelFor(product.category) ? (
+          // Vòng/Nhẫn: Ni-Chột-Dày replaces the legacy size line (products.size itself is untouched).
+          <InfoItem icon={<Ruler className="w-4 h-4" />} label={dimensionLabelFor(product.category) as string}>
+            <span data-testid="product-dimension-display">{formatProductDimension(product) ?? "—"}</span>
           </InfoItem>
+        ) : (
+          product.size !== undefined &&
+          product.size !== null && (
+            <InfoItem icon={<Ruler className="w-4 h-4" />} label={sizeLabelFor(product.category)}>
+              {product.size}
+            </InfoItem>
+          )
         )}
 
         {typeof product.weight === "number" && (
