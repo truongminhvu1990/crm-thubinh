@@ -7,8 +7,11 @@ import ReconcileLine from "@/components/reports/overview/ReconcileLine";
 import OverviewMetricCard from "@/components/reports/overview/OverviewMetricCard";
 import ViewToggle from "@/components/reports/overview/ViewToggle";
 import DrillDownTable, { DrillColumn } from "@/components/reports/overview/DrillDownTable";
+import PermissionGate from "@/components/reports/overview/PermissionGate";
+import { SkeletonCard, SkeletonTable } from "@/components/reports/overview/Skeleton";
 import { useCanonicalFetch } from "@/components/reports/overview/useCanonicalFetch";
-import { useHasPermission } from "@/lib/hooks/useHasPermission";
+import { usePermission } from "@/lib/hooks/useHasPermission";
+import { EMPTY_VALUE } from "@/lib/reports/labels.vi";
 import { currency } from "@/lib/reports/format";
 import { formatDate } from "@/lib/utils";
 import { INVENTORY_CURRENT_STATE_LABEL, METRIC_LABELS, InventoryView, parseInventoryView, reconcileView } from "@/lib/reports/overviewUi";
@@ -32,10 +35,10 @@ const unpriced = <span className="font-medium text-amber-600">Chưa định giá
 const price = (v: number | null) => (v === null ? unpriced : currency.format(v));
 
 const PRODUCT_COLUMNS: DrillColumn<InventoryProductDetailRow>[] = [
-  { header: "Mã sản phẩm", render: (r) => r.product_code ?? "—" },
-  { header: "Tên", render: (r) => r.product_name ?? "—" },
-  { header: "Danh mục", render: (r) => r.category ?? "—" },
-  { header: "Nhân viên", render: (r) => r.salesperson ?? "—" },
+  { header: "Mã sản phẩm", render: (r) => r.product_code ?? EMPTY_VALUE },
+  { header: "Tên", render: (r) => r.product_name ?? EMPTY_VALUE },
+  { header: "Danh mục", render: (r) => r.category ?? EMPTY_VALUE },
+  { header: "Nhân viên", render: (r) => r.salesperson ?? EMPTY_VALUE },
   { header: "Giá bán", render: (r) => price(r.sale_price), align: "right" },
 ];
 
@@ -50,7 +53,8 @@ function InventoryReport() {
   const router = useRouter();
   const pathname = usePathname();
   const search = useSearchParams();
-  const canView = useHasPermission("reports.view");
+  const access = usePermission("reports.view");
+  const canView = access === "allowed";
   const view = parseInventoryView(search.get("view"));
 
   const setView = useCallback(
@@ -63,15 +67,6 @@ function InventoryReport() {
     canView ? `/api/reports/overview/${view === "held" ? "held-inventory" : "remaining-inventory"}` : null
   );
 
-  if (!canView) {
-    return (
-      <div className="pb-8">
-        <h1 className="text-2xl font-bold text-foreground sm:text-3xl">Hàng hóa</h1>
-        <p className="mt-4 text-muted-foreground">Bạn không có quyền xem báo cáo</p>
-      </div>
-    );
-  }
-
   const o = overviewState.data?.overview ?? null;
   const bucket = o ? (view === "held" ? o.held : o.remaining) : null;
   const detail = detailState.data;
@@ -82,7 +77,10 @@ function InventoryReport() {
   const hint = (b: { count: number; missingPriceCount: number } | null | undefined) =>
     b ? `${b.count} sản phẩm${b.missingPriceCount ? ` · ${b.missingPriceCount} chưa định giá (không tính vào giá trị)` : ""}` : undefined;
 
+  const overviewLoading = !o && !overviewState.error;
+
   return (
+    <PermissionGate state={access} title="Hàng hóa">
     <div className="space-y-6 pb-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">Hàng hóa</h1>
@@ -98,10 +96,17 @@ function InventoryReport() {
       </p>
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {overviewLoading ? (
+          <>
+            <SkeletonCard title={METRIC_LABELS.held} />
+            <SkeletonCard title={METRIC_LABELS.remaining} />
+          </>
+        ) : (
+          <>
         <OverviewMetricCard
           testId="inventory-card-held"
           title={METRIC_LABELS.held}
-          value={o?.held ? currency.format(o.held.value) : "—"}
+          value={o?.held ? currency.format(o.held.value) : EMPTY_VALUE}
           hint={hint(o?.held)}
           icon={<Hourglass className="h-6 w-6" />}
           active={view === "held"}
@@ -110,12 +115,14 @@ function InventoryReport() {
         <OverviewMetricCard
           testId="inventory-card-remaining"
           title={METRIC_LABELS.remaining}
-          value={o?.remaining ? currency.format(o.remaining.value) : "—"}
+          value={o?.remaining ? currency.format(o.remaining.value) : EMPTY_VALUE}
           hint={hint(o?.remaining)}
           icon={<PackageOpen className="h-6 w-6" />}
           active={view === "remaining"}
           onSelect={() => setView("remaining")}
         />
+          </>
+        )}
       </section>
 
       <section className="space-y-3">
@@ -134,7 +141,8 @@ function InventoryReport() {
           />
         </div>
 
-        {detailState.error && <p className="text-sm text-destructive">{detailState.error}</p>}
+        {detailState.error && <p className="text-sm text-destructive" role="alert">{detailState.error}</p>}
+        {overviewState.error && <p className="text-sm text-destructive" role="alert">{overviewState.error}</p>}
 
         {detail && (
           <div className="space-y-1 text-sm" data-testid="inventory-reconcile">
@@ -151,7 +159,7 @@ function InventoryReport() {
         )}
 
         {detailState.loading && !detail ? (
-          <p className="text-sm text-muted-foreground">Đang tải…</p>
+          <SkeletonTable columns={6} />
         ) : detail ? (
           view === "held" ? (
             <DrillDownTable columns={HELD_COLUMNS} rows={detail.rows as HeldInventoryRow[]} rowKey={(r) => r.product_id} testId="inventory-detail-table" />
@@ -161,12 +169,13 @@ function InventoryReport() {
         ) : null}
       </section>
     </div>
+    </PermissionGate>
   );
 }
 
 export default function InventoryReportPage() {
   return (
-    <Suspense fallback={<div className="flex h-64 items-center justify-center text-muted-foreground">Đang tải…</div>}>
+    <Suspense fallback={<SkeletonTable rows={4} columns={4} />}>
       <InventoryReport />
     </Suspense>
   );

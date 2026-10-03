@@ -44,7 +44,7 @@ export default function UnrecognizedOrderValueBreakdown({ rows }: Props) {
     <Card testId="dashboard-unrecognized-breakdown-card">
       <h2 className="text-base font-semibold text-foreground mb-1">{METRIC_LABELS.unrecognizedValue} — chi tiết</h2>
       <p className="text-sm text-muted-foreground mb-4">
-        Tính riêng từ Đơn hàng — vì sao các đơn này chưa đủ điều kiện ghi nhận doanh thu (Completed + Paid)
+        Tính riêng từ Đơn hàng — vì sao các đơn này chưa đủ điều kiện ghi nhận doanh thu (Hoàn thành + Đã thanh toán)
       </p>
       <div className="overflow-x-auto">
         <table className="w-full text-sm" data-testid="dashboard-unrecognized-breakdown-table">

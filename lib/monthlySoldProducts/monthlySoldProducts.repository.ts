@@ -64,6 +64,33 @@ interface OrderRow {
   customer: CustomerRelation | CustomerRelation[] | null;
 }
 
+/** Phase 1.5A: an order that IS Sold by the locked definition (Completed, or Reserved with a real payment) but has
+ * NO order_items, so it produces no sold line. It is reported for display only ("Chưa có sản phẩm trong đơn"); it adds
+ * nothing to any Sold total (totals are, and stay, the sum of the sold lines). */
+export interface SoldItemlessOrder {
+  order_id: string;
+  order_number: string;
+  order_date: string;
+  order_status: string;
+  payment_status: string;
+  /** orders.total_amount - informational only, NOT part of the Sold value. */
+  total_amount: number;
+  customer_id: string;
+  customer_name: string;
+  customer_code: string;
+  sales_owner: string | null;
+  amount_paid: number;
+  remaining_balance: number;
+  payment_methods: string | null;
+}
+
+interface OrderSide {
+  lines: SoldLine[];
+  itemless: SoldItemlessOrder[];
+}
+
+const EMPTY_ORDER_SIDE: OrderSide = { lines: [], itemless: [] };
+
 interface OrderItemRow {
   id: string;
   order_id: string;
@@ -121,11 +148,11 @@ function resolveRange(filters: MonthlySoldProductsFilters): { from?: string; to?
 
 const PRODUCT_COLUMNS = "product:products(product_code, product_name, category, jade_type, cost_price)";
 
-async function fetchOrderLines(
+async function fetchOrderSide(
   range: { from?: string; to?: string },
   client: SupabaseClient,
   staff: Staff | null
-): Promise<SoldLine[]> {
+): Promise<OrderSide> {
   // Sold scope is decided by the shared isSoldOrder() below (using real
   // payment RECORDS, not payment_status); the query only narrows to the two
   // statuses that can ever qualify.
@@ -149,11 +176,11 @@ async function fetchOrderLines(
   );
   if (error) {
     console.error("Error fetching sold orders for monthly sold products:", error);
-    return [];
+    return EMPTY_ORDER_SIDE;
   }
 
   const candidates = data || [];
-  if (candidates.length === 0) return [];
+  if (candidates.length === 0) return EMPTY_ORDER_SIDE;
 
   // "Reserved counts as Sold only with at least one ACTUAL payment": decided
   // from the payments table (a row keyed to this order_id; amount is
@@ -177,7 +204,7 @@ async function fetchOrderLines(
   }
 
   const orders = candidates.filter((o) => isSoldOrder(o, paymentsByOrderId.get(o.id)?.length ?? 0));
-  if (orders.length === 0) return [];
+  if (orders.length === 0) return EMPTY_ORDER_SIDE;
   const orderById = new Map(orders.map((o) => [o.id, o]));
   const orderIds = orders.map((o) => o.id);
 
@@ -239,12 +266,38 @@ async function fetchOrderLines(
       amount_paid: paymentSummary.amountPaid,
       remaining_balance: paymentSummary.remainingBalance,
       payment_methods: paymentSummary.paymentMethods,
+      quantity: Number(item.quantity) || 1,
       cost_price: costPrice,
       salesperson_id: snapshot?.salesperson_id ?? null,
       sales_owner: order.sales_owner,
     });
   }
-  return lines;
+
+  // Phase 1.5A: Sold orders (same locked definition, same query) that have no order_items at all. Nothing here feeds
+  // any total; it only lets the Sold detail say so instead of silently omitting the order.
+  const orderIdsWithItems = new Set(items.map((i) => i.order_id));
+  const itemless: SoldItemlessOrder[] = orders
+    .filter((o) => !orderIdsWithItems.has(o.id))
+    .map((o) => {
+      const payment = deriveOrderPaymentSummary(Number(o.total_amount) || 0, paymentsByOrderId.get(o.id) ?? []);
+      const customer = first(o.customer);
+      return {
+        order_id: o.id,
+        order_number: o.order_number,
+        order_date: o.order_date,
+        order_status: o.order_status,
+        payment_status: o.payment_status,
+        total_amount: Number(o.total_amount) || 0,
+        customer_id: o.customer_id,
+        customer_name: customer?.full_name ?? "",
+        customer_code: customer?.customer_code ?? "",
+        sales_owner: o.sales_owner,
+        amount_paid: payment.amountPaid,
+        remaining_balance: payment.remainingBalance,
+        payment_methods: payment.paymentMethods,
+      };
+    });
+  return { lines, itemless };
 }
 
 /** Legacy entries: customer_purchases with no linked order_item (manual /
@@ -309,6 +362,7 @@ async function fetchLegacyLines(
       amount_paid: null,
       remaining_balance: null,
       payment_methods: null,
+      quantity: 1,
       cost_price: costPrice,
       salesperson_id: r.salesperson_id,
       sales_owner: null,
@@ -325,22 +379,37 @@ export async function getSoldLines(
   client: SupabaseClient = supabase,
   staff?: Staff | null
 ): Promise<SoldLine[]> {
+  return (await getSoldLinesWithItemless(filters, client, staff)).lines;
+}
+
+/** Phase 1.5A: the SAME single code path as getSoldLines (which now just returns `.lines`), plus the Sold orders that
+ * have no product line. The sold lines - and therefore every total - are identical to what getSoldLines always returned. */
+export async function getSoldLinesWithItemless(
+  filters: MonthlySoldProductsFilters,
+  client: SupabaseClient = supabase,
+  staff?: Staff | null
+): Promise<{ lines: SoldLine[]; itemless: SoldItemlessOrder[] }> {
   const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
   const range = resolveRange(filters);
 
-  const [orderLines, legacyLines] = await Promise.all([
-    fetchOrderLines(range, client, resolvedStaff),
+  const [orderSide, legacyLines] = await Promise.all([
+    fetchOrderSide(range, client, resolvedStaff),
     fetchLegacyLines(range, client, resolvedStaff),
   ]);
-  let lines = [...orderLines, ...legacyLines];
+  let lines = [...orderSide.lines, ...legacyLines];
+  let itemless = orderSide.itemless;
 
   if (filters.customer) {
     const term = filters.customer.replace(/[%,]/g, "").toLowerCase();
     lines = lines.filter(
       (l) => l.customer_name.toLowerCase().includes(term) || l.customer_code.toLowerCase().includes(term)
     );
+    itemless = itemless.filter((o) => o.customer_name.toLowerCase().includes(term) || o.customer_code.toLowerCase().includes(term));
   }
-  if (filters.productCategory) lines = lines.filter((l) => l.product_category === filters.productCategory);
+  if (filters.productCategory) {
+    lines = lines.filter((l) => l.product_category === filters.productCategory);
+    itemless = []; // an order with no product has no category, so it can never match a category filter
+  }
   if (filters.salespersonId) {
     // salesperson_id is only stored on the purchase snapshot; a line with no
     // snapshot yet matches by the Order's sales_owner name instead - same
@@ -352,14 +421,20 @@ export async function getSoldLines(
       const owner = (l.sales_owner ?? l.salesperson ?? "").trim().toLowerCase();
       return name !== "" && owner === name;
     });
+    itemless = itemless.filter((o) => name !== "" && (o.sales_owner ?? "").trim().toLowerCase() === name);
   }
 
-  return lines.sort((a, b) => {
+  lines = lines.sort((a, b) => {
     if (a.sale_date !== b.sale_date) return a.sale_date < b.sale_date ? 1 : -1;
     const an = a.order_number ?? "";
     const bn = b.order_number ?? "";
     if (an !== bn) return an < bn ? 1 : -1;
     return a.line_key < b.line_key ? -1 : 1;
   });
+  itemless = itemless.sort((a, b) => {
+    if (a.order_date !== b.order_date) return a.order_date < b.order_date ? 1 : -1;
+    return a.order_number === b.order_number ? 0 : a.order_number < b.order_number ? 1 : -1;
+  });
+  return { lines, itemless };
 }
 

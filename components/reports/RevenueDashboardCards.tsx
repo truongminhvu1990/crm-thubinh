@@ -26,7 +26,7 @@ const PERIOD_LABEL: Record<RevenuePeriodKey, string> = {
   this_week: "Tuần này",
   this_month: "Tháng này",
   this_quarter: "Quý này",
-  this_year: "Năm này",
+  this_year: "Năm nay",
 };
 
 function MetricCard({

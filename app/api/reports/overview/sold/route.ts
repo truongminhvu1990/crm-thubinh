@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
   };
 
   const client = await createClient();
-  const { totals, orders, products } = await getSoldDetail(filters, client, auth.staff);
+  const { totals, orders, products, itemlessOrders } = await getSoldDetail(filters, client, auth.staff);
 
   return NextResponse.json({
     metric: "sold",
@@ -45,5 +45,7 @@ export async function GET(request: NextRequest) {
     total: totals.soldValue,
     count: view === "orders" ? orders.length : products.length,
     rows: view === "orders" ? orders : products,
+    // Phase 1.5A: Sold orders with no product line. Display only: they are NOT in `totals`, `total` or `rows`.
+    itemlessOrders,
   });
 }

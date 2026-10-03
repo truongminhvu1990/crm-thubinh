@@ -74,7 +74,7 @@ export default function ReportsReconciliationPage() {
             Đối soát doanh thu
           </h1>
           <p className="text-muted-foreground mt-1.5 text-sm">
-            So sánh Doanh thu và Khách hàng hàng đầu giữa Reports (customer_purchases) và Business Intelligence (orders)
+            So sánh Doanh thu và Khách hàng hàng đầu giữa Báo cáo (customer_purchases) và Phân tích kinh doanh (orders)
           </p>
           <div className="mt-1">
             <PageViewingLabel />
@@ -118,10 +118,10 @@ export default function ReportsReconciliationPage() {
                       Chỉ số
                     </th>
                     <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide px-3 py-2">
-                      Reports
+                      Báo cáo
                     </th>
                     <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide px-3 py-2">
-                      Business Intelligence
+                      Phân tích kinh doanh
                     </th>
                     <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide px-3 py-2">
                       Chênh lệch
@@ -167,10 +167,10 @@ export default function ReportsReconciliationPage() {
                         Khách hàng
                       </th>
                       <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide px-3 py-2">
-                        Reports
+                        Báo cáo
                       </th>
                       <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide px-3 py-2">
-                        Business Intelligence
+                        Phân tích kinh doanh
                       </th>
                       <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide px-3 py-2">
                         Chênh lệch

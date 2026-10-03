@@ -14,7 +14,7 @@ export default function FollowUpSummaryCard({ counts }: Props) {
     <Link href="/follow-up" className="block">
       <Card className="hover:border-primary/40 transition-colors">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold text-foreground">Follow-up Summary</h2>
+          <h2 className="text-base font-semibold text-foreground">Tóm tắt theo dõi</h2>
           <ArrowRight className="w-4 h-4 text-muted-foreground" />
         </div>
         <div className="grid grid-cols-3 gap-3">

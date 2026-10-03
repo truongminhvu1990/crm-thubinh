@@ -75,9 +75,9 @@ export default function SupplierBalancePage() {
     <div className="pb-8">
       <div className="mb-6 flex items-start sm:items-end justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">Số dư Supplier</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">Số dư Nhà cung cấp</h1>
           <p className="text-muted-foreground mt-1.5 text-sm">
-            Tổng IN, tổng OUT và số dư theo từng Supplier — đọc trực tiếp từ Money Debt Ledger, không phải công nợ phải trả
+            Tổng IN, tổng OUT và số dư theo từng Nhà cung cấp — đọc trực tiếp từ Sổ công nợ tiền, không phải công nợ phải trả
           </p>
           <div className="mt-1">
             <PageViewingLabel />
@@ -88,7 +88,7 @@ export default function SupplierBalancePage() {
           className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
           data-testid="supplier-balance-view-ledger-link"
         >
-          Xem giao dịch chi tiết trên Money Debt Ledger
+          Xem giao dịch chi tiết trên Sổ công nợ tiền
           <ExternalLink className="w-3.5 h-3.5" />
         </Link>
       </div>
@@ -96,13 +96,13 @@ export default function SupplierBalancePage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
         <StatCard
           testId="supplier-balance-supplier-count-card"
-          title="Số Supplier có giao dịch"
+          title="Số Nhà cung cấp có giao dịch"
           value={summary.supplierCount}
           icon={<Users className="w-5 h-5" />}
         />
         <StatCard
           testId="supplier-balance-row-count-card"
-          title="Số dòng (Supplier × đơn vị tiền tệ)"
+          title="Số dòng (Nhà cung cấp × đơn vị tiền tệ)"
           value={summary.rowCount}
           icon={<Landmark className="w-5 h-5" />}
         />
@@ -113,7 +113,7 @@ export default function SupplierBalancePage() {
           <input
             data-testid="supplier-balance-search-input"
             type="text"
-            placeholder="Tìm theo tên hoặc mã Supplier..."
+            placeholder="Tìm theo tên hoặc mã Nhà cung cấp..."
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             className={`${inputClass} w-72`}

@@ -195,6 +195,9 @@ export interface SoldDetail {
   /** One row per sold product line. gross_profit is nulled for anyone who is
    * not Owner/Manager, exactly as getMonthlySoldProductsPage does. */
   products: MonthlySoldProductRow[];
+  /** Phase 1.5A: Sold orders (locked definition) that have no product line. Display only - NOT included in
+   * `totals`, `orders` or `products`, so every total is unchanged. */
+  itemlessOrders: repo.SoldItemlessOrder[];
 }
 
 /** Phase 1 - Reporting Foundation: drill-down for "Đã bán", both views from
@@ -206,10 +209,10 @@ export async function getSoldDetail(
   client?: SupabaseClient,
   staff?: Staff | null
 ): Promise<SoldDetail> {
-  const { totals, orders, lines } = await getSoldDataset(filters, client, staff);
+  const { totals, orders, lines, itemless } = await getSoldDataset(filters, client, staff);
   const permitted = await canViewCostAndProfit(staff, client);
   const products = lines.map(toRow).map((r) => (permitted ? r : { ...r, gross_profit: null }));
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { recognizedOrderIds, ...publicTotals } = totals;
-  return { totals: publicTotals, orders, products };
+  return { totals: publicTotals, orders, products, itemlessOrders: itemless };
 }

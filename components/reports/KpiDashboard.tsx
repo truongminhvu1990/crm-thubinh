@@ -31,6 +31,12 @@ const PREVIOUS_PERIOD_LABEL: Record<DateFilterOption, string> = {
   this_month: "tháng trước",
   this_quarter: "quý trước",
   this_year: "năm trước",
+  yesterday: "ngày liền trước",
+  last_7_days: "7 ngày liền trước",
+  last_week: "tuần liền trước",
+  last_month: "tháng liền trước",
+  last_quarter: "quý liền trước",
+  last_year: "năm liền trước",
   custom: "kỳ trước",
   all_time: "",
 };

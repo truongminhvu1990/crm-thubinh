@@ -323,3 +323,206 @@ export async function getUnrecognizedOrderDetail(
   );
   return { summary, total: summary.orderBasedUnrecognizedValue, count: summary.unrecognizedOrderCount, rows };
 }
+
+// ---------------------------------------------------------------------------
+// Phase 1.5A: PRODUCT view of the same two order populations.
+//
+// Built on the SAME order set (loadOrderValueOrders) and the SAME per-order detail (buildDetailRows - paid / remaining /
+// recognition / reason), so the product view can never describe different orders or different payments than the order
+// view. Nothing is written and nothing is invented:
+//  - an order with product lines -> one row per line (amount = order_items.line_total);
+//  - an order WITHOUT any product line -> ONE presentation row "Chưa có sản phẩm trong đơn" carrying the order total
+//    (it is not a product; it is never stored);
+//  - an order whose total differs from the sum of its lines (e.g. an order-level discount) -> ONE extra
+//    "order_difference" row with the remainder, so that every order always contributes exactly its order total.
+// Therefore: sum(rows.amount) === the canonical total of the selected metric, by construction, and re-checked below.
+// ---------------------------------------------------------------------------
+
+export type OrderProductRowKind = "line" | "no_items" | "order_difference";
+
+export interface OrderProductDetailRow {
+  /** Unique key: the order_items id for a line, otherwise "<kind>:<order id>". */
+  row_key: string;
+  kind: OrderProductRowKind;
+  order_id: string;
+  order_number: string;
+  order_date: string;
+  customer_id: string;
+  customer_name: string;
+  customer_code: string | null;
+  order_status: string;
+  payment_status: string;
+  recognized: boolean;
+  unrecognized_reason: UnrecognizedReason | null;
+  product_id: string | null;
+  product_code: string | null;
+  product_name: string | null;
+  category: string | null;
+  quantity: number | null;
+  unit_price: number | null;
+  discount: number | null;
+  /** What this row adds to the metric's total. Line: the line total. no_items: the order total. order_difference: the remainder. */
+  amount: number;
+  /** ORDER-level figures, repeated on every row of the same order - never to be summed across rows. */
+  order_total: number;
+  paid_amount: number;
+  remaining_amount: number;
+}
+
+export interface OrderProductDetail {
+  summary: OrderValueSummary;
+  /** The canonical total of the selected metric (== the Overview card). */
+  total: number;
+  /** sum(rows[].amount), computed independently - equals `total` unless the data itself is inconsistent. */
+  rowsTotal: number;
+  count: number;
+  orderCount: number;
+  noItemsOrderCount: number;
+  noItemsTotal: number;
+  differenceTotal: number;
+  rows: OrderProductDetailRow[];
+}
+
+interface ItemProductRelation {
+  product_code: string | null;
+  product_name: string | null;
+  category: string | null;
+}
+
+export interface OrderItemLine {
+  id: string;
+  order_id: string;
+  product_id: string | null;
+  snapshot_sale_price: number | null;
+  discount: number | null;
+  quantity: number | null;
+  line_total: number | null;
+  product: ItemProductRelation | ItemProductRelation[] | null;
+}
+
+const ORDER_ITEM_COLUMNS =
+  "id, order_id, product_id, snapshot_sale_price, discount, quantity, line_total, product:products(product_code, product_name, category)";
+
+function lineAmount(item: OrderItemLine): number {
+  if (item.line_total !== null && item.line_total !== undefined && Number.isFinite(Number(item.line_total))) return Number(item.line_total);
+  return (Number(item.snapshot_sale_price) || 0) * (Number(item.quantity) || 1) - (Number(item.discount) || 0);
+}
+
+/** Pure. `orderRows` are the per-order details (already sorted newest first); `items` are their order_items. */
+export function buildOrderProductRows(orderRows: OrderValueDetailRow[], items: OrderItemLine[]): OrderProductDetailRow[] {
+  const byOrder = new Map<string, OrderItemLine[]>();
+  for (const item of items) {
+    const list = byOrder.get(item.order_id) ?? [];
+    list.push(item);
+    byOrder.set(item.order_id, list);
+  }
+
+  const rows: OrderProductDetailRow[] = [];
+  for (const o of orderRows) {
+    const base = {
+      order_id: o.order_id,
+      order_number: o.order_number,
+      order_date: o.order_date,
+      customer_id: o.customer_id,
+      customer_name: o.customer_name,
+      customer_code: o.customer_code,
+      order_status: o.order_status,
+      payment_status: o.payment_status,
+      recognized: o.recognized,
+      unrecognized_reason: o.unrecognized_reason,
+      order_total: o.order_total,
+      paid_amount: o.paid_amount,
+      remaining_amount: o.remaining_amount,
+    };
+    const lines = (byOrder.get(o.order_id) ?? []).slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+    if (lines.length === 0) {
+      rows.push({ ...base, row_key: `no_items:${o.order_id}`, kind: "no_items", product_id: null, product_code: null, product_name: null, category: null, quantity: null, unit_price: null, discount: null, amount: o.order_total });
+      continue;
+    }
+
+    let linesSum = 0;
+    for (const item of lines) {
+      const p = Array.isArray(item.product) ? item.product[0] ?? null : item.product;
+      const amount = lineAmount(item);
+      linesSum += amount;
+      rows.push({
+        ...base,
+        row_key: item.id,
+        kind: "line",
+        product_id: item.product_id,
+        product_code: p?.product_code ?? null,
+        product_name: p?.product_name ?? null,
+        category: p?.category ?? null,
+        quantity: item.quantity === null || item.quantity === undefined ? null : Number(item.quantity),
+        unit_price: item.snapshot_sale_price === null || item.snapshot_sale_price === undefined ? null : Number(item.snapshot_sale_price),
+        discount: item.discount === null || item.discount === undefined ? null : Number(item.discount),
+        amount,
+      });
+    }
+    const remainder = o.order_total - linesSum;
+    if (Math.abs(remainder) >= 0.005) {
+      rows.push({ ...base, row_key: `order_difference:${o.order_id}`, kind: "order_difference", product_id: null, product_code: null, product_name: null, category: null, quantity: null, unit_price: null, discount: null, amount: remainder });
+    }
+  }
+  return rows;
+}
+
+const EMPTY_PRODUCT_DETAIL = (summary: OrderValueSummary): OrderProductDetail => ({
+  summary,
+  total: 0,
+  rowsTotal: 0,
+  count: 0,
+  orderCount: 0,
+  noItemsOrderCount: 0,
+  noItemsTotal: 0,
+  differenceTotal: 0,
+  rows: [],
+});
+
+async function loadOrderProductDetail(
+  range: DateRange | null,
+  staff: ScopingStaff | null | undefined,
+  client: SupabaseClient,
+  onlyUnrecognized: boolean
+): Promise<OrderProductDetail> {
+  const orders = await loadOrderValueOrders(range, staff, client);
+  if (!orders) return EMPTY_PRODUCT_DETAIL(EMPTY_SUMMARY);
+  const summary = summarizeOrderValueRows(orders);
+  const population = onlyUnrecognized ? orders.filter((o) => !isOrderRecognized(o)) : orders;
+  const orderRows = await buildDetailRows(population, client);
+  const ids = orderRows.map((r) => r.order_id).filter((id) => id !== "");
+  const items = ids.length ? await selectIn<OrderItemLine>(client, "order_items", ORDER_ITEM_COLUMNS, "order_id", ids) : [];
+  const rows = buildOrderProductRows(orderRows, items);
+
+  const noItems = rows.filter((r) => r.kind === "no_items");
+  return {
+    summary,
+    total: onlyUnrecognized ? summary.orderBasedUnrecognizedValue : summary.totalOrderValue,
+    rowsTotal: rows.reduce((sum, r) => sum + r.amount, 0),
+    count: rows.length,
+    orderCount: orderRows.length,
+    noItemsOrderCount: noItems.length,
+    noItemsTotal: noItems.reduce((sum, r) => sum + r.amount, 0),
+    differenceTotal: rows.filter((r) => r.kind === "order_difference").reduce((sum, r) => sum + r.amount, 0),
+    rows,
+  };
+}
+
+/** Product view of "Tổng giá trị đơn hàng": every non-Lost order in range, by product line. */
+export async function getOrderValueProductDetail(
+  range: DateRange | null,
+  staff?: ScopingStaff | null,
+  client: SupabaseClient = supabase
+): Promise<OrderProductDetail> {
+  return loadOrderProductDetail(range, staff, client, false);
+}
+
+/** Product view of "Giá trị chưa ghi nhận": exactly the orders that are not Completed + Paid, by product line. */
+export async function getUnrecognizedProductDetail(
+  range: DateRange | null,
+  staff?: ScopingStaff | null,
+  client: SupabaseClient = supabase
+): Promise<OrderProductDetail> {
+  return loadOrderProductDetail(range, staff, client, true);
+}

@@ -141,6 +141,28 @@ test("sold: view=orders (default) and view=products describe the same population
   assert.equal((await call("sold", `${SEPT}&view=bogus`)).status, 400);
 });
 
+test("Phase 1.5A order-value / unrecognized: view=products reconciles to the same canonical total as the order view; an unknown view is a 400", async () => {
+  for (const route of ["order-value", "unrecognized"] as const) {
+    const orders = await call(route, SEPT);
+    const products = await call(route, `${SEPT}&view=products`);
+    assert.equal(products.status, 200, route);
+    assert.equal(products.body.view, "products", route);
+    assert.equal(products.body.total, orders.body.total, `${route}: same canonical total in both views`);
+    assert.equal(products.body.rowsTotal, products.body.total, `${route}: the product rows add up to the total`);
+    assert.ok(products.body.rows.every((r: { kind: string }) => ["line", "no_items", "order_difference"].includes(r.kind)));
+    assert.equal(orders.body.view, undefined, `${route}: the default response shape is unchanged`);
+    assert.equal((await call(route, `${SEPT}&view=orders`)).body.total, orders.body.total);
+    assert.equal((await call(route, `${SEPT}&view=bogus`)).status, 400, route);
+  }
+  assert.equal((await call("order-value", `${SEPT}&view=products`)).body.rows.length, 7, "O2 has two lines");
+});
+
+test("Phase 1.5A sold: itemlessOrders is always present and is not part of the total or the rows", async () => {
+  const { body } = await call("sold", `${SEPT}&view=orders`);
+  assert.deepEqual(body.itemlessOrders, []);
+  assert.equal(body.rows.length, 5);
+});
+
 test("sold: the report's own filters are forwarded (customer narrows the same population in both the total and the rows)", async () => {
   const { body } = await call("sold", `${SEPT}&view=products&customer=${encodeURIComponent("Khách 2")}`);
   assert.equal(body.rows.length, 2, "O2's two lines");

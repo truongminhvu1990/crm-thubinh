@@ -162,7 +162,8 @@ export async function getSoldDataset(
   filters: MonthlySoldProductsFilters,
   client?: SupabaseClient,
   staff?: Staff | null
-): Promise<{ totals: SoldTotals; orders: SoldOrderRow[]; lines: SoldLine[] }> {
-  const lines = await repo.getSoldLines(filters, client, staff);
-  return { totals: summarizeSoldLines(lines), orders: groupSoldLinesByOrder(lines), lines };
+): Promise<{ totals: SoldTotals; orders: SoldOrderRow[]; lines: SoldLine[]; itemless: repo.SoldItemlessOrder[] }> {
+  const { lines, itemless } = await repo.getSoldLinesWithItemless(filters, client, staff);
+  // totals / orders / lines are computed from the sold LINES exactly as before; `itemless` is display-only.
+  return { totals: summarizeSoldLines(lines), orders: groupSoldLinesByOrder(lines), lines, itemless };
 }

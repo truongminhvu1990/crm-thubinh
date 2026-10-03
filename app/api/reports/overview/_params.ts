@@ -38,6 +38,16 @@ export function parseOverviewRange(searchParams: URLSearchParams): { range: Date
   return { range: { start, end } };
 }
 
+/** Phase 1.5A: `view=orders` (default, unchanged) or `view=products` for the two order-based drill-downs. Anything else
+ * is rejected, never silently defaulted. */
+export function parseOrdersView(searchParams: URLSearchParams): { view: "orders" | "products" } | { error: NextResponse } {
+  const view = searchParams.get("view") ?? "orders";
+  if (view !== "orders" && view !== "products") {
+    return { error: NextResponse.json({ error: "view must be 'orders' or 'products'" }, { status: 400 }) };
+  }
+  return { view };
+}
+
 /** Optional inventory narrowing - the same three fields /inventory filters
  * by, minus the ones that are not part of the held/remaining definition. */
 export function parseInventoryFilters(searchParams: URLSearchParams): InventoryFilters {

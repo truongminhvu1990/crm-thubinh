@@ -61,7 +61,8 @@ export function salesDetailApiUrl(
   view: SalesView
 ): string {
   const p = rangeParams(range);
-  if (metric === "sold") p.set("view", view);
+  // Phase 1.5A: the two order-based metrics also have a product view; recognized-revenue is regrouped client-side.
+  if (metric === "sold" || metric === "order-value" || metric === "unrecognized") p.set("view", view);
   const q = p.toString();
   return `/api/reports/overview/${metric}${q ? `?${q}` : ""}`;
 }
@@ -79,11 +80,10 @@ export function inventoryPageHref(view: InventoryView): string {
   return `/reports/inventory?view=${view}`;
 }
 
-/** Whether a metric offers a product-line view from the canonical data.
- * Order-grained metrics (total / unrecognized) have no product lines in their
- * canonical detail, so the toggle is disabled instead of inventing one. */
+/** Phase 1.5A: every Sales metric now offers both views (orders without product lines appear as an explicit
+ * "Chưa có sản phẩm trong đơn" row, never as an invented product). Kept as a function so callers stay unchanged. */
 export function supportsProductView(metric: SalesMetric): boolean {
-  return metric === "sold" || metric === "recognized-revenue";
+  return SALES_METRICS.includes(metric);
 }
 
 export interface GroupableRecognizedRow {

@@ -60,11 +60,15 @@ test("FIX 1: both available and REALLY different -> mismatch is still reported, 
   assert.equal(reconcileView(0, 0, false), "match");
 });
 
-test("FIX 2: disabled SẢN PHẨM toggle shows VISIBLE text (not only a title) and links it with aria-describedby", () => {
-  const note = productViewDisabledNote("order-value");
-  assert.equal(note, PRODUCT_VIEW_UNSUPPORTED_NOTE);
-  assert.equal(productViewDisabledNote("unrecognized"), PRODUCT_VIEW_UNSUPPORTED_NOTE);
-  assert.ok(note!.startsWith("Chưa hỗ trợ xem theo sản phẩm"));
+// Phase 1.5A (PO-approved): every Sales metric now has a product view, so no Sales toggle is disabled any more. The
+// ViewToggle's generic disabled-reason mechanism (used by other screens) stays covered with a local sample note.
+test("Phase 1.5A: no Sales metric disables the SẢN PHẨM toggle any more", () => {
+  for (const m of ["order-value", "recognized-revenue", "unrecognized", "sold"] as const) assert.equal(productViewDisabledNote(m), null, m);
+});
+
+test("FIX 2: a disabled toggle option shows VISIBLE text (not only a title) and links it with aria-describedby", () => {
+  const note = PRODUCT_VIEW_UNSUPPORTED_NOTE;
+  assert.ok(note.startsWith("Chưa hỗ trợ xem theo sản phẩm"));
   const markup = renderToStaticMarkup(
     createElement(ViewToggle, {
       testId: "sales-view-toggle",
@@ -72,7 +76,7 @@ test("FIX 2: disabled SẢN PHẨM toggle shows VISIBLE text (not only a title) 
       onChange: () => {},
       options: [
         { value: "orders", label: "Xem theo ĐƠN" },
-        { value: "products", label: "Xem theo SẢN PHẨM", disabled: true, title: note ?? undefined, disabledReason: note ?? undefined },
+        { value: "products", label: "Xem theo SẢN PHẨM", disabled: true, title: note, disabledReason: note },
       ],
     })
   );

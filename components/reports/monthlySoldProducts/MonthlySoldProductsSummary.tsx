@@ -29,7 +29,7 @@ export default function MonthlySoldProductsSummary({ summary }: Props) {
           testId="monthly-sold-products-sold-value-card"
           title="Tổng giá trị sản phẩm bán"
           value={currency.format(summary.soldValue)}
-          hint="Đơn Completed, và đơn Reserved đã có cọc"
+          hint="Đơn Hoàn thành, và đơn Đã giữ hàng đã có cọc"
           icon={<Wallet className="w-6 h-6 text-blue-600" />}
           color="bg-blue-100"
         />
@@ -39,8 +39,8 @@ export default function MonthlySoldProductsSummary({ summary }: Props) {
           value={currency.format(summary.recognizedRevenue)}
           hint={
             summary.legacyRecognizedValue > 0
-              ? `Completed + Paid, gồm ${currency.format(summary.legacyRecognizedValue)} dữ liệu cũ (BR-002)`
-              : "Completed + Paid"
+              ? `Hoàn thành + Đã thanh toán, gồm ${currency.format(summary.legacyRecognizedValue)} dữ liệu cũ`
+              : "Hoàn thành + Đã thanh toán"
           }
           icon={<CheckCircle2 className="w-6 h-6 text-emerald-600" />}
           color="bg-emerald-100"
@@ -49,7 +49,7 @@ export default function MonthlySoldProductsSummary({ summary }: Props) {
           testId="monthly-sold-products-unrecognized-card"
           title="Doanh thu chưa ghi nhận"
           value={currency.format(summary.unrecognizedValue)}
-          hint="Đang cọc / chưa Paid đầy đủ"
+          hint="Đang cọc / chưa thanh toán đủ"
           icon={<Clock className="w-6 h-6 text-amber-600" />}
           color="bg-amber-100"
         />
@@ -57,8 +57,8 @@ export default function MonthlySoldProductsSummary({ summary }: Props) {
       <p className="text-xs text-muted-foreground" data-testid="monthly-sold-products-reconciliation-line">
         Trong phạm vi sản phẩm bán: Đã ghi nhận {currency.format(summary.recognizedRevenue)} + Chưa ghi nhận{" "}
         {currency.format(summary.unrecognizedValue)} = {currency.format(summary.soldValue)} · Tỷ lệ đã ghi nhận{" "}
-        {formatPercent(summary.recognizedRatio * 100)}. Khác với &ldquo;Tổng giá trị đơn hàng&rdquo; trên Dashboard (gồm cả đơn Draft và
-        Reserved chưa cọc).
+        {formatPercent(summary.recognizedRatio * 100)}. Khác với &ldquo;Tổng giá trị đơn hàng&rdquo; trên Dashboard (gồm cả đơn Nháp và
+        đơn Đã giữ hàng chưa cọc).
       </p>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

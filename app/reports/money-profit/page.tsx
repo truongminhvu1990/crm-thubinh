@@ -5,10 +5,13 @@ import { Wallet, Coins, TrendingUp, Info } from "lucide-react";
 import GlobalDateFilter from "@/components/shared/GlobalDateFilter";
 import PageViewingLabel from "@/components/shared/PageViewingLabel";
 import OverviewMetricCard from "@/components/reports/overview/OverviewMetricCard";
+import PermissionGate from "@/components/reports/overview/PermissionGate";
+import { SkeletonCard } from "@/components/reports/overview/Skeleton";
 import { useCanonicalFetch } from "@/components/reports/overview/useCanonicalFetch";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
-import { useHasPermission } from "@/lib/hooks/useHasPermission";
-import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
+import { usePermission } from "@/lib/hooks/useHasPermission";
+import { useCanSeeCostAndProfit } from "@/lib/hooks/reportingAccess";
+import { EMPTY_VALUE } from "@/lib/reports/labels.vi";
 import { currency } from "@/lib/reports/format";
 import { METRIC_LABELS, rangeParams, salesPageHref } from "@/lib/reports/overviewUi";
 import type { PurchaseReportData } from "@/lib/reports/reports.service";
@@ -20,24 +23,18 @@ import type { PurchaseReportData } from "@/lib/reports/reports.service";
 // NOT part of Lợi nhuận gộp (the foundation does not define them there).
 
 export default function MoneyProfitPage() {
-  const { range, label } = useGlobalDateFilter();
-  const canView = useHasPermission("reports.view");
-  const canSeeCost = useIsOwnerOrManager();
+  const { range, label, ready } = useGlobalDateFilter();
+  const access = usePermission("reports.view");
+  const canView = access === "allowed";
+  const canSeeCost = useCanSeeCostAndProfit();
   const qs = rangeParams(range).toString();
-  const { data, error } = useCanonicalFetch<PurchaseReportData>(canView ? `/api/reports/purchases${qs ? `?${qs}` : ""}` : null);
+  const { data, error } = useCanonicalFetch<PurchaseReportData>(canView && ready ? `/api/reports/purchases${qs ? `?${qs}` : ""}` : null);
 
-  if (!canView) {
-    return (
-      <div className="pb-8">
-        <h1 className="text-2xl font-bold text-foreground sm:text-3xl">Tiền &amp; Lợi nhuận</h1>
-        <p className="mt-4 text-muted-foreground">Bạn không có quyền xem báo cáo</p>
-      </div>
-    );
-  }
-
-  const money = (v: number | undefined) => (data && v !== undefined ? currency.format(v) : "—");
+  const money = (v: number | undefined) => (data && v !== undefined ? currency.format(v) : EMPTY_VALUE);
+  const loading = !data && !error;
 
   return (
+    <PermissionGate state={access} title="Tiền & Lợi nhuận">
     <div className="space-y-6 pb-8">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
@@ -50,9 +47,17 @@ export default function MoneyProfitPage() {
         <GlobalDateFilter />
       </div>
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {loading ? (
+          <>
+            <SkeletonCard title={METRIC_LABELS.recognizedRevenue} />
+            {canSeeCost && <SkeletonCard title={METRIC_LABELS.cost} />}
+            {canSeeCost && <SkeletonCard title={METRIC_LABELS.grossProfit} />}
+          </>
+        ) : (
+          <>
         <Link href={salesPageHref("recognized-revenue")} className="block" data-testid="money-link-recognized">
           <OverviewMetricCard
             testId="money-card-recognized"
@@ -82,6 +87,8 @@ export default function MoneyProfitPage() {
         ) : (
           <p className="text-sm text-muted-foreground md:col-span-2">Giá vốn và lợi nhuận gộp chỉ hiển thị cho Owner/Manager.</p>
         )}
+          </>
+        )}
       </section>
 
       <p className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
@@ -89,5 +96,6 @@ export default function MoneyProfitPage() {
         Lợi nhuận gộp chưa trừ hoa hồng và chi phí vận hành. Sản phẩm chưa có giá vốn được tính giá vốn bằng 0.
       </p>
     </div>
+    </PermissionGate>
   );
 }

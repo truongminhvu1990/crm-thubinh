@@ -3,6 +3,7 @@ import Link from "next/link";
 import { CustomerReceivableRow } from "@/types/customerReceivable";
 import Badge from "@/components/ui/Badge";
 import { formatDate } from "@/lib/utils";
+import { paymentMethodLabel } from "@/lib/reports/labels.vi";
 
 export type CustomerReceivableColumnKey =
   | "customer"
@@ -113,7 +114,7 @@ export const CUSTOMER_RECEIVABLE_COLUMNS: CustomerReceivableColumnDef[] = [
   {
     key: "paymentMethods",
     label: "Phương thức thanh toán",
-    renderCell: (r) => <span className="text-muted-foreground whitespace-nowrap">{r.paymentMethods ?? "—"}</span>,
+    renderCell: (r) => <span className="text-muted-foreground whitespace-nowrap">{paymentMethodLabel(r.paymentMethods)}</span>,
   },
   {
     key: "lastPaymentDate",

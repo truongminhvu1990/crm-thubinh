@@ -27,9 +27,11 @@ test("labels: exactly the eight approved names, all distinct, and never 'Tổng 
 });
 
 test("drill-down URL carries the SAME start/end the Overview used (end exclusive); all-time = no params", () => {
-  assert.equal(salesDetailApiUrl("order-value", JULY, "orders"), "/api/reports/overview/order-value?start=2026-07-01&end=2026-08-01");
+  assert.equal(salesDetailApiUrl("order-value", JULY, "orders"), "/api/reports/overview/order-value?start=2026-07-01&end=2026-08-01&view=orders");
+  assert.equal(salesDetailApiUrl("order-value", JULY, "products"), "/api/reports/overview/order-value?start=2026-07-01&end=2026-08-01&view=products");
   assert.equal(salesDetailApiUrl("recognized-revenue", JULY, "orders"), "/api/reports/overview/recognized-revenue?start=2026-07-01&end=2026-08-01");
-  assert.equal(salesDetailApiUrl("unrecognized", null, "orders"), "/api/reports/overview/unrecognized");
+  assert.equal(salesDetailApiUrl("unrecognized", null, "orders"), "/api/reports/overview/unrecognized?view=orders");
+  assert.equal(salesDetailApiUrl("unrecognized", null, "products"), "/api/reports/overview/unrecognized?view=products");
   assert.equal(salesDetailApiUrl("sold", JULY, "products"), "/api/reports/overview/sold?start=2026-07-01&end=2026-08-01&view=products");
   assert.equal(salesDetailApiUrl("sold", null, "orders"), "/api/reports/overview/sold?view=orders");
   assert.equal(rangeParams(null).toString(), "");
@@ -51,10 +53,10 @@ test("query parsing falls back safely and never invents a metric", () => {
   assert.equal(parseInventoryView(undefined), "held");
 });
 
-test("product view is only offered where the canonical detail has product lines", () => {
+test("Phase 1.5A: the product view is offered for every Sales metric", () => {
   assert.deepEqual(
     (["order-value", "recognized-revenue", "unrecognized", "sold"] as const).map(supportsProductView),
-    [false, true, false, true]
+    [true, true, true, true]
   );
 });
 

@@ -75,7 +75,7 @@ test.describe("Reports - Supplier Balance", () => {
     await page.goto("/reports/supplier-balance");
     await waitForLoading(page);
 
-    await expect(page.getByRole("heading", { name: "Số dư Supplier" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Số dư Nhà cung cấp" })).toBeVisible();
     await expect(page.getByTestId("supplier-balance-supplier-count-card")).toBeVisible();
     await expect(page.getByTestId("supplier-balance-row-count-card")).toBeVisible();
 

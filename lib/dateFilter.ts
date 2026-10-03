@@ -18,12 +18,59 @@ const MS_PER_DAY = 86_400_000;
 
 export type DateFilterOption =
   | "today"
+  | "yesterday"
+  | "last_7_days"
   | "this_week"
+  | "last_week"
   | "this_month"
+  | "last_month"
   | "this_quarter"
+  | "last_quarter"
   | "this_year"
+  | "last_year"
   | "all_time"
   | "custom";
+
+/** Phase 1.5A (Product Owner): the preset list, in display order, with its Vietnamese label. The ONE list every date
+ * control renders and every validator checks (localStorage restore included). */
+export const DATE_PRESETS: { value: DateFilterOption; label: string }[] = [
+  { value: "today", label: "Hôm nay" },
+  { value: "yesterday", label: "Hôm qua" },
+  { value: "last_7_days", label: "7 ngày qua" },
+  { value: "this_week", label: "Tuần này" },
+  { value: "last_week", label: "Tuần trước" },
+  { value: "this_month", label: "Tháng này" },
+  { value: "last_month", label: "Tháng trước" },
+  { value: "this_quarter", label: "Quý này" },
+  { value: "last_quarter", label: "Quý trước" },
+  { value: "this_year", label: "Năm nay" },
+  { value: "last_year", label: "Năm trước" },
+  { value: "all_time", label: "Toàn thời gian" },
+  { value: "custom", label: "Tùy chọn" },
+];
+
+export function isDateFilterOption(value: unknown): value is DateFilterOption {
+  return DATE_PRESETS.some((p) => p.value === value);
+}
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+function isRealDate(value: string): boolean {
+  if (!DATE_ONLY.test(value)) return false;
+  const [y, m, d] = value.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+}
+
+export type CustomRangeCheck = { ok: true } | { ok: false; message: string };
+
+/** A custom range may only be COMMITTED (and therefore only then trigger any report request) when both dates are real
+ * and FROM <= TO. The message is shown to the user as-is. */
+export function validateCustomRange(from: string | undefined | null, to: string | undefined | null): CustomRangeCheck {
+  if (!from || !to) return { ok: false, message: "Vui lòng chọn đủ ngày bắt đầu và ngày kết thúc." };
+  if (!isRealDate(from) || !isRealDate(to)) return { ok: false, message: "Ngày không hợp lệ. Vui lòng chọn lại." };
+  if (from > to) return { ok: false, message: "Ngày bắt đầu phải trước hoặc bằng ngày kết thúc." };
+  return { ok: true };
+}
 
 export interface DateRange {
   start: string; // inclusive, YYYY-MM-DD
@@ -83,6 +130,19 @@ export function getDateRange(option: DateFilterOption, customFrom?: string, cust
     return { start, end: addDaysToDateStr(start, 1) };
   }
 
+  // Phase 1.5A presets. Each "previous"-style preset is exactly the previous equivalent period of its "this" twin, so
+  // Yesterday / Last week / Last month / Last quarter / Last year can never disagree with the comparison logic.
+  if (option === "yesterday") return getPreviousEquivalentRange("today", getDateRange("today"));
+  if (option === "last_week") return getPreviousEquivalentRange("this_week", getDateRange("this_week"));
+  if (option === "last_month") return getPreviousEquivalentRange("this_month", getDateRange("this_month"));
+  if (option === "last_quarter") return getPreviousEquivalentRange("this_quarter", getDateRange("this_quarter"));
+  if (option === "last_year") return getPreviousEquivalentRange("this_year", getDateRange("this_year"));
+  if (option === "last_7_days") {
+    // 7 days INCLUDING today (Product Owner, P3).
+    const today = BusinessTime.todayString();
+    return { start: addDaysToDateStr(today, -6), end: addDaysToDateStr(today, 1) };
+  }
+
   if (option === "this_week") {
     const start = BusinessTime.todayString(BusinessTime.startOfWeek());
     return { start, end: addDaysToDateStr(start, 7) };
@@ -125,7 +185,14 @@ export function getDateRange(option: DateFilterOption, customFrom?: string, cust
 export function getPreviousEquivalentRange(option: DateFilterOption, range: DateRange | null): DateRange | null {
   if (!range || option === "all_time") return null;
 
-  if (option === "today" || option === "this_week" || option === "custom") {
+  if (
+    option === "today" ||
+    option === "yesterday" ||
+    option === "last_7_days" ||
+    option === "this_week" ||
+    option === "last_week" ||
+    option === "custom"
+  ) {
     const [sy, sm, sd] = range.start.split("-").map(Number);
     const [ey, em, ed] = range.end.split("-").map(Number);
     const durationDays = Math.round(
@@ -136,18 +203,25 @@ export function getPreviousEquivalentRange(option: DateFilterOption, range: Date
 
   const [y, m] = range.start.split("-").map(Number);
 
-  if (option === "this_month") {
+  if (option === "this_month" || option === "last_month") {
     const prev = new Date(y, m - 2, 1);
     return { start: `${prev.getFullYear()}-${pad(prev.getMonth() + 1)}-01`, end: range.start };
   }
 
-  if (option === "this_quarter") {
+  if (option === "this_quarter" || option === "last_quarter") {
     const prev = new Date(y, m - 1 - 3, 1);
     return { start: `${prev.getFullYear()}-${pad(prev.getMonth() + 1)}-01`, end: range.start };
   }
 
-  // this_year
-  return { start: `${y - 1}-01-01`, end: range.start };
+  if (option === "this_year" || option === "last_year") {
+    return { start: `${y - 1}-01-01`, end: range.start };
+  }
+
+  // Any option not handled above is shifted back by its own length (never silently treated as a year).
+  const [sy, sm, sd] = range.start.split("-").map(Number);
+  const [ey, em, ed] = range.end.split("-").map(Number);
+  const days = Math.round((new Date(ey, em - 1, ed).getTime() - new Date(sy, sm - 1, sd).getTime()) / 86_400_000);
+  return { start: addDaysToDateStr(range.start, -days), end: range.start };
 }
 
 /**
@@ -159,6 +233,27 @@ export function getDateFilterLabel(option: DateFilterOption, customFrom?: string
   if (option === "all_time") return "Toàn thời gian";
   if (option === "today") return "Hôm nay";
   if (option === "this_week") return "Tuần này";
+  if (option === "yesterday" || option === "last_7_days" || option === "last_week") {
+    // Relative presets also show the dates they resolve to, so nobody has to guess.
+    const range = getDateRange(option);
+    const name = option === "yesterday" ? "Hôm qua" : option === "last_7_days" ? "7 ngày qua" : "Tuần trước";
+    if (!range) return name;
+    const last = addDaysToDateStr(range.end, -1);
+    const [ly, lm, ld] = last.split("-");
+    const [, sm, sd] = range.start.split("-");
+    return range.start === last ? `${name} (${ld}/${lm}/${ly})` : `${name} (${sd}/${sm} → ${ld}/${lm}/${ly})`;
+  }
+  if (option === "last_month") {
+    const range = getDateRange("last_month");
+    const [y, m] = (range?.start ?? "").split("-");
+    return `Tháng ${Number(m)}/${y}`;
+  }
+  if (option === "last_quarter") {
+    const range = getDateRange("last_quarter");
+    const [y, m] = (range?.start ?? "").split("-").map(Number);
+    return `Quý ${Math.floor((m - 1) / 3) + 1}/${y}`;
+  }
+  if (option === "last_year") return `${Number((getDateRange("last_year")?.start ?? "").split("-")[0])}`;
   if (option === "this_year") return `${BusinessTime.businessYear()}`;
   if (option === "this_quarter") {
     const { year, quarter } = BusinessTime.businessQuarter();

@@ -41,7 +41,7 @@ export default function SupplierBalanceTable({ rows, isLoading = false }: Props)
           <Landmark className="w-5 h-5 text-muted-foreground" />
         </div>
         <p className="text-muted-foreground text-sm" data-testid="supplier-balance-empty-state">
-          Không có Supplier nào khớp với bộ lọc đã chọn
+          Không có Nhà cung cấp nào khớp với bộ lọc đã chọn
         </p>
       </div>
     );
@@ -82,7 +82,7 @@ export default function SupplierBalanceTable({ rows, isLoading = false }: Props)
         <table data-testid="supplier-balance-table" className="w-full min-w-[900px] text-sm">
           <thead>
             <tr className="border-b border-border">
-              <th className="text-left px-5 py-3.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Supplier</th>
+              <th className="text-left px-5 py-3.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Nhà cung cấp</th>
               <th className="text-left px-5 py-3.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Đơn vị tiền tệ</th>
               <th className="text-right px-5 py-3.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tổng IN</th>
               <th className="text-right px-5 py-3.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tổng OUT</th>
