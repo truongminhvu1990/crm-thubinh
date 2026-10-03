@@ -2,12 +2,16 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Users, Gem, Package, TrendingUp, Calendar, Wallet, Coins, ClipboardList, PiggyBank } from "lucide-react";
+import { Users, Gem, Package, TrendingUp, Calendar, Wallet, Coins, ClipboardList, PiggyBank, PackageCheck, Hourglass, PackageOpen } from "lucide-react";
 import { FollowUpSummaryCounts } from "@/lib/customer.service";
 import { ProductReportData, BatchStaticReportData, PurchaseReportData } from "@/lib/reports/reports.service";
 import { OrderValueSummary } from "@/lib/orders/orderValueSummary.service";
+import type { OverviewMetrics } from "@/lib/reports/overviewMetrics.service";
+import { METRIC_LABELS, inventoryPageHref, salesPageHref } from "@/lib/reports/overviewUi";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
-import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
+import { useCanSeeCostAndProfit } from "@/lib/hooks/reportingAccess";
+import { EMPTY_VALUE } from "@/lib/reports/labels.vi";
+import { SkeletonBlock, SkeletonCard } from "@/components/reports/overview/Skeleton";
 import { TopSalesStaffEntry } from "@/lib/staff.service";
 import Card from "@/components/ui/Card";
 import StatCard from "@/components/ui/StatCard";
@@ -22,7 +26,19 @@ import UnrecognizedOrderValueBreakdown from "@/components/dashboard/Unrecognized
 import ScopeIndicator from "@/components/shared/ScopeIndicator";
 
 export default function Dashboard() {
-  const { range, label } = useGlobalDateFilter();
+  const { range, label, ready } = useGlobalDateFilter();
+  // Phase 1.5A: the period a response belongs to. Period-dependent regions show a skeleton until the response for the
+  // CURRENT period has arrived - never the previous period's numbers - and nothing is requested before the stored
+  // period has been read (no wasted default-period calls on open).
+  const rangeStart = range?.start;
+  const rangeEnd = range?.end;
+  const rangeKey = rangeStart && rangeEnd ? `${rangeStart}|${rangeEnd}` : "all";
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const [staffKey, setStaffKey] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const hasData = loadedKey !== null;
+  const periodReady = loadedKey === rangeKey;
+  const staffReady = staffKey === rangeKey;
 
   const [customerStats, setCustomerStats] = useState({
     total: 0,
@@ -35,7 +51,7 @@ export default function Dashboard() {
   const [purchaseData, setPurchaseData] = useState<PurchaseReportData | null>(null);
   const [orderValue, setOrderValue] = useState<OrderValueSummary | null>(null);
   const [unrecognizedOrderValue, setUnrecognizedOrderValue] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
+  const [overview, setOverview] = useState<OverviewMetrics | null>(null);
   const [followUpCounts, setFollowUpCounts] = useState<FollowUpSummaryCounts>({
     overdue: 0,
     today: 0,
@@ -49,12 +65,12 @@ export default function Dashboard() {
   // Owner/Manager additionally see two more cards (Giá vốn/Lãi / Lỗ), using
   // totalCost/totalProfit already present on `purchaseData` since Part 3's
   // change to getPurchaseReportData - no new fetch needed.
-  const canViewCostAndProfit = useIsOwnerOrManager();
+  const canViewCostAndProfit = useCanSeeCostAndProfit();
 
   useEffect(() => {
+    if (!ready) return;
     let cancelled = false;
-    setIsLoading(true);
-    const overviewParams = range ? `?start=${range.start}&end=${range.end}` : "";
+    const overviewParams = rangeStart && rangeEnd ? `?start=${rangeStart}&end=${rangeEnd}` : "";
     fetch(`/api/dashboard/overview${overviewParams}`)
       .then((res) =>
         res.ok
@@ -65,26 +81,36 @@ export default function Dashboard() {
               purchases: PurchaseReportData;
               orderValue: OrderValueSummary;
               unrecognizedOrderValue: number;
+              overview: OverviewMetrics;
             }>)
           : null
       )
       .then((overview) => {
-        if (cancelled || !overview) return;
+        if (cancelled) return;
+        if (!overview) {
+          setLoadError(true);
+          return;
+        }
         setCustomerStats(overview.customers);
         setProductTotal(overview.products.total);
         setBatchTotal(overview.batches.totalBatches);
         setPurchaseData(overview.purchases);
         setOrderValue(overview.orderValue);
         setUnrecognizedOrderValue(overview.unrecognizedOrderValue);
+        setOverview(overview.overview ?? null);
+        setLoadError(false);
       })
-      .catch((error) => console.error("Failed to load dashboard stats:", error))
+      .catch((error) => {
+        console.error("Failed to load dashboard stats:", error);
+        if (!cancelled) setLoadError(true);
+      })
       .finally(() => {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) setLoadedKey(rangeKey);
       });
     return () => {
       cancelled = true;
     };
-  }, [range]);
+  }, [ready, rangeStart, rangeEnd, rangeKey]);
 
   // Follow-up Summary widget (Sprint v1.1.1) - kept in its own effect, not
   // part of the range-dependent Promise.all above, since follow-up counts
@@ -121,17 +147,24 @@ export default function Dashboard() {
   // reads customer_purchases (see getTopSalesStaff), so it must respect the
   // Global Date Filter the same as the other revenue-based widgets above.
   useEffect(() => {
+    if (!ready) return;
     let cancelled = false;
-    const topSalesStaffParams = range ? `?start=${range.start}&end=${range.end}` : "";
+    const topSalesStaffParams = rangeStart && rangeEnd ? `?start=${rangeStart}&end=${rangeEnd}` : "";
     fetch(`/api/dashboard/top-sales-staff${topSalesStaffParams}`)
       .then((res) => (res.ok ? (res.json() as Promise<TopSalesStaffEntry[]>) : []))
       .then((entries) => {
-        if (!cancelled) setTopSalesStaff(entries);
+        if (!cancelled) {
+          setTopSalesStaff(entries);
+          setStaffKey(rangeKey);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setStaffKey(rangeKey);
       });
     return () => {
       cancelled = true;
     };
-  }, [range]);
+  }, [ready, rangeStart, rangeEnd, rangeKey]);
 
   // Revenue label now follows the Global Date Filter (Sprint v1.0.2)
   // instead of always saying "this month".
@@ -152,13 +185,13 @@ export default function Dashboard() {
     maximumFractionDigits: 0,
   });
 
-  if (isLoading) {
-    return (
-      <div className="flex justify-center items-center h-96">
-        <div className="animate-spin text-2xl">⟳</div>
-      </div>
-    );
-  }
+  const cardsSkeleton = (n: number) => (
+    <div className="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="dashboard-skeleton">
+      {Array.from({ length: n }).map((_, i) => (
+        <SkeletonCard key={i} />
+      ))}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-background pb-8">
@@ -176,6 +209,12 @@ export default function Dashboard() {
         <GlobalDateFilter />
       </div>
 
+      {loadError && (
+        <p className="mb-4 text-sm text-destructive" role="alert" data-testid="dashboard-load-error">
+          Không tải được dữ liệu Dashboard. Vui lòng thử lại.
+        </p>
+      )}
+
       {/* Revenue Management Visibility (2026-08-29) - three distinct
           management metrics, deliberately never merged into one "Doanh
           thu" figure (Production read-only audit, 2026-08-29, confirmed
@@ -191,36 +230,83 @@ export default function Dashboard() {
           (getOrderValueSummary's own Completed+Paid complement) - each
           card's hint below says so explicitly so the two numbers are never
           read as directly subtractable. */}
+      {!periodReady ? cardsSkeleton(3) : (
       <div className="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard
-          testId="dashboard-total-order-value-card"
-          title="Tổng giá trị đơn hàng"
-          value={currency.format(totalOrderValue)}
-          hint={`Tổng giá trị các đơn phát sinh trong kỳ (Đơn hàng, không tính Lost) · ${orderValue?.totalOrderCount ?? 0} đơn`}
-          icon={<ClipboardList className="w-8 h-8 text-blue-600" />}
-          color="bg-blue-100"
-          badge={<ScopeIndicator resource="orders" />}
-        />
-        <Link href="/reports">
+        <Link href={salesPageHref("order-value")}>
+          <StatCard
+            testId="dashboard-total-order-value-card"
+            title={METRIC_LABELS.totalOrderValue}
+            value={currency.format(totalOrderValue)}
+            hint={`Tổng giá trị các đơn phát sinh trong kỳ (Đơn hàng, không tính đơn Đã mất) · ${orderValue?.totalOrderCount ?? 0} đơn`}
+            icon={<ClipboardList className="w-8 h-8 text-blue-600" />}
+            color="bg-blue-100"
+            badge={<ScopeIndicator resource="orders" />}
+          />
+        </Link>
+        <Link href={salesPageHref("recognized-revenue")}>
           <StatCard
             testId="dashboard-revenue-card"
             title={revenueLabel}
             value={currency.format(monthRevenue)}
-            hint="Completed + Paid — có thể gồm doanh thu ghi nhận ngoài Đơn hàng"
+            hint="Hoàn thành + Đã thanh toán — có thể gồm doanh thu ghi nhận ngoài Đơn hàng"
             icon={<Wallet className="w-8 h-8 text-emerald-600" />}
             color="bg-emerald-100"
             badge={<ScopeIndicator resource="revenue" />}
           />
         </Link>
-        <StatCard
-          testId="dashboard-unrecognized-order-value-card"
-          title="Giá trị đơn chưa ghi nhận"
-          value={currency.format(unrecognizedOrderValue)}
-          hint={`${orderValue?.unrecognizedOrderCount ?? 0} đơn · Tính riêng từ Đơn hàng — không phải hiệu số của hai chỉ số trên`}
-          icon={<PiggyBank className="w-8 h-8 text-amber-600" />}
-          color="bg-amber-100"
-        />
+        <Link href={salesPageHref("unrecognized")}>
+          <StatCard
+            testId="dashboard-unrecognized-order-value-card"
+            title={METRIC_LABELS.unrecognizedValue}
+            value={currency.format(unrecognizedOrderValue)}
+            hint={`${orderValue?.unrecognizedOrderCount ?? 0} đơn · Tính riêng từ Đơn hàng — không phải hiệu số của hai chỉ số trên`}
+            icon={<PiggyBank className="w-8 h-8 text-amber-600" />}
+            color="bg-amber-100"
+          />
+        </Link>
       </div>
+      )}
+
+      {/* Phase 1.4 - the other three canonical Overview metrics (Đã bán,
+          Hàng đang giữ, Hàng còn lại). Values come from the same
+          /api/dashboard/overview response; each opens its drill-down.
+          Held/Remaining are current inventory, not date-filtered.
+          Phase 1.4.2: rendered only when the server returned `overview`,
+          which it does only for callers holding reports.view. */}
+      {!periodReady ? cardsSkeleton(3) : overview && (
+      <div className="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Link href={salesPageHref("sold")}>
+          <StatCard
+            testId="dashboard-sold-card"
+            title={METRIC_LABELS.sold}
+            value={overview?.sold ? currency.format(overview.sold.value) : EMPTY_VALUE}
+            hint={overview?.sold ? `${overview.sold.orderCount} đơn · ${overview.sold.lineCount} sản phẩm` : undefined}
+            icon={<PackageCheck className="w-8 h-8 text-emerald-600" />}
+            color="bg-emerald-100"
+          />
+        </Link>
+        <Link href={inventoryPageHref("held")}>
+          <StatCard
+            testId="dashboard-held-card"
+            title={METRIC_LABELS.held}
+            value={overview?.held ? currency.format(overview.held.value) : EMPTY_VALUE}
+            hint={overview?.held ? `${overview.held.count} sản phẩm${overview.held.missingPriceCount ? ` · ${overview.held.missingPriceCount} chưa định giá` : ""} · hiện tại` : undefined}
+            icon={<Hourglass className="w-8 h-8 text-blue-600" />}
+            color="bg-blue-100"
+          />
+        </Link>
+        <Link href={inventoryPageHref("remaining")}>
+          <StatCard
+            testId="dashboard-remaining-card"
+            title={METRIC_LABELS.remaining}
+            value={overview?.remaining ? currency.format(overview.remaining.value) : EMPTY_VALUE}
+            hint={overview?.remaining ? `${overview.remaining.count} sản phẩm${overview.remaining.missingPriceCount ? ` · ${overview.remaining.missingPriceCount} chưa định giá` : ""} · hiện tại` : undefined}
+            icon={<PackageOpen className="w-8 h-8 text-primary" />}
+            color="bg-primary/10"
+          />
+        </Link>
+      </div>
+      )}
       {/* Revenue & Sales Reporting Unification (revised) - the two groups of
           cards have DIFFERENT scopes and are deliberately not forced into
           one identity: (1) Orders view, by order date: every non-Lost Order
@@ -229,34 +315,42 @@ export default function Dashboard() {
           BR-002 unchanged: purchases linked to Completed + Paid Orders plus
           BR-002 legacy purchases with no Order. Each line says which scope
           it describes. */}
+      {!periodReady ? (
+        <div className="mb-4 space-y-2">
+          <SkeletonBlock className="h-3 w-3/4" />
+          <SkeletonBlock className="h-3 w-2/3" />
+        </div>
+      ) : (
       <div className="mb-4 space-y-1 text-xs text-muted-foreground" data-testid="dashboard-revenue-scope-notes">
         <p data-testid="dashboard-orders-view-line">
-          Theo Đơn hàng (ngày đơn): Tổng giá trị đơn hàng {currency.format(totalOrderValue)} = Completed + Paid{" "}
-          {currency.format(orderValue?.orderBasedRecognizedValue ?? 0)} + Giá trị đơn chưa ghi nhận{" "}
+          Theo Đơn hàng (ngày đơn): Tổng giá trị đơn hàng {currency.format(totalOrderValue)} = Hoàn thành + Đã thanh toán{" "}
+          {currency.format(orderValue?.orderBasedRecognizedValue ?? 0)} + {METRIC_LABELS.unrecognizedValue}{" "}
           {currency.format(unrecognizedOrderValue)}
         </p>
         <p data-testid="dashboard-recognized-breakdown-line">
-          Doanh thu đã ghi nhận (ngày bán, BR-001 + BR-002): gắn Đơn hàng Completed + Paid{" "}
-          {currency.format(monthRevenue - legacyRecognizedRevenue)} + dữ liệu cũ không gắn Đơn hàng (BR-002){" "}
+          Doanh thu đã ghi nhận (ngày bán): gắn Đơn hàng Hoàn thành + Đã thanh toán{" "}
+          {currency.format(monthRevenue - legacyRecognizedRevenue)} + dữ liệu cũ không gắn Đơn hàng{" "}
           {currency.format(legacyRecognizedRevenue)} = {currency.format(monthRevenue)}
         </p>
       </div>
+      )}
 
       {/* Simple Profit Calculation Package, Final Revision: Owner/Manager
           additionally see Giá vốn/Lãi / Lỗ - nothing is hidden or replaced
           for Sales, unchanged by this task. */}
-      {canViewCostAndProfit && (
+      {canViewCostAndProfit && !periodReady && cardsSkeleton(2)}
+      {canViewCostAndProfit && periodReady && (
         <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
           <StatCard
             testId="dashboard-cost-card"
-            title="Giá vốn"
+            title={METRIC_LABELS.cost}
             value={currency.format(purchaseData?.totalCost ?? 0)}
             icon={<Coins className="w-8 h-8 text-amber-600" />}
             color="bg-amber-100"
           />
           <StatCard
             testId="dashboard-profit-card"
-            title="Lãi / Lỗ"
+            title={METRIC_LABELS.grossProfit}
             value={currency.format(purchaseData?.totalProfit ?? 0)}
             icon={<TrendingUp className="w-8 h-8 text-primary" />}
             color="bg-primary/10"
@@ -268,7 +362,7 @@ export default function Dashboard() {
           Visibility, 2026-08-29). Same visibility as the cards above (no
           new permission - data-scoped by "orders", same as /orders). */}
       <div className="mb-6">
-        <UnrecognizedOrderValueBreakdown rows={orderValue?.breakdown ?? []} />
+        {periodReady ? <UnrecognizedOrderValueBreakdown rows={orderValue?.breakdown ?? []} /> : <SkeletonBlock className="h-32 w-full" />}
       </div>
 
       {/* Overview - customer stats (existing) + product/batch totals (Reports) */}
@@ -277,7 +371,7 @@ export default function Dashboard() {
           <StatCard
             testId="dashboard-customer-total-card"
             title="Tổng khách hàng"
-            value={customerStats.total}
+            value={hasData ? customerStats.total : EMPTY_VALUE}
             icon={<Users className="w-6 h-6 text-primary" />}
             color="bg-primary/10"
             badge={<ScopeIndicator resource="customers" />}
@@ -287,7 +381,7 @@ export default function Dashboard() {
           <StatCard
             testId="dashboard-customer-vip-card"
             title="Khách VIP"
-            value={customerStats.vip}
+            value={hasData ? customerStats.vip : EMPTY_VALUE}
             icon={<Gem className="w-6 h-6 text-yellow-600" />}
             color="bg-yellow-100"
           />
@@ -295,14 +389,14 @@ export default function Dashboard() {
         <StatCard
           testId="dashboard-customer-normal-card"
           title="Khách thường"
-          value={customerStats.normal}
+          value={hasData ? customerStats.normal : EMPTY_VALUE}
           icon={<Users className="w-6 h-6 text-green-600" />}
           color="bg-green-100"
         />
         <StatCard
           testId="dashboard-recently-contacted-card"
           title="Liên hệ 7 ngày"
-          value={customerStats.recentlyContacted}
+          value={hasData ? customerStats.recentlyContacted : EMPTY_VALUE}
           icon={<Calendar className="w-6 h-6 text-purple-600" />}
           color="bg-purple-100"
         />
@@ -310,7 +404,7 @@ export default function Dashboard() {
           <StatCard
             testId="dashboard-product-total-card"
             title="Tổng sản phẩm"
-            value={productTotal}
+            value={hasData ? productTotal : EMPTY_VALUE}
             icon={<Gem className="w-6 h-6 text-primary" />}
             color="bg-primary/10"
           />
@@ -319,7 +413,7 @@ export default function Dashboard() {
           <StatCard
             testId="dashboard-batch-total-card"
             title="Tổng lô hàng"
-            value={batchTotal}
+            value={hasData ? batchTotal : EMPTY_VALUE}
             icon={<Package className="w-6 h-6 text-blue-600" />}
             color="bg-blue-100"
           />
@@ -334,12 +428,12 @@ export default function Dashboard() {
 
       {/* Sales Summary */}
       <div className="mb-6">
-        <SalesSummary data={purchaseData} monthLabel={label} />
+        {periodReady ? <SalesSummary data={purchaseData} monthLabel={label} /> : <SkeletonBlock className="h-40 w-full" />}
       </div>
 
       {/* Top Sales Staff (Sprint v2.0.0, Feature 9) */}
       <div className="mb-6 max-w-2xl">
-        <TopSalesStaffCard entries={topSalesStaff} />
+        {staffReady ? <TopSalesStaffCard entries={topSalesStaff} /> : <SkeletonBlock className="h-32 w-full" />}
       </div>
 
       {/* Dashboard integration with existing Reports */}

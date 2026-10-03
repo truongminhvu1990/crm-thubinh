@@ -119,3 +119,72 @@ export function summarizeRevenue(
     recognizedRatio: total > 0 ? recognized / total : 0,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Phase 1 - Reporting Foundation. Everything below is ADDITIVE: it consolidates
+// the purchase-row recognition rule that lib/reports/reports.service.ts used to
+// keep as a private copy, and adds the shared "why" wording the drill-down
+// datasets expose. No definition above this line was touched.
+// ---------------------------------------------------------------------------
+
+/** The shape of a `customer_purchases` row for recognition purposes: the
+ * linked Order (through order_items) is embedded by the query. `order_items`
+ * is null for a legacy row; it can also be non-null with `orders: null`
+ * when the join finds no Order. */
+export interface PurchaseRecognitionFields {
+  order_item_id: string | null;
+  order_items: { orders: OrderStatusFields | null } | null;
+}
+
+/** BR-001 + BR-002 (both LOCKED) applied to one customer_purchases row.
+ *  - BR-002: no linked Order (order_item_id NULL - legacy / manual entry)
+ *    -> recognized by exception.
+ *  - BR-001: linked Order -> recognized only when that Order is Completed
+ *    AND Paid; a linked row whose Order cannot be found is NOT recognized.
+ * This is the verbatim rule of reports.service.ts's former private
+ * isRevenueRecognized (proven equal by revenueDefinition.regression.test.ts). */
+export function isPurchaseRecognized(row: PurchaseRecognitionFields): boolean {
+  if (!row.order_item_id) return true;
+  const order = row.order_items?.orders;
+  return !!order && isOrderRecognized(order);
+}
+
+export type RecognitionRule = "BR-001" | "BR-002";
+
+/** Which LOCKED rule recognizes a purchase row (null = not recognized). */
+export function purchaseRecognitionRule(row: PurchaseRecognitionFields): RecognitionRule | null {
+  if (!isPurchaseRecognized(row)) return null;
+  return row.order_item_id ? "BR-001" : "BR-002";
+}
+
+/** Plain-Vietnamese wording of each rule, for detail views. */
+export const RECOGNITION_RULE_LABEL: Record<RecognitionRule, string> = {
+  "BR-001": "Đơn đã hoàn thành và thanh toán đủ",
+  "BR-002": "Dữ liệu cũ, không gắn đơn hàng (ghi nhận theo quy tắc dữ liệu cũ)",
+};
+
+export type UnrecognizedReasonCode = "ORDER_DRAFT" | "ORDER_RESERVED" | "ORDER_NOT_FULLY_PAID" | "ORDER_LOST";
+
+export interface UnrecognizedReason {
+  code: UnrecognizedReasonCode;
+  label: string;
+}
+
+/** Why a non-Lost Order is not recognized revenue. Derived ONLY from the
+ * two fields BR-001 reads (order status, payment status) plus whether a
+ * payment record exists - it never introduces a new condition. Returns
+ * null for a recognized order. */
+export function getUnrecognizedReason(order: OrderStatusFields, paymentCount: number): UnrecognizedReason | null {
+  if (isOrderRecognized(order)) return null;
+  if (order.order_status === "Lost") return { code: "ORDER_LOST", label: "Đơn đã mất, không tính doanh thu" };
+  if (order.order_status === "Completed") {
+    return { code: "ORDER_NOT_FULLY_PAID", label: "Đã hoàn thành nhưng chưa thanh toán đủ" };
+  }
+  if (order.order_status === "Reserved") {
+    return {
+      code: "ORDER_RESERVED",
+      label: paymentCount > 0 ? "Đã giữ hàng và đã cọc, chưa hoàn thành" : "Đã giữ hàng, chưa cọc, chưa hoàn thành",
+    };
+  }
+  return { code: "ORDER_DRAFT", label: "Đơn nháp, chưa hoàn thành" };
+}

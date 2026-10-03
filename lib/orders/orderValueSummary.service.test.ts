@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mock } from "node:test";
+import { applyWindow, WindowState } from "@/lib/reports/postgrestFake.testutil";
 
 // getOrderValueSummary backs the Dashboard's new "Tổng giá trị đơn hàng" /
 // "Giá trị đơn chưa ghi nhận" cards (Revenue Management Visibility,
@@ -33,8 +34,16 @@ function fakeClient(rows: FakeOrderRow[], calls: QueryCalls = {}) {
   return {
     from: (table: string) => {
       calls.table = table;
+      // Phase 1.2: PostgREST window semantics (order / range / count / max-rows cap)
+      // - the loader pages, so the fake must answer .order() and .range().
+      const w: WindowState = {};
       const builder = {
-        select: () => builder,
+        select: (_cols?: string, opts?: { count?: string }) => {
+          if (opts?.count === "exact") w.countExact = true;
+          return builder;
+        },
+        order: (col: string, o?: { ascending?: boolean }) => ((w.order = { col, ascending: o?.ascending ?? true }), builder),
+        range: (from: number, to: number) => ((w.range = [from, to]), builder),
         neq: (col: string, val: string) => {
           calls.neq = [col, val];
           return builder;
@@ -47,7 +56,10 @@ function fakeClient(rows: FakeOrderRow[], calls: QueryCalls = {}) {
           calls.lt = [col, val];
           return builder;
         },
-        then: (resolve: (r: { data: FakeOrderRow[]; error: null }) => void) => resolve({ data: rows, error: null }),
+        then: (resolve: (r: { data: FakeOrderRow[]; error: null; count: number | null }) => void) => {
+          const { data, count } = applyWindow(rows, w, undefined, table);
+          return resolve({ data, error: null, count });
+        },
       };
       return builder;
     },

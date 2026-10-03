@@ -56,11 +56,11 @@ export default function ReportsTable({ icon, title, headers, rows, emptyLabel, s
           <button
             type="button"
             disabled
-            title="Coming Soon"
+            title="Sắp ra mắt"
             className="inline-flex items-center gap-1.5 rounded-lg border border-input bg-muted px-3 py-2 text-sm text-muted-foreground opacity-50 cursor-not-allowed"
           >
             <Download className="w-4 h-4" />
-            Coming Soon
+            Sắp ra mắt
           </button>
         </div>
       </div>

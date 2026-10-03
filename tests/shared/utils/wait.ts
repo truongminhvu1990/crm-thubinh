@@ -36,6 +36,19 @@ export async function waitForLoading(page: Page, timeout = 15_000) {
       });
   }
 
+  // Phase 1.5A: Reporting / Dashboard regions now show `data-skeleton` placeholders (no spinner) while loading.
+  const skeleton = page.locator("[data-skeleton]");
+  const skeletonAppeared = await skeleton
+    .first()
+    .waitFor({ state: "visible", timeout: 300 })
+    .then(() => true)
+    .catch(() => false);
+  if (skeletonAppeared) {
+    await page
+      .waitForFunction(() => document.querySelectorAll("[data-skeleton]").length === 0, undefined, { timeout })
+      .catch(() => {});
+  }
+
   await page.waitForLoadState("networkidle", { timeout }).catch(() => {
     // Long-polling / SSE connections can keep the network non-idle
     // indefinitely — don't fail the test over it.

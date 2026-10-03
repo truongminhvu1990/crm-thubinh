@@ -49,11 +49,11 @@ export default function ExportButtons<T,>({ sheetName, filename, columns, rows }
       <button
         type="button"
         disabled
-        title="Coming Soon"
+        title="Sắp ra mắt"
         className="inline-flex items-center gap-1.5 rounded-lg border border-input bg-muted px-3 py-1.5 text-sm text-muted-foreground opacity-50 cursor-not-allowed"
       >
         <FileText className="w-3.5 h-3.5" />
-        PDF (Coming Soon)
+        PDF (Sắp ra mắt)
       </button>
     </div>
   );

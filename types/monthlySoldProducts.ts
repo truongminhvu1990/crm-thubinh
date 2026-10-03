@@ -70,6 +70,9 @@ export interface MonthlySoldProductRow {
   original_price: number | null;
   discount: number | null;
   final_sale_price: number;
+  /** Phase 1.5A: units on the order line (order_items.quantity); 1 for a legacy entry. Additive and optional - no
+   * existing consumer reads it, and final_sale_price is already the whole line amount. */
+  quantity?: number;
   gross_profit: number | null;
   /** Payment Details (Product Owner task, 2026-08-14) - Order-level, not
    * per-product-line: `payments` records amounts against the Order as a

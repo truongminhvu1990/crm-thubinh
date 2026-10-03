@@ -99,6 +99,6 @@ test("recognitionLabel: recognized, legacy-recognized, deposit and not-fully-pai
   );
   assert.equal(
     recognitionLabel(baseRow({ recognition: "unrecognized", order_status: "Completed", payment_status: "PartiallyPaid" })),
-    "Chưa ghi nhận — chưa Paid đầy đủ"
+    "Chưa ghi nhận — chưa thanh toán đủ"
   );
 });

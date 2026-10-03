@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mock } from "node:test";
+import { applyWindow, WindowState } from "@/lib/reports/postgrestFake.testutil";
 
 // getPurchaseReportData backs the Dashboard's "Doanh thu đã ghi nhận" card
 // (Revenue Management Visibility, 2026-08-29) and is the one Recognized
@@ -33,9 +34,22 @@ function fakeClient(rows: FakePurchaseRow[]) {
   return {
     from: (table: string) => {
       assert.equal(table, "customer_purchases");
-      return {
-        select: async () => ({ data: rows, error: null }),
+      // Phase 1.2: the purchase loader pages (.order().range(), count) under the
+      // PostgREST max-rows cap, so the fake must answer the same way.
+      const w: WindowState = {};
+      const builder: Record<string, unknown> = {
+        select: (_cols?: string, opts?: { count?: string }) => {
+          if (opts?.count === "exact") w.countExact = true;
+          return builder;
+        },
+        order: (col: string, o?: { ascending?: boolean }) => ((w.order = { col, ascending: o?.ascending ?? true }), builder),
+        range: (from: number, to: number) => ((w.range = [from, to]), builder),
+        then: (ok: (v: unknown) => unknown, fail?: (e: unknown) => unknown) => {
+          const { data, count } = applyWindow(rows, w, undefined, table);
+          return Promise.resolve({ data, error: null, count }).then(ok, fail);
+        },
       };
+      return builder;
     },
   } as never;
 }

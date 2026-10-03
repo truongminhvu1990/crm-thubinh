@@ -7,6 +7,7 @@ import { DateRange } from "@/lib/dateFilter";
 import { currency } from "@/lib/reports/format";
 import { rangeSearchParams } from "@/lib/reports/reportsApiClient";
 import { PurchaseReportData } from "@/lib/reports/reports.service";
+import { METRIC_LABELS } from "@/lib/reports/overviewUi";
 
 // Simple Profit Calculation Package, Part 3 - exactly three summary values,
 // no percentages/charts/additional analysis. Reuses the existing
@@ -31,13 +32,13 @@ export default function ProfitSection({ range }: Props) {
     <Card>
       <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-4">
         <TrendingUp className="w-5 h-5 text-primary" />
-        Lãi / Lỗ
+        {METRIC_LABELS.grossProfit}
       </h3>
       <div className="grid grid-cols-3 gap-4">
         <div className="rounded-lg border border-border p-4">
           <div className="flex items-center gap-2 text-muted-foreground">
             <Wallet className="w-4 h-4" />
-            <p className="text-xs">Tổng doanh thu</p>
+            <p className="text-xs">{METRIC_LABELS.recognizedRevenue}</p>
           </div>
           <p className="text-lg font-semibold text-foreground mt-2">
             {data ? currency.format(data.totalRevenue) : "—"}
@@ -46,7 +47,7 @@ export default function ProfitSection({ range }: Props) {
         <div className="rounded-lg border border-border p-4">
           <div className="flex items-center gap-2 text-muted-foreground">
             <Coins className="w-4 h-4" />
-            <p className="text-xs">Tổng giá vốn</p>
+            <p className="text-xs">{METRIC_LABELS.cost}</p>
           </div>
           <p className="text-lg font-semibold text-foreground mt-2">
             {data ? currency.format(data.totalCost) : "—"}
@@ -55,7 +56,7 @@ export default function ProfitSection({ range }: Props) {
         <div className="rounded-lg border border-border p-4">
           <div className="flex items-center gap-2 text-muted-foreground">
             <Wallet className="w-4 h-4" />
-            <p className="text-xs">Tổng lãi / lỗ</p>
+            <p className="text-xs">{METRIC_LABELS.grossProfit}</p>
           </div>
           <p className="text-lg font-semibold text-foreground mt-2">
             {data ? currency.format(data.totalProfit) : "—"}

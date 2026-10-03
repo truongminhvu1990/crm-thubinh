@@ -3,6 +3,7 @@
 import { Receipt } from "lucide-react";
 import { MonthlySoldProductRow } from "@/types/monthlySoldProducts";
 import { formatDate } from "@/lib/utils";
+import { paymentMethodLabel } from "@/lib/reports/labels.vi";
 import Badge from "@/components/ui/Badge";
 import { recognitionLabel } from "@/lib/monthlySoldProducts/monthlySoldProductsColumns";
 import {
@@ -173,7 +174,7 @@ export default function MonthlySoldProductsTable({
                 <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">{money(r.remaining_balance)}</td>
               )}
               {show("payment_methods") && (
-                <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">{r.payment_methods || "—"}</td>
+                <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">{paymentMethodLabel(r.payment_methods)}</td>
               )}
               <td className="px-4 py-3.5 text-sm whitespace-nowrap" data-testid="monthly-sold-products-recognition-cell">
                 <Badge variant={r.recognition === "recognized" ? "success" : "warning"}>{recognitionLabel(r)}</Badge>

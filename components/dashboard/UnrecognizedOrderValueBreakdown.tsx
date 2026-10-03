@@ -4,6 +4,7 @@ import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import { ORDER_STATUS, PAYMENT_STATUS, ORDER_STATUS_BADGE_VARIANT, PAYMENT_STATUS_BADGE_VARIANT, labelFor } from "@/lib/orders/order.constants";
 import { OrderValueBreakdownRow } from "@/lib/orders/orderValueSummary.service";
+import { METRIC_LABELS } from "@/lib/reports/overviewUi";
 
 interface Props {
   rows: OrderValueBreakdownRow[];
@@ -31,7 +32,7 @@ export default function UnrecognizedOrderValueBreakdown({ rows }: Props) {
   if (rows.length === 0) {
     return (
       <Card testId="dashboard-unrecognized-breakdown-card">
-        <h2 className="text-base font-semibold text-foreground mb-1">Giá trị đơn chưa ghi nhận — chi tiết</h2>
+        <h2 className="text-base font-semibold text-foreground mb-1">{METRIC_LABELS.unrecognizedValue} — chi tiết</h2>
         <p className="text-sm text-muted-foreground">Không có đơn nào chưa đủ điều kiện ghi nhận doanh thu trong kỳ đã chọn.</p>
       </Card>
     );
@@ -41,9 +42,9 @@ export default function UnrecognizedOrderValueBreakdown({ rows }: Props) {
 
   return (
     <Card testId="dashboard-unrecognized-breakdown-card">
-      <h2 className="text-base font-semibold text-foreground mb-1">Giá trị đơn chưa ghi nhận — chi tiết</h2>
+      <h2 className="text-base font-semibold text-foreground mb-1">{METRIC_LABELS.unrecognizedValue} — chi tiết</h2>
       <p className="text-sm text-muted-foreground mb-4">
-        Tính riêng từ Đơn hàng — vì sao các đơn này chưa đủ điều kiện ghi nhận doanh thu (Completed + Paid)
+        Tính riêng từ Đơn hàng — vì sao các đơn này chưa đủ điều kiện ghi nhận doanh thu (Hoàn thành + Đã thanh toán)
       </p>
       <div className="overflow-x-auto">
         <table className="w-full text-sm" data-testid="dashboard-unrecognized-breakdown-table">
@@ -76,7 +77,7 @@ export default function UnrecognizedOrderValueBreakdown({ rows }: Props) {
           <tfoot>
             <tr className="border-t border-border font-semibold">
               <td className="py-2 pr-4" colSpan={3}>
-                Tổng giá trị đơn chưa ghi nhận
+                Tổng {METRIC_LABELS.unrecognizedValue.toLowerCase()}
               </td>
               <td className="py-2 text-right text-foreground">{currency.format(total)}</td>
             </tr>

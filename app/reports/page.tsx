@@ -47,7 +47,10 @@ import Badge from "@/components/ui/Badge";
 import { formatDate } from "@/lib/utils";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
 import { useIsOwner } from "@/lib/hooks/useIsOwner";
-import { useHasPermission } from "@/lib/hooks/useHasPermission";
+import { usePermission } from "@/lib/hooks/useHasPermission";
+import PermissionGate from "@/components/reports/overview/PermissionGate";
+import { SkeletonBlock, SkeletonCard } from "@/components/reports/overview/Skeleton";
+import { TERMS, productStatusLabel } from "@/lib/reports/labels.vi";
 import {
   BatchStaticReportData,
   BatchRevenueRow,
@@ -56,6 +59,7 @@ import {
   PurchaseReportData,
 } from "@/lib/reports/reports.service";
 import { DateRange } from "@/lib/dateFilter";
+import { METRIC_LABELS } from "@/lib/reports/overviewUi";
 
 const currency = new Intl.NumberFormat("vi-VN", {
   style: "currency",
@@ -83,9 +87,10 @@ async function fetchJson<T>(url: string): Promise<T | null> {
 }
 
 export default function ReportsPage() {
-  const { option, range } = useGlobalDateFilter();
+  const { option, range, ready } = useGlobalDateFilter();
   const isOwner = useIsOwner();
-  const canView = useHasPermission("reports.view");
+  const access = usePermission("reports.view");
+  const canView = access === "allowed";
 
   // Decision 21 (Refresh) - bumping this key remounts the whole BI Center
   // subtree below, so every section's own mount effect (and its existing
@@ -97,8 +102,13 @@ export default function ReportsPage() {
   const [productData, setProductData] = useState<ProductReportData | null>(null);
   const [batchStatic, setBatchStatic] = useState<BatchStaticReportData | null>(null);
 
-  const [purchaseData, setPurchaseData] = useState<PurchaseReportData | null>(null);
-  const [revenueByBatch, setRevenueByBatch] = useState<BatchRevenueRow[] | null>(null);
+  // Phase 1.5A: results are stored WITH the period they belong to; a result for another period reads as null (the
+  // sections already render placeholders for null), so the previous period's numbers can never be shown.
+  const periodKey = rangeQuery(range);
+  const [purchaseResult, setPurchaseResult] = useState<{ key: string; data: PurchaseReportData | null } | null>(null);
+  const [batchRevenueResult, setBatchRevenueResult] = useState<{ key: string; data: BatchRevenueRow[] | null } | null>(null);
+  const purchaseData = purchaseResult && purchaseResult.key === periodKey ? purchaseResult.data : null;
+  const revenueByBatch = batchRevenueResult && batchRevenueResult.key === periodKey ? batchRevenueResult.data : null;
 
   // Initial load - everything not gated behind a Date Filter loads once.
   // Guarded on canView (Reporting API Permission Enforcement, Product Owner
@@ -114,17 +124,31 @@ export default function ReportsPage() {
 
   // Doanh thu section - the Global Date Filter governs all 4 of its reports
   // at once (REPORTS_SPEC.md §4, Sprint v1.0.2).
+  // Phase 1.5A: no request before the stored period is known (`ready`); on a period change the previous period's data
+  // is cleared (the sections already render placeholders for null) and a slower earlier response is ignored.
   useEffect(() => {
-    if (!canView) return;
-    fetchJson<PurchaseReportData>(`/api/reports/purchases${rangeQuery(range)}`).then(setPurchaseData);
-  }, [canView, range]);
+    if (!canView || !ready) return;
+    let cancelled = false;
+    fetchJson<PurchaseReportData>(`/api/reports/purchases${periodKey}`).then((d) => {
+      if (!cancelled) setPurchaseResult({ key: periodKey, data: d });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [canView, ready, periodKey]);
 
   // Revenue by Batch - the only Lô hàng report the Date Filter governs, same
   // shared range as the Doanh thu section above.
   useEffect(() => {
-    if (!canView) return;
-    fetchJson<BatchRevenueRow[]>(`/api/reports/batches/revenue${rangeQuery(range)}`).then(setRevenueByBatch);
-  }, [canView, range]);
+    if (!canView || !ready) return;
+    let cancelled = false;
+    fetchJson<BatchRevenueRow[]>(`/api/reports/batches/revenue${periodKey}`).then((d) => {
+      if (!cancelled) setBatchRevenueResult({ key: periodKey, data: d });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [canView, ready, periodKey]);
 
   const initialLoading = customerData === null || productData === null || batchStatic === null;
 
@@ -207,19 +231,18 @@ export default function ReportsPage() {
   // a 403), never a clear reason why. Same early-return pattern already
   // established by app/reports/reconciliation/page.tsx's own Owner-only
   // gate, using the existing useHasPermission hook rather than a new one.
-  if (!canView) {
-    return (
-      <div className="pb-8">
-        <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">Báo cáo</h1>
-        <p className="text-muted-foreground mt-4">Bạn không có quyền xem báo cáo</p>
-      </div>
-    );
-  }
+  if (access !== "allowed") return <PermissionGate state={access} title={TERMS.reports}>{null}</PermissionGate>;
 
   if (initialLoading) {
     return (
-      <div className="flex justify-center items-center h-64">
-        <div className="animate-spin text-2xl">⟳</div>
+      <div className="pb-8 space-y-4" data-testid="reports-skeleton">
+        <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">{TERMS.reports}</h1>
+        <SkeletonBlock className="h-4 w-64" />
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
       </div>
     );
   }
@@ -269,6 +292,24 @@ export default function ReportsPage() {
           this change - only decluttered.
           ============================================================ */}
 
+      {/* Phase 1.4 - the simplified entry points. Each opens one screen whose
+          numbers come from the canonical Overview; the BI Center below is
+          unchanged. */}
+      <section aria-label="Báo cáo chính" className="grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="reports-primary-entries">
+        <Link href="/reports/sales" className="block rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:border-primary/40" data-testid="reports-entry-sales">
+          <span className="block text-sm font-semibold text-foreground">Bán hàng</span>
+          <span className="mt-1 block text-xs text-muted-foreground">{METRIC_LABELS.totalOrderValue} · {METRIC_LABELS.recognizedRevenue} · {METRIC_LABELS.unrecognizedValue} · {METRIC_LABELS.sold}</span>
+        </Link>
+        <Link href="/reports/inventory" className="block rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:border-primary/40" data-testid="reports-entry-inventory">
+          <span className="block text-sm font-semibold text-foreground">Hàng hóa</span>
+          <span className="mt-1 block text-xs text-muted-foreground">{METRIC_LABELS.held} · {METRIC_LABELS.remaining}</span>
+        </Link>
+        <Link href="/reports/money-profit" className="block rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:border-primary/40" data-testid="reports-entry-money-profit">
+          <span className="block text-sm font-semibold text-foreground">Tiền &amp; Lợi nhuận</span>
+          <span className="mt-1 block text-xs text-muted-foreground">{METRIC_LABELS.recognizedRevenue} · {METRIC_LABELS.cost} · {METRIC_LABELS.grossProfit}</span>
+        </Link>
+      </section>
+
       <div key={refreshToken} className="space-y-6">
         {/* Revenue Reporting (07_REPORTING_SPEC.md §5) */}
         <ReportGroupSection title="Doanh thu" description="Tổng quan, KPI, xu hướng và lợi nhuận doanh thu" icon={Wallet}>
@@ -303,7 +344,7 @@ export default function ReportsPage() {
               <ScopeIndicator resource="revenue" />
             </h2>
             <StatCard
-              title="Tổng doanh thu"
+              title={METRIC_LABELS.recognizedRevenue}
               value={purchaseData !== null ? currency.format(purchaseData.totalRevenue) : "—"}
               icon={<Wallet className="w-5 h-5 text-primary" />}
               placeholder={purchaseData === null}
@@ -382,7 +423,7 @@ export default function ReportsPage() {
               icon={<CircleDot className="w-5 h-5 text-primary" />}
               title="Theo trạng thái"
               headers={["Trạng thái", "Số lượng"]}
-              rows={breakdownRows(productData!.byStatus)}
+              rows={breakdownRows(productData!.byStatus.map((r) => ({ ...r, label: productStatusLabel(r.label) })))}
               emptyLabel="Chưa có dữ liệu"
               searchPlaceholder="Tìm theo trạng thái..."
             />
@@ -580,9 +621,9 @@ export default function ReportsPage() {
             <span className="flex items-center gap-3">
               <Landmark className="w-5 h-5 text-primary" />
               <span>
-                <span className="block text-sm font-semibold text-foreground">Số dư Supplier</span>
+                <span className="block text-sm font-semibold text-foreground">Số dư Nhà cung cấp</span>
                 <span className="block text-xs text-muted-foreground">
-                  Tổng IN, tổng OUT và số dư theo từng Supplier trên Money Debt Ledger
+                  Tổng IN, tổng OUT và số dư theo từng Nhà cung cấp trên Sổ công nợ tiền
                 </span>
               </span>
             </span>
@@ -605,7 +646,7 @@ export default function ReportsPage() {
                 <span>
                   <span className="block text-sm font-semibold text-foreground">Đối soát doanh thu</span>
                   <span className="block text-xs text-muted-foreground">
-                    So sánh doanh thu và khách hàng hàng đầu giữa Reports và Business Intelligence
+                    So sánh doanh thu và khách hàng hàng đầu giữa Báo cáo và Phân tích kinh doanh
                   </span>
                 </span>
               </span>

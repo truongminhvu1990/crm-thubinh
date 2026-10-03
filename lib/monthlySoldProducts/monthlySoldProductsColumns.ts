@@ -83,7 +83,7 @@ export const MONTHLY_SOLD_PRODUCTS_COLUMNS: MonthlySoldProductsColumnDef[] = [
 export function recognitionLabel(row: Pick<MonthlySoldProductRow, "recognition" | "order_status" | "payment_status" | "is_legacy">): string {
   if (row.recognition === "recognized") return row.is_legacy ? "Đã ghi nhận (dữ liệu cũ)" : "Đã ghi nhận";
   if (row.order_status === "Reserved") return "Chưa ghi nhận — đang cọc";
-  return "Chưa ghi nhận — chưa Paid đầy đủ";
+  return "Chưa ghi nhận — chưa thanh toán đủ";
 }
 
 /** Columns the current viewer may see at all - the picker only offers

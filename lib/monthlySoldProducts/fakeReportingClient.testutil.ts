@@ -4,6 +4,14 @@
 // repository test and the Dashboard-vs-Sold Products reconciliation test so
 // both read the SAME fixture through the SAME fake.
 
+import { applyWindow, FakeStats, WindowState } from "@/lib/reports/postgrestFake.testutil";
+
+// Phase 1.2: this fake now behaves like PostgREST for completeness - every response
+// is capped at `max-rows` (1000 by default), and .order() / .range() / count:"exact"
+// work as on the real server (see lib/reports/postgrestFake.testutil.ts). A loader
+// that does not page can therefore no longer pass against this fake with more
+// than 1000 rows.
+
 export interface FakeOrder {
   id: string;
   order_number: string;
@@ -56,10 +64,11 @@ interface Filters {
   lt: Record<string, string>;
 }
 
-export function makeFakeReportingClient(data: FakeData) {
+export function makeFakeReportingClient(data: FakeData, stats?: FakeStats) {
   return {
     from(table: string) {
       const f: Filters = { in: {}, neq: {}, eq: {}, isNull: [], gte: {}, lt: {} };
+      const w: WindowState = {};
       let selected = "";
 
       const inRange = (value: string | undefined, col: string) =>
@@ -86,6 +95,7 @@ export function makeFakeReportingClient(data: FakeData) {
                   const oi = p.order_item_id ? data.orderItems.find((i) => i.id === p.order_item_id) : undefined;
                   const ord = oi ? data.orders.find((o) => o.id === oi.order_id) : undefined;
                   return {
+                    id: p.id,
                     customer_id: p.customer_id,
                     product_id: p.product_id,
                     sale_price: p.sale_price,
@@ -117,7 +127,13 @@ export function makeFakeReportingClient(data: FakeData) {
       };
 
       const builder: Record<string, unknown> = {
-        select: (cols?: string) => ((selected = cols ?? ""), builder),
+        select: (cols?: string, opts?: { count?: string }) => {
+          selected = cols ?? "";
+          if (opts?.count === "exact") w.countExact = true;
+          return builder;
+        },
+        order: (col: string, opts?: { ascending?: boolean }) => ((w.order = { col, ascending: opts?.ascending ?? true }), builder),
+        range: (from: number, to: number) => ((w.range = [from, to]), builder),
         in: (col: string, vals: unknown[]) => ((f.in[col] = vals), builder),
         neq: (col: string, val: unknown) => ((f.neq[col] = val), builder),
         eq: (col: string, val: unknown) => ((f.eq[col] = val), builder),
@@ -125,8 +141,10 @@ export function makeFakeReportingClient(data: FakeData) {
         gte: (col: string, val: string) => ((f.gte[col] = val), builder),
         lt: (col: string, val: string) => ((f.lt[col] = val), builder),
         maybeSingle: () => Promise.resolve({ data: resolve()[0] ?? null, error: null }),
-        then: (ok: (v: unknown) => unknown, fail?: (e: unknown) => unknown) =>
-          Promise.resolve({ data: resolve(), error: null }).then(ok, fail),
+        then: (ok: (v: unknown) => unknown, fail?: (e: unknown) => unknown) => {
+          const { data: rows, count } = applyWindow(resolve(), w, stats, table);
+          return Promise.resolve({ data: rows, error: null, count }).then(ok, fail);
+        },
       };
       return builder;
     },

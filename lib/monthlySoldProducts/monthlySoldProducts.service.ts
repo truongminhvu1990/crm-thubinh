@@ -11,6 +11,7 @@ import { resolveRoleForStaff } from "@/lib/permission/permissionCenter.service";
 import { getOperatingExpensesTotal } from "@/lib/operatingExpenses/operatingExpenses.service";
 import { getAccrualCommissionExpense } from "@/lib/reports/commissionExpense";
 import * as repo from "./monthlySoldProducts.repository";
+import { getSoldDataset, summarizeSoldLines, SoldOrderRow, SoldTotals } from "./soldDataset";
 
 // Business logic / composition only - MonthlySoldProductsRepository owns
 // every direct Supabase call. Nothing here recomputes sale_amount; it only
@@ -98,30 +99,21 @@ export async function getMonthlySoldProductsSummary(
 ): Promise<MonthlySoldProductsSummary> {
   const lines = await repo.getSoldLines(filters, client, staff);
 
-  let recognizedRevenue = 0;
-  let legacyRecognizedValue = 0;
-  let unrecognizedValue = 0;
-  for (const l of lines) {
-    if (l.recognition === "recognized") {
-      recognizedRevenue += l.final_sale_price;
-      if (l.is_legacy) legacyRecognizedValue += l.final_sale_price;
-    } else unrecognizedValue += l.final_sale_price;
-  }
-  const soldValue = recognizedRevenue + unrecognizedValue;
-
-  const totalCustomers = new Set(lines.map((l) => l.customer_id)).size;
-
-  const recognizedOrderIds = new Set<string>();
-  const unrecognizedOrderIds = new Set<string>();
-  let legacyCount = 0;
-  for (const l of lines) {
-    if (l.order_id === null) legacyCount += 1;
-    else if (l.recognition === "recognized") recognizedOrderIds.add(l.order_id);
-    else unrecognizedOrderIds.add(l.order_id);
-  }
-  const recognizedOrders = recognizedOrderIds.size + legacyCount;
-  const unrecognizedOrders = unrecognizedOrderIds.size;
-  const totalOrders = recognizedOrders + unrecognizedOrders;
+  // Phase 1 - Reporting Foundation: these figures come from the shared
+  // summarizeSoldLines (soldDataset.ts), the same function the Overview's
+  // "Đã bán" metric and the Sold drill-downs use - arithmetic unchanged.
+  const sold = summarizeSoldLines(lines);
+  const {
+    soldValue,
+    recognizedRevenue,
+    legacyRecognizedValue,
+    unrecognizedValue,
+    totalCustomers,
+    recognizedOrders,
+    unrecognizedOrders,
+    totalOrders,
+  } = sold;
+  const recognizedOrderIds = new Set(sold.recognizedOrderIds);
 
   const productCost = lines.reduce((sum, l) => (l.recognition === "recognized" ? sum + (l.cost_price ?? 0) : sum), 0);
 
@@ -194,4 +186,33 @@ export async function getAllFilteredRowsForExport(
     page += 1;
   }
   return rows;
+}
+
+export interface SoldDetail {
+  totals: Omit<SoldTotals, "recognizedOrderIds">;
+  /** One row per sold Order (legacy BR-002 entries are one row each). */
+  orders: SoldOrderRow[];
+  /** One row per sold product line. gross_profit is nulled for anyone who is
+   * not Owner/Manager, exactly as getMonthlySoldProductsPage does. */
+  products: MonthlySoldProductRow[];
+  /** Phase 1.5A: Sold orders (locked definition) that have no product line. Display only - NOT included in
+   * `totals`, `orders` or `products`, so every total is unchanged. */
+  itemlessOrders: repo.SoldItemlessOrder[];
+}
+
+/** Phase 1 - Reporting Foundation: drill-down for "Đã bán", both views from
+ * one Sold population (getSoldDataset -> repo.getSoldLines, definition
+ * unchanged). `totals.soldValue` equals the sum of `orders[].sold_value`
+ * and of `products[].final_sale_price`. */
+export async function getSoldDetail(
+  filters: MonthlySoldProductsFilters,
+  client?: SupabaseClient,
+  staff?: Staff | null
+): Promise<SoldDetail> {
+  const { totals, orders, lines, itemless } = await getSoldDataset(filters, client, staff);
+  const permitted = await canViewCostAndProfit(staff, client);
+  const products = lines.map(toRow).map((r) => (permitted ? r : { ...r, gross_profit: null }));
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { recognizedOrderIds, ...publicTotals } = totals;
+  return { totals: publicTotals, orders, products, itemlessOrders: itemless };
 }
