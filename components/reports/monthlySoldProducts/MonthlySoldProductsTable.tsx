@@ -4,6 +4,7 @@ import { Receipt } from "lucide-react";
 import { MonthlySoldProductRow } from "@/types/monthlySoldProducts";
 import { formatDate } from "@/lib/utils";
 import { paymentMethodLabel } from "@/lib/reports/labels.vi";
+import EntityLink from "@/components/reports/entity/EntityLink";
 import Badge from "@/components/ui/Badge";
 import { recognitionLabel } from "@/lib/monthlySoldProducts/monthlySoldProductsColumns";
 import {
@@ -108,10 +109,10 @@ export default function MonthlySoldProductsTable({
               <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Lãi gộp</th>
             )}
             {show("amount_paid") && (
-              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Đã thanh toán</th>
+              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Đã thanh toán (cả đơn)</th>
             )}
             {show("remaining_balance") && (
-              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tiền còn lại</th>
+              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tiền còn lại (cả đơn)</th>
             )}
             {show("payment_methods") && (
               <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -132,13 +133,13 @@ export default function MonthlySoldProductsTable({
                 <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">{formatDate(r.sale_date)}</td>
               )}
               {show("order_number") && (
-                <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">{r.order_number || "—"}</td>
+                <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap"><EntityLink type="order" id={r.order_id}>{r.order_number || "—"}</EntityLink></td>
               )}
               {show("product_code") && (
-                <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">{r.product_code || "—"}</td>
+                <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap"><EntityLink type="product" id={r.product_id}>{r.product_code || "—"}</EntityLink></td>
               )}
               {show("product_name") && (
-                <td className="px-4 py-3.5 text-sm font-medium text-foreground">{r.product_name || "—"}</td>
+                <td className="px-4 py-3.5 text-sm font-medium text-foreground"><EntityLink type="product" id={r.product_id}>{r.product_name || "—"}</EntityLink></td>
               )}
               {show("product_category") && (
                 <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">{r.product_category || "—"}</td>
@@ -148,7 +149,7 @@ export default function MonthlySoldProductsTable({
               )}
               {show("customer") && (
                 <td className="px-4 py-3.5">
-                  <div className="text-sm font-medium text-foreground">{r.customer_name}</div>
+                  <div className="text-sm font-medium text-foreground"><EntityLink type="customer" id={r.customer_id}>{r.customer_name}</EntityLink></div>
                   <div className="text-xs text-muted-foreground">{r.customer_code}</div>
                 </td>
               )}

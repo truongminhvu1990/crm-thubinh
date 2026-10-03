@@ -11,6 +11,7 @@ import {
   DEFAULT_VISIBLE_SALES_LEDGER_COLUMNS,
   getAvailableSalesLedgerColumns,
 } from "@/lib/salesLedger/salesLedgerColumns";
+import EntityLink from "@/components/reports/entity/EntityLink";
 import Badge from "@/components/ui/Badge";
 
 interface Props {
@@ -223,7 +224,7 @@ export default function SalesLedgerTable({
               )}
               {show("product_code") && (
                 <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
-                  {r.product_code || "—"}
+                  <EntityLink type="product" id={r.product_id}>{r.product_code || "—"}</EntityLink>
                 </td>
               )}
               {show("product_name") && (
@@ -240,13 +241,13 @@ export default function SalesLedgerTable({
                         <ImageOff className="w-4 h-4 text-muted-foreground" />
                       </div>
                     )}
-                    <div className="min-w-0 font-medium text-foreground truncate">{r.product_name || "—"}</div>
+                    <div className="min-w-0 font-medium text-foreground truncate"><EntityLink type="product" id={r.product_id}>{r.product_name || "—"}</EntityLink></div>
                   </div>
                 </td>
               )}
               {show("customer") && (
                 <td className="px-4 py-3.5">
-                  <div className="text-sm font-medium text-foreground">{r.customer_name}</div>
+                  <div className="text-sm font-medium text-foreground"><EntityLink type="customer" id={r.customer_id}>{r.customer_name}</EntityLink></div>
                   <div className="text-xs text-muted-foreground">{r.customer_code}</div>
                 </td>
               )}

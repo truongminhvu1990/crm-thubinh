@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDate } from "@/lib/utils";
+import { BusinessTime } from "@/lib/businessTime";
 import { useEffect, useState } from "react";
 import { Download, Printer } from "lucide-react";
 import { MonthlySoldProductsFilters as Filters, MonthlySoldProductRow, MonthlySoldProductsSummary as Summary } from "@/types/monthlySoldProducts";
@@ -129,7 +131,7 @@ export default function MonthlySoldProductsSection() {
       exportColumns.push({ header: "Ghi nhận doanh thu", width: 30, value: (r) => recognitionLabel(r) });
 
       const blob = await exportRowsToExcel<MonthlySoldProductRow>("San pham da ban", exportColumns, allRows);
-      downloadBlob(blob, `san-pham-da-ban-theo-thang-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      downloadBlob(blob, `san-pham-da-ban-theo-thang-${BusinessTime.todayString()}.xlsx`);
     } catch (error) {
       alert("Lỗi khi xuất Excel");
       console.error(error);
@@ -148,7 +150,7 @@ export default function MonthlySoldProductsSection() {
           (print:hidden), so the printed page needs its own title/date. */}
       <div className="hidden print:block mb-2">
         <h1 className="text-xl font-bold text-foreground">{REPORT_TITLE}</h1>
-        <p className="text-sm text-muted-foreground">Ngày in: {new Date().toLocaleDateString("vi-VN")}</p>
+        <p className="text-sm text-muted-foreground">Ngày in: {formatDate(new Date())}</p>
       </div>
 
       <div className="flex items-center justify-between flex-wrap gap-3 print:hidden">

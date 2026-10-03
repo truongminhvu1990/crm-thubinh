@@ -1,5 +1,6 @@
 "use client";
 
+import { BusinessTime } from "@/lib/businessTime";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Download, ShieldCheck } from "lucide-react";
@@ -232,7 +233,7 @@ function SalesLedgerPageInner() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `so-ban-hang-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      link.download = `so-ban-hang-${BusinessTime.todayString()}.xlsx`;
       link.click();
       URL.revokeObjectURL(url);
     } catch (error) {

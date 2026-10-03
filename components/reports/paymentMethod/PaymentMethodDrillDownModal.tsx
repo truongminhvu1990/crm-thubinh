@@ -1,5 +1,7 @@
 "use client";
 
+import EntityLink from "@/components/reports/entity/EntityLink";
+import { BusinessTime } from "@/lib/businessTime";
 import { useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import { PaymentMethodReportFilters, PaymentMethodDrillDownRow } from "@/types/paymentMethodReport";
@@ -71,7 +73,7 @@ export default function PaymentMethodDrillDownModal({ paymentMethod, filters, on
     setIsExporting(true);
     try {
       const blob = await exportPaymentMethodDrillDownToExcel(paymentMethod, rows);
-      downloadBlob(blob, `chi-tiet-${paymentMethod.toLowerCase().replace(/\s+/g, "-")}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      downloadBlob(blob, `chi-tiet-${paymentMethod.toLowerCase().replace(/\s+/g, "-")}-${BusinessTime.todayString()}.xlsx`);
     } catch (error) {
       alert("Lỗi khi xuất Excel");
       console.error(error);
@@ -118,8 +120,8 @@ export default function PaymentMethodDrillDownModal({ paymentMethod, filters, on
                 <th className="text-left font-semibold px-3 py-2">Tên sản phẩm</th>
                 <th className="text-left font-semibold px-3 py-2">Khách hàng</th>
                 <th className="text-right font-semibold px-3 py-2">Giá bán</th>
-                <th className="text-right font-semibold px-3 py-2">Đã thanh toán</th>
-                <th className="text-right font-semibold px-3 py-2">Tiền còn lại</th>
+                <th className="text-right font-semibold px-3 py-2">Đã thanh toán (cả đơn)</th>
+                <th className="text-right font-semibold px-3 py-2">Tiền còn lại (cả đơn)</th>
                 <th className="text-left font-semibold px-3 py-2">Ngày bán</th>
                 <th className="text-left font-semibold px-3 py-2">Phương thức thanh toán</th>
               </tr>
@@ -127,11 +129,11 @@ export default function PaymentMethodDrillDownModal({ paymentMethod, filters, on
             <tbody>
               {rows.map((r, i) => (
                 <tr key={`${r.orderId}-${r.productId}-${i}`} className="border-b border-border last:border-0">
-                  <td className="px-3 py-2 whitespace-nowrap">{r.orderNumber}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">{r.productCode || "—"}</td>
-                  <td className="px-3 py-2">{r.productName || "—"}</td>
+                  <td className="px-3 py-2 whitespace-nowrap"><EntityLink type="order" id={r.orderId} onOpen={onClose}>{r.orderNumber}</EntityLink></td>
+                  <td className="px-3 py-2 whitespace-nowrap"><EntityLink type="product" id={r.productId} onOpen={onClose}>{r.productCode || "—"}</EntityLink></td>
+                  <td className="px-3 py-2"><EntityLink type="product" id={r.productId} onOpen={onClose}>{r.productName || "—"}</EntityLink></td>
                   <td className="px-3 py-2 whitespace-nowrap">
-                    {r.customerName} <span className="text-xs text-muted-foreground">({r.customerCode})</span>
+                    <EntityLink type="customer" id={r.customerId} onOpen={onClose}>{r.customerName}</EntityLink> <span className="text-xs text-muted-foreground">({r.customerCode})</span>
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">{currency.format(r.saleAmount)}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">{currency.format(r.amountPaid)}</td>

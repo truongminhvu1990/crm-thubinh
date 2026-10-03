@@ -1,5 +1,6 @@
 "use client";
 
+import { BusinessTime } from "@/lib/businessTime";
 import { useEffect, useState } from "react";
 import { Layers } from "lucide-react";
 import { DateRange } from "@/lib/dateFilter";
@@ -50,7 +51,7 @@ export default function CategoryAnalysisSection({ range }: Props) {
       actions={
         <ExportButtons
           sheetName="Danh muc"
-          filename={`phan-tich-danh-muc-${new Date().toISOString().slice(0, 10)}.xlsx`}
+          filename={`phan-tich-danh-muc-${BusinessTime.todayString()}.xlsx`}
           columns={[
             { header: "Danh mục", width: 24, value: (r: CategoryAnalysisRow) => r.category },
             { header: "Doanh thu", width: 16, value: (r: CategoryAnalysisRow) => r.revenue },

@@ -232,7 +232,7 @@ test("drill-down export: extends the shared Excel writer (reportsBIExport.ts), s
 
   assert.deepEqual(
     (sheet.getRow(1).values as unknown[]).slice(1),
-    ["Mã đơn hàng", "Mã sản phẩm", "Tên sản phẩm", "Khách hàng", "Giá bán", "Đã thanh toán", "Tiền còn lại", "Ngày bán", "Phương thức thanh toán"]
+    ["Mã đơn hàng", "Mã sản phẩm", "Tên sản phẩm", "Khách hàng", "Giá bán", "Đã thanh toán (cả đơn)", "Tiền còn lại (cả đơn)", "Ngày bán", "Phương thức thanh toán"]
   );
   assert.deepEqual(
     (sheet.getRow(2).values as unknown[]).slice(1),

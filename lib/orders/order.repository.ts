@@ -21,6 +21,7 @@ import { CommissionStatus } from "@/types/commission";
 import { CompensationStatus } from "@/types/compensation";
 import { BusinessTime } from "@/lib/businessTime";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { selectIn } from "@/lib/reports/selectIn";
 
 /** Orders -> Sales Snapshot Integration. One element per order_item, built
  * by order.service.ts's completeOrder() and handed to the
@@ -1219,6 +1220,34 @@ export type FullOrderRecord = Order & {
 // order.service.ts) since they operate on raw repository-shaped rows, not
 // domain/business objects.
 // ---------------------------------------------------------------------------
+
+/** Phase 1.6: product names for a page of orders in ONE batched read (chunked
+ * .in(), see lib/reports/selectIn.ts) - the Orders list shows the real product
+ * instead of only a count. Read-only; a failed read degrades to count-only
+ * display rather than failing the list. */
+export async function findProductNamesByOrderIds(orderIds: string[], client: SupabaseClient = supabase): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (!orderIds.length) return out;
+  try {
+    const rows = await selectIn<{ order_id: string; product: { product_name: string | null } | { product_name: string | null }[] | null }>(
+      client,
+      "order_items",
+      "order_id, product:products(product_name)",
+      "order_id",
+      orderIds
+    );
+    for (const r of rows) {
+      const p = Array.isArray(r.product) ? r.product[0] : r.product;
+      if (!p?.product_name) continue;
+      const list = out.get(r.order_id) ?? [];
+      list.push(p.product_name);
+      out.set(r.order_id, list);
+    }
+  } catch (error) {
+    console.error("Error fetching order product names:", error);
+  }
+  return out;
+}
 
 /** PostgREST's aggregate `count` join comes back as a single-element array. */
 export function extractItemCount(row: OrderWithItemCount): number {

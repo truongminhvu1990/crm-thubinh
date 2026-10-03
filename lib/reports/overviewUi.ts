@@ -90,6 +90,7 @@ export interface GroupableRecognizedRow {
   order_id: string | null;
   order_number: string | null;
   recognition_date: string;
+  customer_id?: string | null;
   customer_name: string;
   amount: number;
   rule_label: string;
@@ -100,6 +101,7 @@ export interface RecognizedOrderGroup {
   order_id: string | null;
   order_number: string | null;
   recognition_date: string;
+  customer_id?: string | null;
   customer_name: string;
   lines: number;
   amount: number;
@@ -124,6 +126,7 @@ export function groupRecognizedByOrder(rows: GroupableRecognizedRow[]): Recogniz
         order_id: r.order_id,
         order_number: r.order_number,
         recognition_date: r.recognition_date,
+        customer_id: r.customer_id ?? null,
         customer_name: r.customer_name,
         lines: 1,
         amount: r.amount,

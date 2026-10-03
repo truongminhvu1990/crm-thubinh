@@ -71,8 +71,8 @@ export const MONTHLY_SOLD_PRODUCTS_COLUMNS: MonthlySoldProductsColumnDef[] = [
   // see types/monthlySoldProducts.ts's MonthlySoldProductRow doc comment.
   // No availableWhen gate: unlike Gross Profit these aren't cost/margin
   // figures, and reports.view already gates the whole report.
-  { key: "amount_paid", label: "Đã thanh toán", width: 16, exportValue: (r) => r.amount_paid ?? "" },
-  { key: "remaining_balance", label: "Tiền còn lại", width: 16, exportValue: (r) => r.remaining_balance ?? "" },
+  { key: "amount_paid", label: "Đã thanh toán (cả đơn)", width: 22, exportValue: (r) => r.amount_paid ?? "" },
+  { key: "remaining_balance", label: "Tiền còn lại (cả đơn)", width: 22, exportValue: (r) => r.remaining_balance ?? "" },
   { key: "payment_methods", label: "Phương thức thanh toán", width: 22, exportValue: (r) => r.payment_methods || "" },
 ];
 

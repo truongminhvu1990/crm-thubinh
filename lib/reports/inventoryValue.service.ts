@@ -144,6 +144,7 @@ export interface HoldingOrderInfo {
   payment_status: string;
   order_total: number;
   customer_name: string;
+  customer_id: string | null;
   customer_code: string | null;
   paid_amount: number;
   payment_count: number;
@@ -209,7 +210,7 @@ interface HoldingLinkRow {
         order_status: string;
         payment_status: string;
         total_amount: number;
-        customer: { full_name: string; customer_code: string } | { full_name: string; customer_code: string }[] | null;
+        customer: { id: string; full_name: string; customer_code: string } | { id: string; full_name: string; customer_code: string }[] | null;
       }
     | null;
 }
@@ -230,7 +231,7 @@ export async function getHeldInventoryDetail(
     ? await selectIn<HoldingLinkRow>(
         client,
         "order_items",
-        "product_id, order:orders(id, order_number, order_date, order_status, payment_status, total_amount, customer:customers(full_name, customer_code))",
+        "product_id, order:orders(id, order_number, order_date, order_status, payment_status, total_amount, customer:customers(id, full_name, customer_code))",
         "product_id",
         held.map((p) => p.id)
       )
@@ -281,6 +282,7 @@ export async function getHeldInventoryDetail(
           payment_status: order.payment_status,
           order_total: total,
           customer_name: customer?.full_name ?? "",
+          customer_id: customer?.id ?? null,
           customer_code: customer?.customer_code ?? null,
           paid_amount: deriveOrderPaymentSummary(total, payments).amountPaid,
           payment_count: payments.length,
