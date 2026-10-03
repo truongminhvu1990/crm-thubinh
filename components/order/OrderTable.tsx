@@ -8,6 +8,7 @@ import { formatDate } from "@/lib/utils";
 import OrderStatusBadge from "./OrderStatusBadge";
 import PaymentStatusBadge from "./PaymentStatusBadge";
 import OrderQuickViewModal from "./OrderQuickViewModal";
+import { formatOrderProducts } from "@/lib/orders/orderProductSummary";
 
 const currency = new Intl.NumberFormat("vi-VN", {
   style: "currency",
@@ -57,7 +58,7 @@ export default function OrderTable({ orders, isLoading = false }: Props) {
               Ngày
             </th>
             <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide px-4 py-3">
-              Số SP
+              Sản phẩm
             </th>
             <th className="text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide px-4 py-3">
               Tổng tiền
@@ -92,7 +93,15 @@ export default function OrderTable({ orders, isLoading = false }: Props) {
                 )}
               </td>
               <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{formatDate(order.order_date)}</td>
-              <td className="px-4 py-3 text-muted-foreground">{order.item_count} sản phẩm</td>
+              <td className="px-4 py-3 text-muted-foreground"><button
+                  type="button"
+                  onClick={() => setQuickViewOrder(order)}
+                  className="text-left hover:text-primary hover:underline"
+                  data-testid="order-products-cell"
+                >
+                  {formatOrderProducts(order.product_names, order.item_count)}
+                </button>
+              </td>
               <td className="px-4 py-3 text-right font-medium text-foreground whitespace-nowrap">
                 {currency.format(order.total_amount)}
               </td>

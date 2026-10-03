@@ -1,5 +1,6 @@
 "use client";
 
+import DateInput from "@/components/shared/DateInput";
 import { useEffect, useState } from "react";
 import { X, Wallet, AlertCircle, TrendingUp } from "lucide-react";
 import { CustomerReceivableFilters, CustomerReceivableRow, CustomerReceivableSummary } from "@/types/customerReceivable";
@@ -180,19 +181,19 @@ export default function CustomerReceivablePage() {
 
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm text-muted-foreground">Từ</span>
-            <input
+            <DateInput
               data-testid="customer-receivable-date-from-input"
-              type="date"
+              
               value={filters.dateFrom || ""}
-              onChange={(e) => update({ dateFrom: e.target.value || undefined, page: 1 })}
+              onChange={(v) => update({ dateFrom: v || undefined, page: 1 })}
               className={inputClass}
             />
             <span className="text-sm text-muted-foreground">đến</span>
-            <input
+            <DateInput
               data-testid="customer-receivable-date-to-input"
-              type="date"
+              
               value={filters.dateTo ? addDaysToDateStr(filters.dateTo, -1) : ""}
-              onChange={(e) => update({ dateTo: e.target.value ? addDaysToDateStr(e.target.value, 1) : undefined, page: 1 })}
+              onChange={(v) => update({ dateTo: v ? addDaysToDateStr(v, 1) : undefined, page: 1 })}
               className={inputClass}
             />
           </div>

@@ -45,8 +45,8 @@ const DRILL_DOWN_EXPORT_COLUMNS: ExcelColumn<PaymentMethodDrillDownRow>[] = [
   { header: "Tên sản phẩm", width: 28, value: (r) => r.productName || "" },
   { header: "Khách hàng", width: 24, value: (r) => `${r.customerName} (${r.customerCode})` },
   { header: "Giá bán", width: 16, value: (r) => r.saleAmount },
-  { header: "Đã thanh toán", width: 16, value: (r) => r.amountPaid },
-  { header: "Tiền còn lại", width: 16, value: (r) => r.remainingBalance },
+  { header: "Đã thanh toán (cả đơn)", width: 22, value: (r) => r.amountPaid },
+  { header: "Tiền còn lại (cả đơn)", width: 22, value: (r) => r.remainingBalance },
   { header: "Ngày bán", width: 14, value: (r) => formatDate(r.orderDate) },
   { header: "Phương thức thanh toán", width: 22, value: (r) => r.paymentMethods || "" },
 ];

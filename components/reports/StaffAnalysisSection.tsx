@@ -1,5 +1,6 @@
 "use client";
 
+import { BusinessTime } from "@/lib/businessTime";
 import { useEffect, useMemo, useState } from "react";
 import { Wallet, Percent, Receipt, Scale, Trophy } from "lucide-react";
 import Card from "@/components/ui/Card";
@@ -116,7 +117,7 @@ export default function StaffAnalysisSection({ range }: Props) {
         actions={
           <ExportButtons
             sheetName="Nhan vien"
-            filename={`phan-tich-nhan-vien-${new Date().toISOString().slice(0, 10)}.xlsx`}
+            filename={`phan-tich-nhan-vien-${BusinessTime.todayString()}.xlsx`}
             columns={[
               { header: "Mã nhân viên", width: 16, value: (r: StaffAnalysisRow) => r.staff_code },
               { header: "Tên nhân viên", width: 24, value: (r: StaffAnalysisRow) => r.full_name },

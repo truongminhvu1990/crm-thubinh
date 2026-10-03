@@ -9,6 +9,7 @@ import PageViewingLabel from "@/components/shared/PageViewingLabel";
 import OverviewMetricCard from "@/components/reports/overview/OverviewMetricCard";
 import ViewToggle from "@/components/reports/overview/ViewToggle";
 import DrillDownTable, { DrillColumn } from "@/components/reports/overview/DrillDownTable";
+import EntityLink from "@/components/reports/entity/EntityLink";
 import PermissionGate from "@/components/reports/overview/PermissionGate";
 import { SkeletonCard, SkeletonTable } from "@/components/reports/overview/Skeleton";
 import { useCanonicalFetch } from "@/components/reports/overview/useCanonicalFetch";
@@ -72,9 +73,9 @@ const productText = (code: string | null, name: string | null) => [code, name].f
 const quantityText = (v: number | null | undefined) => (v === null || v === undefined ? EMPTY_VALUE : String(v));
 
 const ORDER_COLUMNS: DrillColumn<OrderValueDetailRow>[] = [
-  { header: "Số đơn", render: (r) => r.order_number },
+  { header: "Số đơn", render: (r) => <EntityLink type="order" id={r.order_id}>{r.order_number}</EntityLink> },
   { header: "Ngày đơn", render: (r) => formatDate(r.order_date) },
-  { header: "Khách hàng", render: (r) => r.customer_name },
+  { header: "Khách hàng", render: (r) => <EntityLink type="customer" id={r.customer_id}>{r.customer_name}</EntityLink> },
   { header: "Trạng thái đơn", render: (r) => orderStatusLabel(r.order_status) },
   { header: "Thanh toán", render: (r) => paymentStatusLabel(r.payment_status) },
   { header: "Giá trị đơn", render: (r) => money(r.order_total), align: "right" },
@@ -90,13 +91,13 @@ const UNRECOGNIZED_COLUMNS: DrillColumn<OrderValueDetailRow>[] = [
 function productCell(r: OrderProductDetailRow) {
   if (r.kind === "no_items") return <span className="italic text-muted-foreground">{NO_ITEMS_ROW_LABEL}</span>;
   if (r.kind === "order_difference") return <span className="italic text-muted-foreground">{ORDER_LEVEL_DIFFERENCE_LABEL}</span>;
-  return productText(r.product_code, r.product_name);
+  return <EntityLink type="product" id={r.product_id}>{productText(r.product_code, r.product_name)}</EntityLink>;
 }
 
 const ORDER_PRODUCT_COLUMNS: DrillColumn<OrderProductDetailRow>[] = [
-  { header: "Số đơn", render: (r) => r.order_number },
+  { header: "Số đơn", render: (r) => <EntityLink type="order" id={r.order_id}>{r.order_number}</EntityLink> },
   { header: "Ngày đơn", render: (r) => formatDate(r.order_date) },
-  { header: "Khách hàng", render: (r) => r.customer_name },
+  { header: "Khách hàng", render: (r) => <EntityLink type="customer" id={r.customer_id}>{r.customer_name}</EntityLink> },
   { header: "Sản phẩm", render: productCell },
   { header: "Danh mục", render: (r) => r.category ?? EMPTY_VALUE },
   { header: "Số lượng", render: (r) => quantityText(r.quantity), align: "right" },
@@ -116,26 +117,26 @@ const UNRECOGNIZED_PRODUCT_COLUMNS: DrillColumn<OrderProductDetailRow>[] = [
 
 const RECOGNIZED_PRODUCT_COLUMNS: DrillColumn<RecognizedRevenueRow>[] = [
   { header: "Ngày ghi nhận", render: (r) => formatDate(r.recognition_date) },
-  { header: "Số đơn", render: (r) => r.order_number ?? EMPTY_VALUE },
-  { header: "Sản phẩm", render: (r) => productText(r.product_code, r.product_name) },
-  { header: "Khách hàng", render: (r) => r.customer_name },
+  { header: "Số đơn", render: (r) => <EntityLink type="order" id={r.order_id}>{r.order_number ?? EMPTY_VALUE}</EntityLink> },
+  { header: "Sản phẩm", render: (r) => <EntityLink type="product" id={r.product_id}>{productText(r.product_code, r.product_name)}</EntityLink> },
+  { header: "Khách hàng", render: (r) => <EntityLink type="customer" id={r.customer_id}>{r.customer_name}</EntityLink> },
   { header: "Quy tắc", render: (r) => r.rule_label },
   { header: "Doanh thu", render: (r) => money(r.amount), align: "right" },
 ];
 
 const RECOGNIZED_ORDER_COLUMNS: DrillColumn<RecognizedOrderGroup>[] = [
   { header: "Ngày ghi nhận", render: (r) => formatDate(r.recognition_date) },
-  { header: "Số đơn", render: (r) => r.order_number ?? "— (dữ liệu cũ, không gắn đơn)" },
-  { header: "Khách hàng", render: (r) => r.customer_name },
+  { header: "Số đơn", render: (r) => <EntityLink type="order" id={r.order_id}>{r.order_number ?? "— (dữ liệu cũ, không gắn đơn)"}</EntityLink> },
+  { header: "Khách hàng", render: (r) => <EntityLink type="customer" id={r.customer_id}>{r.customer_name}</EntityLink> },
   { header: "Số dòng", render: (r) => r.lines, align: "right" },
   { header: "Quy tắc", render: (r) => r.rule_label },
   { header: "Doanh thu", render: (r) => money(r.amount), align: "right" },
 ];
 
 const SOLD_ORDER_COLUMNS: DrillColumn<SoldOrderRow>[] = [
-  { header: "Số đơn", render: (r) => r.order_number ?? "— (dữ liệu cũ)" },
+  { header: "Số đơn", render: (r) => <EntityLink type="order" id={r.order_id}>{r.order_number ?? "— (dữ liệu cũ)"}</EntityLink> },
   { header: "Ngày đơn", render: (r) => formatDate(r.order_date) },
-  { header: "Khách hàng", render: (r) => r.customer_name },
+  { header: "Khách hàng", render: (r) => <EntityLink type="customer" id={r.customer_id}>{r.customer_name}</EntityLink> },
   { header: "Số sản phẩm", render: (r) => r.product_count, align: "right" },
   { header: "Trạng thái đơn", render: (r) => orderStatusLabel(r.order_status) },
   { header: "Thanh toán", render: (r) => paymentStatusLabel(r.payment_status) },
@@ -148,9 +149,9 @@ const SOLD_ORDER_COLUMNS: DrillColumn<SoldOrderRow>[] = [
 
 const SOLD_PRODUCT_COLUMNS: DrillColumn<MonthlySoldProductRow>[] = [
   { header: "Ngày đơn", render: (r) => formatDate(r.sale_date) },
-  { header: "Số đơn", render: (r) => r.order_number ?? "— (dữ liệu cũ)" },
-  { header: "Khách hàng", render: (r) => r.customer_name },
-  { header: "Sản phẩm", render: (r) => productText(r.product_code, r.product_name) },
+  { header: "Số đơn", render: (r) => <EntityLink type="order" id={r.order_id}>{r.order_number ?? "— (dữ liệu cũ)"}</EntityLink> },
+  { header: "Khách hàng", render: (r) => <EntityLink type="customer" id={r.customer_id}>{r.customer_name}</EntityLink> },
+  { header: "Sản phẩm", render: (r) => <EntityLink type="product" id={r.product_id}>{productText(r.product_code, r.product_name)}</EntityLink> },
   { header: "Danh mục", render: (r) => r.product_category ?? EMPTY_VALUE },
   { header: "Số lượng", render: (r) => quantityText(r.quantity), align: "right" },
   { header: "Đơn giá", render: (r) => money(r.original_price), align: "right" },
@@ -165,9 +166,9 @@ const SOLD_PRODUCT_COLUMNS: DrillColumn<MonthlySoldProductRow>[] = [
 ];
 
 const SOLD_ITEMLESS_COLUMNS: DrillColumn<SoldItemlessOrder>[] = [
-  { header: "Số đơn", render: (r) => r.order_number },
+  { header: "Số đơn", render: (r) => <EntityLink type="order" id={r.order_id}>{r.order_number}</EntityLink> },
   { header: "Ngày đơn", render: (r) => formatDate(r.order_date) },
-  { header: "Khách hàng", render: (r) => r.customer_name },
+  { header: "Khách hàng", render: (r) => <EntityLink type="customer" id={r.customer_id}>{r.customer_name}</EntityLink> },
   { header: "Sản phẩm", render: () => <span className="italic text-muted-foreground">{NO_ITEMS_ROW_LABEL}</span> },
   { header: "Trạng thái đơn", render: (r) => orderStatusLabel(r.order_status) },
   { header: "Thanh toán", render: (r) => paymentStatusLabel(r.payment_status) },

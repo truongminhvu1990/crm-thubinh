@@ -1,5 +1,6 @@
 "use client";
 
+import { BusinessTime } from "@/lib/businessTime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { TrendingUp } from "lucide-react";
 import Card from "@/components/ui/Card";
@@ -151,7 +152,7 @@ export default function RevenueTrendChart({ range }: Props) {
           </div>
           <ExportButtons
             sheetName="Xu huong doanh thu"
-            filename={`xu-huong-doanh-thu-${new Date().toISOString().slice(0, 10)}.xlsx`}
+            filename={`xu-huong-doanh-thu-${BusinessTime.todayString()}.xlsx`}
             columns={[
               { header: "Kỳ", width: 16, value: (r: RevenueTrendPoint) => bucketLabel(r.bucket, granularity) },
               { header: "Doanh thu", width: 16, value: (r: RevenueTrendPoint) => r.revenue },

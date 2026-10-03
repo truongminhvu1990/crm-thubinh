@@ -15,6 +15,7 @@
 import { useState } from "react";
 import { DATE_PRESETS, DateFilterOption, addDaysToDateStr, validateCustomRange } from "@/lib/dateFilter";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
+import DateInput from "@/components/shared/DateInput";
 
 const selectClass =
   "rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
@@ -99,21 +100,19 @@ export default function GlobalDateFilter() {
       {showCustom && (
         <div className="flex flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">
-            <input
+            <DateInput
               data-testid="report-date-filter-from"
               aria-label="Từ ngày"
-              type="date"
               value={fromValue}
-              onChange={(e) => onFromChange(e.target.value)}
+              onChange={onFromChange}
               className={selectClass}
             />
             <span className="text-muted-foreground text-sm">-</span>
-            <input
+            <DateInput
               data-testid="report-date-filter-to"
               aria-label="Đến ngày"
-              type="date"
               value={toValue}
-              onChange={(e) => onToChange(e.target.value)}
+              onChange={onToChange}
               className={selectClass}
             />
             <button type="button" data-testid="report-date-filter-apply" onClick={apply} disabled={!editing || !check.ok} className={buttonClass}>

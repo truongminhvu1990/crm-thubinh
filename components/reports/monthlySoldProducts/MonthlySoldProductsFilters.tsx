@@ -1,5 +1,6 @@
 "use client";
 
+import DateInput from "@/components/shared/DateInput";
 import { X } from "lucide-react";
 import { MonthlySoldProductsFilters as Filters } from "@/types/monthlySoldProducts";
 import { addDaysToDateStr } from "@/lib/dateFilter";
@@ -55,18 +56,18 @@ export default function MonthlySoldProductsFilters({ filters, onChange }: Props)
 
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm text-muted-foreground">Từ</span>
-          <input
-            type="date"
+          <DateInput
+            
             value={filters.dateFrom || ""}
-            onChange={(e) => update({ dateFrom: e.target.value || undefined, month: undefined })}
+            onChange={(v) => update({ dateFrom: v || undefined, month: undefined })}
             className={inputClass}
           />
           <span className="text-sm text-muted-foreground">đến</span>
-          <input
-            type="date"
+          <DateInput
+            
             value={filters.dateTo ? addDaysToDateStr(filters.dateTo, -1) : ""}
-            onChange={(e) =>
-              update({ dateTo: e.target.value ? addDaysToDateStr(e.target.value, 1) : undefined, month: undefined })
+            onChange={(v) =>
+              update({ dateTo: v ? addDaysToDateStr(v, 1) : undefined, month: undefined })
             }
             className={inputClass}
           />

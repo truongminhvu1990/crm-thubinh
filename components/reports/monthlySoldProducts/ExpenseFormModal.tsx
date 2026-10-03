@@ -1,5 +1,7 @@
 "use client";
 
+import DateInput from "@/components/shared/DateInput";
+import { BusinessTime } from "@/lib/businessTime";
 import { useState } from "react";
 import { EXPENSE_CATEGORIES, ExpenseCategory, OperatingExpense } from "@/types/operatingExpenses";
 import Modal from "@/components/ui/Modal";
@@ -25,7 +27,7 @@ interface Props {
 }
 
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+  return BusinessTime.todayString();
 }
 
 export default function ExpenseFormModal({ expense, onClose, onSaved }: Props) {
@@ -39,6 +41,11 @@ export default function ExpenseFormModal({ expense, onClose, onSaved }: Props) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+
+    if (!expenseDate) {
+      setError("Vui lòng nhập ngày chi phí hợp lệ (dd/mm/yyyy)");
+      return;
+    }
 
     if (!amount || amount <= 0) {
       setError("Vui lòng nhập số tiền hợp lệ");
@@ -67,14 +74,16 @@ export default function ExpenseFormModal({ expense, onClose, onSaved }: Props) {
   return (
     <Modal open title={expense ? "Sửa chi phí" : "Thêm chi phí"} onClose={onClose} testId="expense-form-modal">
       <form onSubmit={handleSubmit} className="space-y-4">
-        <Input
-          label="Ngày chi phí"
-          type="date"
-          value={expenseDate}
-          onChange={(e) => setExpenseDate(e.target.value)}
-          required
-          data-testid="expense-date-input"
-        />
+        <div className="w-full">
+          <label className="block text-sm font-medium text-foreground mb-1.5">Ngày chi phí</label>
+          <DateInput
+            value={expenseDate}
+            onChange={setExpenseDate}
+            aria-label="Ngày chi phí"
+            data-testid="expense-date-input"
+            className="w-full rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20"
+          />
+        </div>
         <Select
           label="Danh mục"
           options={CATEGORY_OPTIONS}

@@ -1,5 +1,7 @@
 "use client";
 
+import { BusinessTime } from "@/lib/businessTime";
+import DateInput from "@/components/shared/DateInput";
 import { useEffect, useState } from "react";
 import { Download, X, Wallet } from "lucide-react";
 import { PaymentMethodReportFilters, PaymentMethodReportRow } from "@/types/paymentMethodReport";
@@ -77,7 +79,7 @@ export default function PaymentMethodReportPage() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `phuong-thuc-thanh-toan-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      link.download = `phuong-thuc-thanh-toan-${BusinessTime.todayString()}.xlsx`;
       link.click();
       URL.revokeObjectURL(url);
     } catch (error) {
@@ -120,20 +122,20 @@ export default function PaymentMethodReportPage() {
         <div className="flex flex-wrap gap-3 items-center">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm text-muted-foreground">Từ</span>
-            <input
+            <DateInput
               data-testid="payment-method-date-from-input"
-              type="date"
+              
               value={filters.dateFrom || ""}
-              onChange={(e) => update({ dateFrom: e.target.value || undefined, month: undefined })}
+              onChange={(v) => update({ dateFrom: v || undefined, month: undefined })}
               className={inputClass}
             />
             <span className="text-sm text-muted-foreground">đến</span>
-            <input
+            <DateInput
               data-testid="payment-method-date-to-input"
-              type="date"
+              
               value={filters.dateTo ? addDaysToDateStr(filters.dateTo, -1) : ""}
-              onChange={(e) =>
-                update({ dateTo: e.target.value ? addDaysToDateStr(e.target.value, 1) : undefined, month: undefined })
+              onChange={(v) =>
+                update({ dateTo: v ? addDaysToDateStr(v, 1) : undefined, month: undefined })
               }
               className={inputClass}
             />

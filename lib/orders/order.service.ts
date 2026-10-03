@@ -60,6 +60,8 @@ import { logActivity } from "@/lib/activityLog.service";
 
 export interface OrderListItem extends Order {
   item_count: number;
+  /** Phase 1.6: product names per order (list display only), in order_items order. */
+  product_names?: string[];
 }
 
 /** List-page read: every order with its customer joined and item count
@@ -75,10 +77,16 @@ export interface OrderListItem extends Order {
  * under the caller's own session, not the anon-defaulting singleton. */
 export async function getOrderList(staff?: ScopingStaff, client?: SupabaseClient): Promise<OrderListItem[]> {
   const rows = await orderRepository.findAllOrders(staff, client);
+  // One batched read for the whole list (never one per order).
+  const namesByOrder = await orderRepository.findProductNamesByOrderIds(
+    rows.map((r) => r.id!).filter(Boolean),
+    client
+  );
 
   return rows.map((row) => ({
     ...row,
     item_count: orderRepository.extractItemCount(row),
+    product_names: namesByOrder.get(row.id!) ?? [],
   }));
 }
 

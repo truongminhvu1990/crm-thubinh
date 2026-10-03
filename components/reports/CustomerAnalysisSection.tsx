@@ -1,5 +1,6 @@
 "use client";
 
+import { BusinessTime } from "@/lib/businessTime";
 import { useEffect, useState } from "react";
 import { UserPlus, Repeat, Scale, Wallet, Trophy } from "lucide-react";
 import Card from "@/components/ui/Card";
@@ -103,7 +104,7 @@ export default function CustomerAnalysisSection({ range }: Props) {
         actions={
           <ExportButtons
             sheetName="Khach hang"
-            filename={`phan-tich-khach-hang-${new Date().toISOString().slice(0, 10)}.xlsx`}
+            filename={`phan-tich-khach-hang-${BusinessTime.todayString()}.xlsx`}
             columns={[
               { header: "Mã khách hàng", width: 16, value: (r: TopCustomerRow) => r.customer_code },
               { header: "Tên khách hàng", width: 24, value: (r: TopCustomerRow) => r.customer_name },

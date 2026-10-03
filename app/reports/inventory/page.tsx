@@ -7,6 +7,7 @@ import ReconcileLine from "@/components/reports/overview/ReconcileLine";
 import OverviewMetricCard from "@/components/reports/overview/OverviewMetricCard";
 import ViewToggle from "@/components/reports/overview/ViewToggle";
 import DrillDownTable, { DrillColumn } from "@/components/reports/overview/DrillDownTable";
+import EntityLink from "@/components/reports/entity/EntityLink";
 import PermissionGate from "@/components/reports/overview/PermissionGate";
 import { SkeletonCard, SkeletonTable } from "@/components/reports/overview/Skeleton";
 import { useCanonicalFetch } from "@/components/reports/overview/useCanonicalFetch";
@@ -35,8 +36,8 @@ const unpriced = <span className="font-medium text-amber-600">Chưa định giá
 const price = (v: number | null) => (v === null ? unpriced : currency.format(v));
 
 const PRODUCT_COLUMNS: DrillColumn<InventoryProductDetailRow>[] = [
-  { header: "Mã sản phẩm", render: (r) => r.product_code ?? EMPTY_VALUE },
-  { header: "Tên", render: (r) => r.product_name ?? EMPTY_VALUE },
+  { header: "Mã sản phẩm", render: (r) => <EntityLink type="inventory" id={r.product_id}>{r.product_code ?? EMPTY_VALUE}</EntityLink> },
+  { header: "Tên", render: (r) => <EntityLink type="inventory" id={r.product_id}>{r.product_name ?? EMPTY_VALUE}</EntityLink> },
   { header: "Danh mục", render: (r) => r.category ?? EMPTY_VALUE },
   { header: "Nhân viên", render: (r) => r.salesperson ?? EMPTY_VALUE },
   { header: "Giá bán", render: (r) => price(r.sale_price), align: "right" },
@@ -44,8 +45,8 @@ const PRODUCT_COLUMNS: DrillColumn<InventoryProductDetailRow>[] = [
 
 const HELD_COLUMNS: DrillColumn<HeldInventoryRow>[] = [
   ...(PRODUCT_COLUMNS as DrillColumn<HeldInventoryRow>[]),
-  { header: "Đơn đang giữ", render: (r) => (r.holding_order ? r.holding_order.order_number : <span className="text-amber-600">Không có đơn mở</span>) },
-  { header: "Khách hàng", render: (r) => r.holding_order?.customer_name ?? "—" },
+  { header: "Đơn đang giữ", render: (r) => (r.holding_order ? <EntityLink type="order" id={r.holding_order.order_id}>{r.holding_order.order_number}</EntityLink> : <span className="text-amber-600">Không có đơn mở</span>) },
+  { header: "Khách hàng", render: (r) => (r.holding_order ? <EntityLink type="customer" id={r.holding_order.customer_id}>{r.holding_order.customer_name || "—"}</EntityLink> : "—") },
   { header: "Ngày đơn", render: (r) => (r.holding_order ? formatDate(r.holding_order.order_date) : "—") },
 ];
 
@@ -58,8 +59,12 @@ function InventoryReport() {
   const view = parseInventoryView(search.get("view"));
 
   const setView = useCallback(
-    (next: InventoryView) => router.replace(`${pathname}?view=${next}`, { scroll: false }),
-    [pathname, router]
+    (next: InventoryView) => {
+      const p = new URLSearchParams(search.toString());
+      p.set("view", next);
+      router.replace(`${pathname}?${p.toString()}`, { scroll: false });
+    },
+    [pathname, router, search]
   );
 
   const overviewState = useCanonicalFetch<{ overview: OverviewMetrics }>(canView ? "/api/dashboard/overview" : null);
