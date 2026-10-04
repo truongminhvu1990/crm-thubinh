@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dmyToIso, isoToDmy, maskDmy } from "./DateInput";
+import { dmyToIso, isoToDmy, maskDmy } from "./DatePicker";
 
 test("display is dd/mm/yyyy, value stays ISO", () => {
   assert.equal(isoToDmy("2026-10-03"), "03/10/2026");

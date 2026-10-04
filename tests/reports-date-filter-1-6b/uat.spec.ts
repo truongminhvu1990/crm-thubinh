@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { credentialsFor } from "../shared/utils/auth";
 import { LoginPage } from "../shared/pages/LoginPage";
+import { pickDate } from "../reports-date-picker-1-6b1/pickDate";
 
 /**
  * Phase 1.6B - Global Date Filter browser UAT. DEV backend only, READ-ONLY (navigation, GETs, typing in filter inputs;
@@ -208,14 +209,15 @@ test("[desktop] custom range: draft only, no request until a valid range + Áp d
   expect(sold.length).toBe(1);
   expect([sold[0].start, sold[0].end]).toEqual(["2026-09-01", "2026-10-01"]);
 
-  // native calendar: the picker button exists; choosing a day in the native control updates the dd/mm/yyyy field
+  // calendar (Phase 1.6B.1: in-page calendar, no native picker): choosing days updates the dd/mm/yyyy fields, no request
   await select(page).selectOption("custom");
   await expect(page.getByTestId("report-date-filter-from-picker")).toBeVisible();
-  await page.getByTestId("report-date-filter-from-picker").click(); // opens the native picker (showPicker) without throwing
-  await page.getByTestId("report-date-filter-from-native").fill("2026-08-05");
+  const beforePick = reqs.length;
+  await pickDate(page, "report-date-filter-from", "2026-08-05");
   await expect(from).toHaveValue("05/08/2026");
-  await page.getByTestId("report-date-filter-to-native").fill("2026-08-20");
+  await pickDate(page, "report-date-filter-to", "2026-08-20");
   await expect(to).toHaveValue("20/08/2026");
+  expect(reqs.length - beforePick, "choosing dates in the calendar never fetches").toBe(0);
   await expect(apply).toBeEnabled();
   const m2 = reqs.length;
   await apply.click();
@@ -233,10 +235,10 @@ test("[mobile] custom range fits 390px and the picker button is tappable", async
   await expect(select(page)).toBeVisible({ timeout: 40_000 });
   await select(page).selectOption("custom");
   await expect(page.getByTestId("report-date-filter-from")).toBeVisible();
-  await page.getByTestId("report-date-filter-from-picker").tap();
-  await page.getByTestId("report-date-filter-from-native").fill("2026-09-01");
-  await page.getByTestId("report-date-filter-to-native").fill("2026-09-30");
+  await pickDate(page, "report-date-filter-from", "2026-09-01");
+  await pickDate(page, "report-date-filter-to", "2026-09-30");
   await expect(page.getByTestId("report-date-filter-from")).toHaveValue("01/09/2026");
+  await expect(page.getByTestId("report-date-filter-to")).toHaveValue("30/09/2026");
   expect(await noOverflow(page)).toBe(true);
   await shot(page, "mobile-custom-range");
   await page.getByTestId("report-date-filter-apply").tap();

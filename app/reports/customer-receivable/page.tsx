@@ -1,6 +1,6 @@
 "use client";
 
-import DateInput from "@/components/shared/DateInput";
+import DatePicker from "@/components/shared/DatePicker";
 import { useEffect, useState } from "react";
 import { X, Wallet, AlertCircle, TrendingUp } from "lucide-react";
 import { CustomerReceivableFilters, CustomerReceivableRow, CustomerReceivableSummary } from "@/types/customerReceivable";
@@ -181,7 +181,7 @@ export default function CustomerReceivablePage() {
 
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm text-muted-foreground">Từ</span>
-            <DateInput
+            <DatePicker
               data-testid="customer-receivable-date-from-input"
               
               value={filters.dateFrom || ""}
@@ -189,7 +189,7 @@ export default function CustomerReceivablePage() {
               className={inputClass}
             />
             <span className="text-sm text-muted-foreground">đến</span>
-            <DateInput
+            <DatePicker
               data-testid="customer-receivable-date-to-input"
               
               value={filters.dateTo ? addDaysToDateStr(filters.dateTo, -1) : ""}
