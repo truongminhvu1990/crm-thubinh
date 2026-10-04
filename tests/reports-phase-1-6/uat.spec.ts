@@ -330,13 +330,8 @@ for (const [label, vp] of [["desktop", DESKTOP], ["mobile", MOBILE]] as const) {
   test(`[${label}] Monthly Sold Products: Product / Customer / Order drawers (+ date filter input)`, async ({ browser }) => {
     const { ctx, page, errors } = await openPage(browser, "OWNER", vp);
     await page.goto("/reports/monthly-sold-products");
-    // Put a wide range through the dd/mm/yyyy inputs (also exercises DateInput)
-    const inputs = page.locator('input[placeholder="dd/mm/yyyy"]');
-    await expect(inputs.first()).toBeVisible({ timeout: 40_000 });
-    const reqPromise = page.waitForRequest((r) => r.url().includes("/api/reports/monthly-sold-products") && r.url().includes("dateFrom=2020-01-01"), { timeout: 30_000 });
-    await inputs.nth(0).fill("01/01/2020");
-    await reqPromise;
-    await expect(inputs.nth(0)).toHaveValue("01/01/2020");
+    // Phase 1.6B: the period is the Global Date Filter's (the page's own From/To + month inputs were removed)
+    await allTime(page);
     await expect(page.getByTestId("monthly-sold-products-table")).toBeVisible({ timeout: 30_000 });
 
     for (const t of ["product", "customer", "order"] as const) {
@@ -719,7 +714,7 @@ test("[desktop] Date inputs: dd/mm/yyyy display, ISO to API, validation", async 
   const from = page.getByTestId("report-date-filter-from");
   const to = page.getByTestId("report-date-filter-to");
   await expect(from).toHaveAttribute("placeholder", "dd/mm/yyyy");
-  expect(await page.locator('input[type="date"]').count()).toBe(0);
+  expect(await page.locator('input[type="date"]:not([aria-hidden="true"])').count()).toBe(0); // the hidden native input only backs the calendar button
   const apply = page.getByTestId("report-date-filter-apply");
 
   const range = async (a: string, b: string) => {
@@ -762,15 +757,11 @@ test("[desktop] Date inputs: dd/mm/yyyy display, ISO to API, validation", async 
 
   // Monthly Sold Products
   await page.goto("/reports/monthly-sold-products");
-  const msp = page.locator('input[placeholder="dd/mm/yyyy"]');
-  await expect(msp.first()).toBeVisible({ timeout: 40_000 });
-  expect(await page.locator('input[type="date"]').count()).toBe(0);
-  const mReq = page.waitForRequest((r) => r.url().includes("/api/reports/monthly-sold-products") && r.url().includes("dateTo=2026-11-01"), { timeout: 30_000 });
-  await msp.nth(0).fill("01/10/2026");
-  await msp.nth(1).fill("31/10/2026");
-  const mu = new URL((await mReq).url()).searchParams;
-  expect([mu.get("dateFrom"), mu.get("dateTo")]).toEqual(["2026-10-01", "2026-11-01"]);
-  note("msp-api-dates", `${mu.get("dateFrom")} .. ${mu.get("dateTo")}`);
+  // Phase 1.6B: no own date fields any more - the Global Date Filter drives it (covered in tests/reports-date-filter-1-6b)
+  await expect(page.getByTestId("report-date-filter")).toBeVisible({ timeout: 40_000 });
+  // (the Global Date Filter's own From/To inputs may be showing because this context chose "Tùy chọn ngày…" earlier)
+  expect(await page.locator('input[placeholder="dd/mm/yyyy"]:not([data-testid^="report-date-filter-"])').count()).toBe(0);
+  expect(await page.locator('input[type="date"]:not([aria-hidden="true"])').count()).toBe(0);
 
   // Expense form: opens, default = today in VN as dd/mm/yyyy; NOT submitted
   await page.getByTestId("expense-add-button").click();
@@ -795,14 +786,9 @@ test("[desktop] Date inputs: dd/mm/yyyy display, ISO to API, validation", async 
 
   // Payment Method
   await page.goto("/reports/payment-method");
-  const pm = page.getByTestId("payment-method-date-from-input");
-  await expect(pm).toBeVisible({ timeout: 40_000 });
-  await expect(pm).toHaveAttribute("placeholder", "dd/mm/yyyy");
-  const pmReq = page.waitForRequest((r) => r.url().includes("payment-method") && r.url().includes("dateFrom=2026-10-01"), { timeout: 30_000 });
-  await pm.fill("01/10/2026");
-  await pmReq;
-  note("payment-method", "dd/mm/yyyy in, dateFrom=2026-10-01 out");
-  expect(await page.locator('input[type="date"]').count()).toBe(0);
+  await expect(page.getByTestId("report-date-filter")).toBeVisible({ timeout: 40_000 });
+  expect(await page.getByTestId("payment-method-date-from-input").count()).toBe(0); // own date fields removed in Phase 1.6B
+  expect(await page.locator('input[type="date"]:not([aria-hidden="true"])').count()).toBe(0);
 
   // Displayed dates in tables are dd/mm/yyyy (no mm/dd, no ISO)
   await page.goto("/reports/sales?metric=sold&view=orders");
@@ -823,6 +809,7 @@ for (const [label, vp] of [["desktop", DESKTOP], ["mobile", MOBILE]] as const) {
   test(`[${label}] Payment Method modal -> entity drawer: no stacked dialogs, ESC, focus, no click-through`, async ({ browser }) => {
     const { ctx, page, errors } = await openPage(browser, "OWNER", vp);
     await page.goto("/reports/payment-method");
+    await allTime(page); // Phase 1.6B: the page follows the Global Date Filter (default Tháng này)
     const rows = page.locator('[data-testid^="payment-method-row-"]');
     await expect(rows.first()).toBeVisible({ timeout: 40_000 });
     await rows.first().click();
@@ -922,9 +909,7 @@ test("[desktop] Monthly Sold Products: whole-order payment columns are labelled 
     r.request().method() === "GET" ? r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ preference: null }) }) : r.abort()
   );
   await page.goto("/reports/monthly-sold-products");
-  const inputs = page.locator('input[placeholder="dd/mm/yyyy"]');
-  await expect(inputs.first()).toBeVisible({ timeout: 40_000 });
-  await inputs.nth(0).fill("01/01/2020");
+  await allTime(page);
   const table = page.getByTestId("monthly-sold-products-table");
   await expect(table).toBeVisible({ timeout: 40_000 });
   const headers = (await table.locator("th").allInnerTexts()).map((h) => h.trim().toLowerCase());

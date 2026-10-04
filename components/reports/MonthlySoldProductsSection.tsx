@@ -2,7 +2,8 @@
 
 import { formatDate } from "@/lib/utils";
 import { BusinessTime } from "@/lib/businessTime";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
 import { Download, Printer } from "lucide-react";
 import { MonthlySoldProductsFilters as Filters, MonthlySoldProductRow, MonthlySoldProductsSummary as Summary } from "@/types/monthlySoldProducts";
 import { ExcelColumn, exportRowsToExcel, downloadBlob } from "@/lib/reports/reportsBIExport";
@@ -64,7 +65,23 @@ function buildQuery(filters: Filters): string {
 }
 
 export default function MonthlySoldProductsSection() {
-  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  // Phase 1.6B: the period is the Global Date Filter's; this section only owns the non-date filters and the page number.
+  const { range, ready, periodKey } = useGlobalDateFilter();
+  const [localFilters, setLocalFilters] = useState<Filters>(DEFAULT_FILTERS);
+  // The page number only counts for the period it was chosen in (a new period starts at page 1).
+  const [pagePeriodKey, setPagePeriodKey] = useState(periodKey);
+  const filters: Filters = {
+    ...localFilters,
+    page: pagePeriodKey === periodKey ? localFilters.page : 1,
+    dateFrom: range?.start,
+    dateTo: range?.end,
+    month: undefined,
+  };
+  const filtersKey = JSON.stringify(filters);
+  function setFilters(next: Filters) {
+    setPagePeriodKey(periodKey);
+    setLocalFilters(next);
+  }
   const [rows, setRows] = useState<MonthlySoldProductRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [summary, setSummary] = useState<Summary>(EMPTY_SUMMARY);
@@ -86,12 +103,17 @@ export default function MonthlySoldProductsSection() {
     saveError: columnPreferenceSaveError,
   } = useReportColumnPreference<MonthlySoldProductsColumnKey>("monthly_sold_products", availableColumnKeys);
 
+  const loadSeq = useRef(0);
   async function load() {
+    // Phase 1.6B: a response that arrives after a newer request was issued (period switched meanwhile) is dropped, so an older
+  // period's data can never overwrite the newer one.
+    const seq = ++loadSeq.current;
     setIsLoading(true);
     const res = await fetch(`/api/reports/monthly-sold-products?${buildQuery(filters)}`);
     const data: { rows: MonthlySoldProductRow[]; totalCount: number; summary: Summary } = res.ok
       ? await res.json()
       : { rows: [], totalCount: 0, summary: EMPTY_SUMMARY };
+    if (seq !== loadSeq.current) return;
     setRows(data.rows);
     setTotalCount(data.totalCount);
     setSummary(data.summary);
@@ -99,11 +121,12 @@ export default function MonthlySoldProductsSection() {
   }
 
   useEffect(() => {
+    if (!ready) return; // never fetch the default period before the stored one is known
     queueMicrotask(() => {
       load();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(filters)]);
+  }, [ready, filtersKey]);
 
   async function handleExportExcel() {
     setIsExporting(true);
@@ -207,8 +230,9 @@ export default function MonthlySoldProductsSection() {
         />
       </div>
 
+      {ready && (
       <ExpenseManagementSection
-        filters={{ dateFrom: filters.dateFrom, dateTo: filters.dateTo, month: filters.month }}
+        filters={{ dateFrom: filters.dateFrom, dateTo: filters.dateTo }}
         revenue={summary.recognizedRevenue}
         soldValue={summary.soldValue}
         unrecognizedValue={summary.unrecognizedValue}
@@ -220,6 +244,7 @@ export default function MonthlySoldProductsSection() {
         canManage={canViewGrossProfit}
         onExpensesChanged={load}
       />
+      )}
     </div>
   );
 }

@@ -1,9 +1,7 @@
 "use client";
 
-import DateInput from "@/components/shared/DateInput";
 import { X } from "lucide-react";
 import { MonthlySoldProductsFilters as Filters } from "@/types/monthlySoldProducts";
-import { addDaysToDateStr } from "@/lib/dateFilter";
 import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
 import { useStaffOptions } from "@/lib/hooks/useStaffOptions";
 import SearchInput from "@/components/ui/SearchInput";
@@ -17,19 +15,13 @@ interface Props {
   onChange: (filters: Filters) => void;
 }
 
-/** Date Range (arbitrary custom From/To) and Month (a calendar-month
- * shortcut) are the two date filters named by the brief - both narrow the
- * same underlying sale_date bound (Month simply overrides dateFrom/dateTo
- * with that month's start/end when set), rather than being two independent,
- * potentially-conflicting date mechanisms. */
+/** Phase 1.6B: the reporting period is the app's Global Date Filter (rendered by the page), so this bar only holds the
+ * non-date filters. The old own From/To and Month controls are gone. */
 export default function MonthlySoldProductsFilters({ filters, onChange }: Props) {
   const categoryOptions = useMasterDataOptions("product_category");
   const staffOptions = useStaffOptions();
 
   const hasActiveFilters = !!(
-    filters.dateFrom ||
-    filters.dateTo ||
-    filters.month ||
     filters.salespersonId ||
     filters.productCategory ||
     filters.customer
@@ -52,33 +44,6 @@ export default function MonthlySoldProductsFilters({ filters, onChange }: Props)
           onChange={(e) => update({ customer: e.target.value || undefined, month: undefined })}
           onClear={() => update({ customer: undefined })}
           className="w-56"
-        />
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm text-muted-foreground">Từ</span>
-          <DateInput
-            
-            value={filters.dateFrom || ""}
-            onChange={(v) => update({ dateFrom: v || undefined, month: undefined })}
-            className={inputClass}
-          />
-          <span className="text-sm text-muted-foreground">đến</span>
-          <DateInput
-            
-            value={filters.dateTo ? addDaysToDateStr(filters.dateTo, -1) : ""}
-            onChange={(v) =>
-              update({ dateTo: v ? addDaysToDateStr(v, 1) : undefined, month: undefined })
-            }
-            className={inputClass}
-          />
-        </div>
-
-        <input
-          type="month"
-          value={filters.month || ""}
-          onChange={(e) => update({ month: e.target.value || undefined, dateFrom: undefined, dateTo: undefined })}
-          className={inputClass}
-          title="Lọc theo tháng"
         />
 
         <select

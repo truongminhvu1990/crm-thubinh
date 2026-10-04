@@ -26,7 +26,7 @@ const PERIOD_LABEL: Record<RevenuePeriodKey, string> = {
   this_week: "Tuần này",
   this_month: "Tháng này",
   this_quarter: "Quý này",
-  this_year: "Năm nay",
+  this_year: "Năm này",
 };
 
 function MetricCard({
@@ -66,7 +66,7 @@ function MetricCard({
 }
 
 export default function RevenueDashboardCards() {
-  const { customFrom, customTo } = useGlobalDateFilter();
+  const { option, customFrom, customTo } = useGlobalDateFilter();
   const [periods, setPeriods] = useState<RevenuePeriodRow[] | null>(null);
   const [customSummary, setCustomSummary] = useState<RevenueSummary | null>(null);
 
@@ -76,7 +76,8 @@ export default function RevenueDashboardCards() {
       .then(setPeriods);
   }, []);
 
-  const hasCustomRange = !!(customFrom || customTo);
+  // Phase 1.6B: a stored custom range must not resurface on this card while a preset period is active.
+  const hasCustomRange = option === "custom" && !!(customFrom || customTo);
   const customRange = hasCustomRange ? getDateRange("custom", customFrom, customTo) : null;
 
   useEffect(() => {
@@ -110,7 +111,7 @@ export default function RevenueDashboardCards() {
         );
       })}
       <MetricCard
-        title="Tùy chọn"
+        title="Tùy chọn ngày"
         data={
           hasCustomRange && customSummary
             ? { revenue: customSummary.revenue, transactions: customSummary.transactions, avgSale: customSummary.avg_sale }

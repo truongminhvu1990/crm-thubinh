@@ -179,7 +179,7 @@ test("labels of the new presets (Friday 2026-07-24)", (t) => {
 test("DATE_PRESETS: exactly the approved 13 options, in the approved order, with the approved Vietnamese labels", () => {
   assert.deepEqual(
     DATE_PRESETS.map((p) => p.label),
-    ["Hôm nay", "Hôm qua", "7 ngày qua", "Tuần này", "Tuần trước", "Tháng này", "Tháng trước", "Quý này", "Quý trước", "Năm nay", "Năm trước", "Toàn thời gian", "Tùy chọn"]
+    ["Hôm nay", "Hôm qua", "7 ngày qua", "Tuần này", "Tuần trước", "Tháng này", "Tháng trước", "Quý này", "Quý trước", "Năm này", "Năm trước", "Toàn thời gian", "Tùy chọn ngày…"]
   );
   assert.equal(new Set(DATE_PRESETS.map((p) => p.value)).size, 13);
   for (const p of DATE_PRESETS) {
@@ -196,12 +196,12 @@ test("validateCustomRange: a range may be committed only when both dates are rea
   assert.deepEqual(validateCustomRange("2026-08-07", "2026-08-07"), { ok: true }, "a single day is valid");
   const missing = validateCustomRange("2026-08-01", "");
   assert.equal(missing.ok, false);
-  assert.equal((missing as { message: string }).message, "Vui lòng chọn đủ ngày bắt đầu và ngày kết thúc.");
+  assert.equal((missing as { message: string }).message, "Khoảng ngày không hợp lệ");
   assert.equal(validateCustomRange("", "2026-08-01").ok, false);
   assert.equal(validateCustomRange(undefined, undefined).ok, false);
   const reversed = validateCustomRange("2026-08-10", "2026-08-01");
   assert.equal(reversed.ok, false);
-  assert.equal((reversed as { message: string }).message, "Ngày bắt đầu phải trước hoặc bằng ngày kết thúc.");
+  assert.equal((reversed as { message: string }).message, "Khoảng ngày không hợp lệ");
   assert.equal(validateCustomRange("2026-02-30", "2026-03-01").ok, false, "2026-02-30 does not exist");
   assert.equal(validateCustomRange("08/01/2026", "2026-08-02").ok, false, "malformed");
 });

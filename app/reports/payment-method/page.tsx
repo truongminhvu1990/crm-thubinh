@@ -1,13 +1,13 @@
 "use client";
 
 import { BusinessTime } from "@/lib/businessTime";
-import DateInput from "@/components/shared/DateInput";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download, X, Wallet } from "lucide-react";
 import { PaymentMethodReportFilters, PaymentMethodReportRow } from "@/types/paymentMethodReport";
 import { exportPaymentMethodReportToExcel, paymentMethodReportCurrency as currency } from "@/lib/paymentMethodReport/paymentMethodReportExport";
 import { useMasterDataOptions } from "@/lib/hooks/useMasterDataOptions";
-import { addDaysToDateStr } from "@/lib/dateFilter";
+import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
+import GlobalDateFilter from "@/components/shared/GlobalDateFilter";
 import PageViewingLabel from "@/components/shared/PageViewingLabel";
 import ScopeIndicator from "@/components/shared/ScopeIndicator";
 import Button from "@/components/ui/Button";
@@ -35,7 +35,11 @@ function buildQuery(filters: PaymentMethodReportFilters): string {
  * defined columns, same plain title/filters/table shape as Sales Ledger and
  * Monthly Sold Products, its sibling standalone Operational reports. */
 export default function PaymentMethodReportPage() {
-  const [filters, setFilters] = useState<PaymentMethodReportFilters>(DEFAULT_FILTERS);
+  // Phase 1.6B: the period is the Global Date Filter's; this page only owns the non-date filters.
+  const { range, ready } = useGlobalDateFilter();
+  const [localFilters, setLocalFilters] = useState<PaymentMethodReportFilters>(DEFAULT_FILTERS);
+  const filters: PaymentMethodReportFilters = { ...localFilters, dateFrom: range?.start, dateTo: range?.end, month: undefined };
+  const filtersKey = JSON.stringify(filters);
   const [rows, setRows] = useState<PaymentMethodReportRow[]>([]);
   const [paymentMethodOptions, setPaymentMethodOptions] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -44,28 +48,34 @@ export default function PaymentMethodReportPage() {
 
   const salespersonOptions = useMasterDataOptions("salesperson");
 
+  const loadSeq = useRef(0);
   async function load() {
+    // Phase 1.6B: a response that arrives after a newer request was issued (period switched meanwhile) is dropped, so an older
+  // period's data can never overwrite the newer one.
+    const seq = ++loadSeq.current;
     setIsLoading(true);
     const res = await fetch(`/api/reports/payment-method?${buildQuery(filters)}`);
     const data: { rows: PaymentMethodReportRow[]; paymentMethodOptions: string[] } = res.ok
       ? await res.json()
       : { rows: [], paymentMethodOptions: [] };
+    if (seq !== loadSeq.current) return;
     setRows(data.rows);
     setPaymentMethodOptions(data.paymentMethodOptions);
     setIsLoading(false);
   }
 
   useEffect(() => {
+    if (!ready) return; // never fetch the default period before the stored one is known
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(filters)]);
+  }, [ready, filtersKey]);
 
   function update(patch: Partial<PaymentMethodReportFilters>) {
-    setFilters((f) => ({ ...f, ...patch }));
+    setLocalFilters((f) => ({ ...f, ...patch }));
   }
 
   function clearFilters() {
-    setFilters(DEFAULT_FILTERS);
+    setLocalFilters(DEFAULT_FILTERS);
   }
 
   async function handleExport() {
@@ -90,7 +100,7 @@ export default function PaymentMethodReportPage() {
     }
   }
 
-  const hasActiveFilters = !!(filters.month || filters.dateFrom || filters.dateTo || filters.salesperson || filters.paymentMethod);
+  const hasActiveFilters = !!(localFilters.salesperson || localFilters.paymentMethod);
   const totalAmount = rows.reduce((sum, r) => sum + r.totalAmount, 0);
 
   return (
@@ -106,6 +116,8 @@ export default function PaymentMethodReportPage() {
             <PageViewingLabel />
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+        <GlobalDateFilter />
         <Button
           data-testid="payment-method-export-button"
           variant="secondary"
@@ -116,39 +128,11 @@ export default function PaymentMethodReportPage() {
           <Download className="w-4 h-4" />
           {isExporting ? "Đang xuất..." : "Xuất Excel"}
         </Button>
+        </div>
       </div>
 
       <div className="bg-card border border-border rounded-xl shadow-sm p-4 mb-6 space-y-3">
         <div className="flex flex-wrap gap-3 items-center">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm text-muted-foreground">Từ</span>
-            <DateInput
-              data-testid="payment-method-date-from-input"
-              
-              value={filters.dateFrom || ""}
-              onChange={(v) => update({ dateFrom: v || undefined, month: undefined })}
-              className={inputClass}
-            />
-            <span className="text-sm text-muted-foreground">đến</span>
-            <DateInput
-              data-testid="payment-method-date-to-input"
-              
-              value={filters.dateTo ? addDaysToDateStr(filters.dateTo, -1) : ""}
-              onChange={(v) =>
-                update({ dateTo: v ? addDaysToDateStr(v, 1) : undefined, month: undefined })
-              }
-              className={inputClass}
-            />
-          </div>
-
-          <input
-            data-testid="payment-method-month-input"
-            type="month"
-            value={filters.month || ""}
-            onChange={(e) => update({ month: e.target.value || undefined, dateFrom: undefined, dateTo: undefined })}
-            className={inputClass}
-            title="Lọc theo tháng"
-          />
 
           <select
             data-testid="payment-method-staff-filter"

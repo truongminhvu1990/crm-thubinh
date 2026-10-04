@@ -25,6 +25,9 @@ interface GlobalDateFilterValue {
   customTo: string;
   setCustomRange: (from: string, to: string) => void;
   range: DateRange | null;
+  /** Phase 1.6B: stable string identity of the active period (`start|end`, or `all|all` for Toàn thời gian). Use as an effect
+   * dependency / result key instead of re-deriving it from `range`. */
+  periodKey: string;
   label: string;
   /** Phase 1.5A: false until the stored period has been read on the client. Anything that fetches by `range` MUST wait
    * for this, otherwise it first fetches the fixed default ("Tháng này") and only then the stored period. */
@@ -121,13 +124,15 @@ export function GlobalDateFilterProvider({ children }: { children: ReactNode }) 
       writeStoredFilter({ option: "custom", customFrom: from, customTo: to });
     };
 
+    const range = getDateRange(option, customFrom, customTo);
     return {
       option,
       setOption,
       customFrom,
       customTo,
       setCustomRange,
-      range: getDateRange(option, customFrom, customTo),
+      range,
+      periodKey: `${range?.start ?? "all"}|${range?.end ?? "all"}`,
       label: getDateFilterLabel(option, customFrom, customTo),
       ready,
     };

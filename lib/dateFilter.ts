@@ -43,10 +43,10 @@ export const DATE_PRESETS: { value: DateFilterOption; label: string }[] = [
   { value: "last_month", label: "Tháng trước" },
   { value: "this_quarter", label: "Quý này" },
   { value: "last_quarter", label: "Quý trước" },
-  { value: "this_year", label: "Năm nay" },
+  { value: "this_year", label: "Năm này" },
   { value: "last_year", label: "Năm trước" },
   { value: "all_time", label: "Toàn thời gian" },
-  { value: "custom", label: "Tùy chọn" },
+  { value: "custom", label: "Tùy chọn ngày…" },
 ];
 
 export function isDateFilterOption(value: unknown): value is DateFilterOption {
@@ -61,14 +61,17 @@ function isRealDate(value: string): boolean {
   return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
 }
 
+/** Phase 1.6B (Product Owner): ONE user-facing message for every invalid custom range (missing, malformed, reversed). */
+export const INVALID_RANGE_MESSAGE = "Khoảng ngày không hợp lệ";
+
 export type CustomRangeCheck = { ok: true } | { ok: false; message: string };
 
 /** A custom range may only be COMMITTED (and therefore only then trigger any report request) when both dates are real
  * and FROM <= TO. The message is shown to the user as-is. */
 export function validateCustomRange(from: string | undefined | null, to: string | undefined | null): CustomRangeCheck {
-  if (!from || !to) return { ok: false, message: "Vui lòng chọn đủ ngày bắt đầu và ngày kết thúc." };
-  if (!isRealDate(from) || !isRealDate(to)) return { ok: false, message: "Ngày không hợp lệ. Vui lòng chọn lại." };
-  if (from > to) return { ok: false, message: "Ngày bắt đầu phải trước hoặc bằng ngày kết thúc." };
+  if (!from || !to) return { ok: false, message: INVALID_RANGE_MESSAGE };
+  if (!isRealDate(from) || !isRealDate(to)) return { ok: false, message: INVALID_RANGE_MESSAGE };
+  if (from > to) return { ok: false, message: INVALID_RANGE_MESSAGE };
   return { ok: true };
 }
 

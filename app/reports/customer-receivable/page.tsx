@@ -8,7 +8,7 @@ import { FinancialSettlementState } from "@/lib/orders/order.rules";
 import { CustomerReceivableColumnKey, CUSTOMER_RECEIVABLE_COLUMNS } from "@/lib/customerReceivable/customerReceivableColumns";
 import { useReportColumnPreference } from "@/lib/hooks/useReportColumnPreference";
 import { addDaysToDateStr } from "@/lib/dateFilter";
-import PageViewingLabel from "@/components/shared/PageViewingLabel";
+import CurrentStateLabel from "@/components/shared/CurrentStateLabel";
 import ScopeIndicator from "@/components/shared/ScopeIndicator";
 import Button from "@/components/ui/Button";
 import StatCard from "@/components/ui/StatCard";
@@ -119,7 +119,7 @@ export default function CustomerReceivablePage() {
             <ScopeIndicator resource="revenue" />
           </p>
           <div className="mt-1">
-            <PageViewingLabel />
+            <CurrentStateLabel note="(không dùng Kỳ báo cáo chung; bộ lọc ngày bên dưới chỉ áp dụng riêng cho trang này)" />
           </div>
         </div>
         <ColumnPicker

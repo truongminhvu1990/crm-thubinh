@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Hourglass } from "lucide-react";
 import { currency } from "@/lib/reports/format";
 import { CommissionAgingRow } from "@/types/commissionReporting";
-import PageViewingLabel from "@/components/shared/PageViewingLabel";
+import CurrentStateLabel from "@/components/shared/CurrentStateLabel";
 import ScopeIndicator from "@/components/shared/ScopeIndicator";
 
 /** ST-4 — Commission Aging (docs/06_COMMISSION_SPEC.md §16). Current-state
@@ -43,7 +43,7 @@ export default function CommissionAgingPage() {
           <ScopeIndicator resource="commissions" />
         </p>
         <div className="mt-1">
-          <PageViewingLabel />
+          <CurrentStateLabel />
         </div>
       </div>
 

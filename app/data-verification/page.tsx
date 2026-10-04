@@ -38,7 +38,7 @@ const DEFAULT_FILTERS: Filters = {
 };
 
 export default function DataVerificationPage() {
-  const { range } = useGlobalDateFilter();
+  const { range, ready } = useGlobalDateFilter();
 
   const [dashboard, setDashboard] = useState<VerificationDashboardData | null>(null);
   const [localFilters, setLocalFilters] = useState<Filters>(DEFAULT_FILTERS);
@@ -52,18 +52,25 @@ export default function DataVerificationPage() {
   }, []);
 
   const filters = withGlobalDateRange(localFilters, range);
+  const localFiltersKey = JSON.stringify(localFilters);
 
   // No SalesLedgerSummary card on this page (Feature 8's own summary cards
   // already cover this module's numbers) - only the transaction page
   // itself is fetched, per Feature 10's "do not fetch unnecessary rows".
   useEffect(() => {
+    if (!ready) return; // Phase 1.6B: wait for the stored period
+    let cancelled = false; // a late response for a previous period is dropped
     getSalesLedgerPage(filters).then((page) => {
+      if (cancelled) return;
       setRows(page.rows);
       setTotalCount(page.totalCount);
       setIsLoading(false);
     });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(localFilters), range?.start, range?.end]);
+  }, [ready, localFiltersKey, range?.start, range?.end]);
 
   async function handleExport() {
     setIsExporting(true);
