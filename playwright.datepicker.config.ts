@@ -1,0 +1,35 @@
+import { defineConfig, devices } from "@playwright/test";
+import dotenv from "dotenv";
+import path from "path";
+
+// Phase 1.6B.1 - cross-browser matrix for the reusable DatePicker. Separate from playwright.config.ts on purpose (that file
+// is shared with every other suite). Run against a production build pointed at Dev:
+//   QA_BASE_URL=http://localhost:3100 npx playwright test -c playwright.datepicker.config.ts
+// "webkit-*" projects are Playwright's WebKit build (the Safari engine); they approximate Safari but are NOT Safari itself.
+dotenv.config({ path: path.resolve(__dirname, ".env.test") });
+dotenv.config({ path: path.resolve(__dirname, ".env.local") });
+
+export default defineConfig({
+  testDir: "./tests/reports-date-picker-1-6b1",
+  outputDir: "./artifacts/test-results-datepicker",
+  fullyParallel: false,
+  workers: 1,
+  retries: 0,
+  timeout: 180_000,
+  reporter: [["list"], ["json", { outputFile: process.env.PW_JSON_OUT ?? "artifacts/datepicker-matrix.json" }]],
+  use: {
+    baseURL: process.env.QA_BASE_URL || "http://localhost:3100",
+    locale: "en-US",
+    actionTimeout: 15_000,
+    navigationTimeout: 30_000,
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+  },
+  projects: [
+    { name: "chromium-desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
+    { name: "chromium-mobile", use: { ...devices["Pixel 7"], viewport: { width: 390, height: 844 } } },
+    { name: "webkit-desktop", use: { ...devices["Desktop Safari"], viewport: { width: 1440, height: 900 } } },
+    { name: "webkit-mobile", use: { ...devices["iPhone 14"] } },
+    { name: "edge-desktop", use: { ...devices["Desktop Edge"], channel: "msedge", viewport: { width: 1440, height: 900 } } },
+  ],
+});

@@ -1,6 +1,6 @@
 "use client";
 
-import DateInput from "@/components/shared/DateInput";
+import DatePicker from "@/components/shared/DatePicker";
 import { BusinessTime } from "@/lib/businessTime";
 import { useState } from "react";
 import { EXPENSE_CATEGORIES, ExpenseCategory, OperatingExpense } from "@/types/operatingExpenses";
@@ -76,7 +76,7 @@ export default function ExpenseFormModal({ expense, onClose, onSaved }: Props) {
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="w-full">
           <label className="block text-sm font-medium text-foreground mb-1.5">Ngày chi phí</label>
-          <DateInput
+          <DatePicker
             value={expenseDate}
             onChange={setExpenseDate}
             aria-label="Ngày chi phí"

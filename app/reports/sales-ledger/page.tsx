@@ -13,7 +13,9 @@ import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
 import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
 import { useReportColumnPreference } from "@/lib/hooks/useReportColumnPreference";
 import { getProductById } from "@/lib/product.service";
-import { exclusiveEndToInclusiveTo } from "@/lib/reports/drilldown";
+import { addDaysToDateStr } from "@/lib/dateFilter";
+import { DrilldownView, activeDrilldownRange, parseDrilldownRange } from "@/lib/reports/drilldown";
+import { formatDate } from "@/lib/utils";
 import GlobalDateFilter from "@/components/shared/GlobalDateFilter";
 import PageViewingLabel from "@/components/shared/PageViewingLabel";
 import ScopeIndicator from "@/components/shared/ScopeIndicator";
@@ -74,7 +76,7 @@ function SalesLedgerPageInner() {
   // Sales Ledger MUST always use the same selected period as
   // Dashboard/Reports - reuses the exact same shared context, no local
   // date state of its own.
-  const { range, setCustomRange } = useGlobalDateFilter();
+  const { range, ready, periodKey } = useGlobalDateFilter();
   const searchParams = useSearchParams();
 
   // Feature 8 (Drill-down) - a report card in /reports links here with
@@ -137,35 +139,38 @@ function SalesLedgerPageInner() {
     saveError: columnPreferenceSaveError,
   } = useReportColumnPreference<SalesLedgerColumnKey>("sales_ledger", availableColumnKeys);
 
-  // The date range half of a drill-down, unlike the filters above, mutates
-  // the Global Date Filter - a different component's shared context state -
-  // so it has to run as an effect, not a local lazy initializer. Deferred
-  // one microtask out so the setCustomRange call isn't a bare synchronous
-  // statement in the effect body, same shape as every other setState call
-  // in this file already living inside a callback (e.g. `.then(setRows)`).
-  const appliedDrilldownRange = useRef(false);
-  useEffect(() => {
-    if (appliedDrilldownRange.current) return;
-    appliedDrilldownRange.current = true;
+  // Phase 1.6B (Product Owner): the date range of a drill-down URL (?dateFrom=&dateTo=, end exclusive) is VIEW context
+  // only. It is used for this page's data and shown in the heading, but it NEVER writes the Global Date Filter, so the
+  // user's saved period is untouched. It stays in force only while the global period is the one that was active when the
+  // link was opened: choosing another period in the filter hands control back to the filter.
+  const [drilldown, setDrilldown] = useState<DrilldownView | null>(() => parseDrilldownRange(searchParams));
+  // Pin the saved period the link was opened over, as soon as it is known (adjust-state-during-render, no effect).
+  if (drilldown && drilldown.baseKey === null && ready) setDrilldown({ ...drilldown, baseKey: periodKey });
+  const activeDrilldown = activeDrilldownRange(drilldown, periodKey);
+  const effectiveRange = activeDrilldown ?? range;
 
-    const dateFrom = searchParams.get("dateFrom");
-    const dateTo = searchParams.get("dateTo");
-    if (!dateFrom && !dateTo) return;
+  function clearDrilldown() {
+    setDrilldown(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("dateFrom");
+    url.searchParams.delete("dateTo");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}`);
+  }
 
-    queueMicrotask(() => {
-      setCustomRange(dateFrom || "", dateTo ? exclusiveEndToInclusiveTo(dateTo) : "");
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const filters = withGlobalDateRange(localFilters, effectiveRange);
+  const localFiltersKey = JSON.stringify(localFilters);
 
-  const filters = withGlobalDateRange(localFilters, range);
-
+  const loadSeq = useRef(0);
   async function load() {
+    // Phase 1.6B: a response that arrives after a newer request was issued (period switched meanwhile) is dropped, so an older
+  // period's data can never overwrite the newer one.
+    const seq = ++loadSeq.current;
     setIsLoading(true);
     const res = await fetch(`/api/sales-ledger?${buildSalesLedgerQuery(filters)}`);
     const data: { rows: SalesLedgerRow[]; totalCount: number; summary: Summary } = res.ok
       ? await res.json()
       : { rows: [], totalCount: 0, summary: EMPTY_SUMMARY };
+    if (seq !== loadSeq.current) return;
     setRows(data.rows);
     setTotalCount(data.totalCount);
     setSummary(data.summary);
@@ -173,9 +178,10 @@ function SalesLedgerPageInner() {
   }
 
   useEffect(() => {
+    if (!ready) return; // Phase 1.6B: never fetch the default period before the stored one is known
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(localFilters), range?.start, range?.end]);
+  }, [ready, localFiltersKey, effectiveRange?.start, effectiveRange?.end]);
 
   useEffect(() => {
     let cancelled = false;
@@ -254,7 +260,19 @@ function SalesLedgerPageInner() {
             <ScopeIndicator resource="revenue" />
           </p>
           <div className="mt-1">
-            <PageViewingLabel />
+            {activeDrilldown ? (
+              <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-foreground" data-testid="sales-ledger-drilldown-period">
+                Đang xem (từ liên kết):{" "}
+                <span className="text-primary">
+                  {formatDate(activeDrilldown.start)} → {formatDate(addDaysToDateStr(activeDrilldown.end, -1))}
+                </span>
+                <button type="button" onClick={clearDrilldown} className="text-xs font-normal text-primary underline underline-offset-2">
+                  Dùng Kỳ báo cáo đã chọn
+                </button>
+              </p>
+            ) : (
+              <PageViewingLabel />
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">

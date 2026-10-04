@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRightLeft, RefreshCw, Plus, ArrowLeftRight, Link2, X, Landmark } from "lucide-react";
 import { MoneyDebtLedgerEntry, MoneyDebtLedgerBalance } from "@/types/moneyDebtLedger";
 import { MONEY_DEBT_LEDGER_ALL_TYPE_OPTIONS, MONEY_DEBT_LEDGER_CURRENCY_OPTIONS } from "@/lib/moneyDebtLedger/moneyDebtLedger.constants";
@@ -15,6 +15,9 @@ import TechHReconcileModal from "@/components/moneyDebtLedger/TechHReconcileModa
 import SupplierPaymentViaMoneyChangerModal from "@/components/moneyDebtLedger/SupplierPaymentViaMoneyChangerModal";
 import CorrectionModal from "@/components/moneyDebtLedger/CorrectionModal";
 import Button from "@/components/ui/Button";
+import GlobalDateFilter from "@/components/shared/GlobalDateFilter";
+import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
+import { addDaysToDateStr } from "@/lib/dateFilter";
 import SearchInput from "@/components/ui/SearchInput";
 import SearchToolbar from "@/components/ui/SearchToolbar";
 
@@ -50,8 +53,11 @@ export default function MoneyDebtLedgerPage() {
   const [currencyFilter, setCurrencyFilter] = useState("ALL");
   const [typeFilter, setTypeFilter] = useState("ALL");
   const [directionFilter, setDirectionFilter] = useState("ALL");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  // Phase 1.6B: the period is the Global Date Filter's. The API filters transaction_date with BOTH ends inclusive, so the
+  // exclusive range end is converted to the inclusive last day (semantics unchanged).
+  const { range, ready } = useGlobalDateFilter();
+  const dateFrom = range?.start ?? "";
+  const dateTo = range ? addDaysToDateStr(range.end, -1) : "";
   const [activeModal, setActiveModal] = useState<"movement" | "buy-cny" | "tech-h" | "supplier-payment-via-money-changer" | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [permissionDenied, setPermissionDenied] = useState(false);
@@ -63,11 +69,13 @@ export default function MoneyDebtLedgerPage() {
     partyFilter !== "ALL" ||
     currencyFilter !== "ALL" ||
     typeFilter !== "ALL" ||
-    directionFilter !== "ALL" ||
-    dateFrom !== "" ||
-    dateTo !== "";
+    directionFilter !== "ALL";
 
+  const entriesSeq = useRef(0);
   async function loadEntries() {
+    // Phase 1.6B: a response that arrives after a newer request was issued (period switched meanwhile) is dropped, so an older
+  // period's data can never overwrite the newer one.
+    const seq = ++entriesSeq.current;
     setIsLoading(true);
     setLoadError(null);
     setPermissionDenied(false);
@@ -81,33 +89,48 @@ export default function MoneyDebtLedgerPage() {
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);
 
-      const [entriesRes, balancesRes, partiesRes] = await Promise.all([
-        fetch(`/api/money-debt-ledger?${params.toString()}`),
-        fetch("/api/money-debt-ledger/balance"),
-        fetch("/api/money-debt-ledger/counterparties"),
-      ]);
+      const entriesRes = await fetch(`/api/money-debt-ledger?${params.toString()}`);
+      if (seq !== entriesSeq.current) return;
       if (entriesRes.status === 403) {
         setPermissionDenied(true);
         setEntries([]);
         return;
       }
       if (!entriesRes.ok) throw new Error("Không thể tải Money & Debt Ledger");
-      setEntries(await entriesRes.json());
-      setBalances(balancesRes.ok ? await balancesRes.json() : []);
-      setCounterparties(partiesRes.ok ? await partiesRes.json() : []);
+      const json = await entriesRes.json();
+      if (seq !== entriesSeq.current) return;
+      setEntries(json);
     } catch (error) {
       console.error("Failed to load Money & Debt Ledger:", error);
       setLoadError(error instanceof Error ? error.message : "Đã có lỗi xảy ra");
     } finally {
-      setIsLoading(false);
+      if (seq === entriesSeq.current) setIsLoading(false);
+    }
+  }
+
+  /** Phase 1.6B: balances and counterparties depend on neither the filters nor the period, so they are loaded once and
+   * after a save - not again on every filter / period change. */
+  async function loadSupporting() {
+    try {
+      const [balancesRes, partiesRes] = await Promise.all([fetch("/api/money-debt-ledger/balance"), fetch("/api/money-debt-ledger/counterparties")]);
+      setBalances(balancesRes.ok ? await balancesRes.json() : []);
+      setCounterparties(partiesRes.ok ? await partiesRes.json() : []);
+    } catch (error) {
+      console.error("Failed to load Money & Debt Ledger balances:", error);
     }
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time load of the (period-independent) balances
+    loadSupporting();
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return; // Phase 1.6B: never fetch before the Global Date Filter's stored period is known
     // eslint-disable-next-line react-hooks/set-state-in-effect -- same fetch-on-filter-change pattern as app/compensation-ledger/page.tsx
     loadEntries();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm, partyFilter, currencyFilter, typeFilter, directionFilter, dateFrom, dateTo]);
+  }, [ready, searchTerm, partyFilter, currencyFilter, typeFilter, directionFilter, dateFrom, dateTo]);
 
   function handleClearFilters() {
     setSearchTerm("");
@@ -115,18 +138,18 @@ export default function MoneyDebtLedgerPage() {
     setCurrencyFilter("ALL");
     setTypeFilter("ALL");
     setDirectionFilter("ALL");
-    setDateFrom("");
-    setDateTo("");
   }
 
   function handleModalSaved() {
     setActiveModal(null);
     loadEntries();
+    loadSupporting();
   }
 
   function handleCorrectionSaved() {
     setCorrectionTarget(null);
     loadEntries();
+    loadSupporting();
   }
 
   function handleSelectMoneyChanger(partyId: string | null) {
@@ -224,6 +247,9 @@ export default function MoneyDebtLedgerPage() {
 
           {/* F. Filters */}
           <div className="bg-card border border-border rounded-xl shadow-sm p-4 mb-6">
+            <p className="mb-3 text-xs text-muted-foreground" data-testid="money-debt-ledger-period-note">
+              Kỳ báo cáo lọc theo ngày giao dịch của danh sách bên dưới. Số dư và bảng Money Changer ở trên là trạng thái hiện tại, không đổi theo kỳ.
+            </p>
             <SearchToolbar
               search={
                 <SearchInput
@@ -283,22 +309,7 @@ export default function MoneyDebtLedgerPage() {
                   </option>
                 ))}
               </select>
-              <input
-                data-testid="money-debt-ledger-date-from"
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-                aria-label="Từ ngày"
-              />
-              <input
-                data-testid="money-debt-ledger-date-to"
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="flex-1 sm:flex-none sm:w-40 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-                aria-label="Đến ngày"
-              />
+              <GlobalDateFilter />
 
               {hasActiveFilters && (
                 <Button data-testid="money-debt-ledger-clear-filters-button" variant="secondary" size="md" onClick={handleClearFilters}>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { OperatingExpense } from "@/types/operatingExpenses";
 import { currency } from "@/lib/reports/format";
@@ -77,12 +77,17 @@ export default function ExpenseManagementSection({
   const [editing, setEditing] = useState<OperatingExpense | null>(null);
   const [deleting, setDeleting] = useState<OperatingExpense | null>(null);
 
+  const loadSeq = useRef(0);
   async function load() {
+    // Phase 1.6B: a response that arrives after a newer request was issued (period switched meanwhile) is dropped, so an older
+  // period's data can never overwrite the newer one.
+    const seq = ++loadSeq.current;
     setIsLoading(true);
     const res = await fetch(`/api/reports/operating-expenses?${buildQuery(filters)}`);
     const data: { rows: OperatingExpense[]; total: number } = res.ok
       ? await res.json()
       : { rows: [], total: 0 };
+    if (seq !== loadSeq.current) return;
     setRows(data.rows);
     setTotal(data.total);
     setIsLoading(false);

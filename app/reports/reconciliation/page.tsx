@@ -25,14 +25,14 @@ function Loading() {
 }
 
 export default function ReportsReconciliationPage() {
-  const { range } = useGlobalDateFilter();
+  const { range, ready } = useGlobalDateFilter();
   const isOwner = useIsOwner();
   const [data, setData] = useState<ReportsReconciliation | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
-    if (!isOwner) return;
+    if (!isOwner || !ready) return; // Phase 1.6B: wait for the stored period
     let cancelled = false;
     setIsLoading(true);
     setForbidden(false);
@@ -54,7 +54,7 @@ export default function ReportsReconciliationPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOwner, range?.start, range?.end]);
+  }, [isOwner, ready, range?.start, range?.end]);
 
   if (!isOwner) {
     return (

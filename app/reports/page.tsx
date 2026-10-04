@@ -310,6 +310,12 @@ export default function ReportsPage() {
         </Link>
       </section>
 
+      {!ready ? (
+        <div className="space-y-4" role="status" aria-label="Đang tải kỳ báo cáo" data-testid="reports-period-loading">
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
+      ) : (
       <div key={refreshToken} className="space-y-6">
         {/* Revenue Reporting (07_REPORTING_SPEC.md §5) */}
         <ReportGroupSection title="Doanh thu" description="Tổng quan, KPI, xu hướng và lợi nhuận doanh thu" icon={Wallet}>
@@ -334,7 +340,7 @@ export default function ReportsPage() {
           </section>
 
           <section className="space-y-4">
-            <ProfitSection range={range} />
+            <ProfitSection data={purchaseData} />
           </section>
 
           <section className="space-y-4">
@@ -695,6 +701,7 @@ export default function ReportsPage() {
               separately. */}
         </ReportGroupSection>
       </div>
+      )}
     </div>
   );
 }

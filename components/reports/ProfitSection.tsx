@@ -1,11 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { TrendingUp, Wallet, Coins } from "lucide-react";
 import Card from "@/components/ui/Card";
-import { DateRange } from "@/lib/dateFilter";
 import { currency } from "@/lib/reports/format";
-import { rangeSearchParams } from "@/lib/reports/reportsApiClient";
 import { PurchaseReportData } from "@/lib/reports/reports.service";
 import { METRIC_LABELS } from "@/lib/reports/overviewUi";
 
@@ -15,19 +12,11 @@ import { METRIC_LABELS } from "@/lib/reports/overviewUi";
 // returns totalCost/totalProfit - no new API, no new RPC.
 
 interface Props {
-  range: DateRange | null;
+  /** Phase 1.6B: the Reports page already fetches /api/reports/purchases for the active period - it is passed in, not refetched. */
+  data: PurchaseReportData | null;
 }
 
-export default function ProfitSection({ range }: Props) {
-  const [data, setData] = useState<PurchaseReportData | null>(null);
-
-  useEffect(() => {
-    fetch(`/api/reports/purchases?${rangeSearchParams(range)}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((d: PurchaseReportData | null) => setData(d));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range?.start, range?.end]);
-
+export default function ProfitSection({ data }: Props) {
   return (
     <Card>
       <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-4">

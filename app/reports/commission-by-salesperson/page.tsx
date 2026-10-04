@@ -15,11 +15,12 @@ import ScopeIndicator from "@/components/shared/ScopeIndicator";
  * over `sales_commissions` (lib/commissionReporting/), never Commission's
  * own service. */
 export default function CommissionBySalespersonPage() {
-  const { range } = useGlobalDateFilter();
+  const { range, ready } = useGlobalDateFilter();
   const [rows, setRows] = useState<CommissionBySalespersonRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    if (!ready) return; // Phase 1.6B: never fetch the default period before the stored one is known
     let cancelled = false;
     setIsLoading(true);
     fetch(`/api/reports/commission-by-salesperson?${rangeSearchParams(range)}`)
@@ -34,7 +35,7 @@ export default function CommissionBySalespersonPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range?.start, range?.end]);
+  }, [ready, range?.start, range?.end]);
 
   const totalCommission = rows.reduce((sum, r) => sum + r.totalCommissionAmount, 0);
 

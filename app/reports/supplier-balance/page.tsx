@@ -5,7 +5,7 @@ import Link from "next/link";
 import { X, Users, Landmark, ExternalLink } from "lucide-react";
 import { SupplierBalanceFilters, SupplierBalanceRow, SupplierBalanceSummary } from "@/types/supplierBalance";
 import { MoneyDebtLedgerCurrency } from "@/types/moneyDebtLedger";
-import PageViewingLabel from "@/components/shared/PageViewingLabel";
+import CurrentStateLabel from "@/components/shared/CurrentStateLabel";
 import StatCard from "@/components/ui/StatCard";
 import Button from "@/components/ui/Button";
 import SupplierBalanceTable from "@/components/supplierBalance/SupplierBalanceTable";
@@ -80,7 +80,7 @@ export default function SupplierBalancePage() {
             Tổng IN, tổng OUT và số dư theo từng Nhà cung cấp — đọc trực tiếp từ Sổ công nợ tiền, không phải công nợ phải trả
           </p>
           <div className="mt-1">
-            <PageViewingLabel />
+            <CurrentStateLabel />
           </div>
         </div>
         <Link

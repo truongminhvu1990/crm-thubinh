@@ -1,5 +1,6 @@
 import { Gem } from "lucide-react";
 import PageViewingLabel from "@/components/shared/PageViewingLabel";
+import GlobalDateFilter from "@/components/shared/GlobalDateFilter";
 import MonthlySoldProductsSection from "@/components/reports/MonthlySoldProductsSection";
 
 // Product Owner Decision (2026-07-28) - standalone operational report page,
@@ -11,7 +12,8 @@ import MonthlySoldProductsSection from "@/components/reports/MonthlySoldProducts
 export default function MonthlySoldProductsPage() {
   return (
     <div className="pb-8">
-      <div className="mb-6">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
         <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight flex items-center gap-2">
           <Gem className="w-7 h-7 text-primary" />
           Sản phẩm đã bán theo tháng
@@ -22,6 +24,8 @@ export default function MonthlySoldProductsPage() {
         <div className="mt-1.5">
           <PageViewingLabel />
         </div>
+        </div>
+        <GlobalDateFilter />
       </div>
 
       <MonthlySoldProductsSection />

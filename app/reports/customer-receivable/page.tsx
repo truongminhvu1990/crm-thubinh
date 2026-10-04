@@ -1,6 +1,6 @@
 "use client";
 
-import DateInput from "@/components/shared/DateInput";
+import DatePicker from "@/components/shared/DatePicker";
 import { useEffect, useState } from "react";
 import { X, Wallet, AlertCircle, TrendingUp } from "lucide-react";
 import { CustomerReceivableFilters, CustomerReceivableRow, CustomerReceivableSummary } from "@/types/customerReceivable";
@@ -8,7 +8,7 @@ import { FinancialSettlementState } from "@/lib/orders/order.rules";
 import { CustomerReceivableColumnKey, CUSTOMER_RECEIVABLE_COLUMNS } from "@/lib/customerReceivable/customerReceivableColumns";
 import { useReportColumnPreference } from "@/lib/hooks/useReportColumnPreference";
 import { addDaysToDateStr } from "@/lib/dateFilter";
-import PageViewingLabel from "@/components/shared/PageViewingLabel";
+import CurrentStateLabel from "@/components/shared/CurrentStateLabel";
 import ScopeIndicator from "@/components/shared/ScopeIndicator";
 import Button from "@/components/ui/Button";
 import StatCard from "@/components/ui/StatCard";
@@ -119,7 +119,7 @@ export default function CustomerReceivablePage() {
             <ScopeIndicator resource="revenue" />
           </p>
           <div className="mt-1">
-            <PageViewingLabel />
+            <CurrentStateLabel note="(không dùng Kỳ báo cáo chung; bộ lọc ngày bên dưới chỉ áp dụng riêng cho trang này)" />
           </div>
         </div>
         <ColumnPicker
@@ -181,7 +181,7 @@ export default function CustomerReceivablePage() {
 
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm text-muted-foreground">Từ</span>
-            <DateInput
+            <DatePicker
               data-testid="customer-receivable-date-from-input"
               
               value={filters.dateFrom || ""}
@@ -189,7 +189,7 @@ export default function CustomerReceivablePage() {
               className={inputClass}
             />
             <span className="text-sm text-muted-foreground">đến</span>
-            <DateInput
+            <DatePicker
               data-testid="customer-receivable-date-to-input"
               
               value={filters.dateTo ? addDaysToDateStr(filters.dateTo, -1) : ""}

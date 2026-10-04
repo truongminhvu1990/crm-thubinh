@@ -5,9 +5,9 @@ import { Wallet } from "lucide-react";
 import { Customer } from "@/types/customer";
 import { CustomerPurchaseSummary } from "@/types/purchase";
 import { getCustomerRevenue } from "@/lib/purchase.service";
-import { getDateRange } from "@/lib/reports/reports.service";
+import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
 import Card from "@/components/ui/Card";
-import CustomerRevenueDateFilter, { CustomerDateFilterOption } from "./CustomerRevenueDateFilter";
+import GlobalDateFilter from "@/components/shared/GlobalDateFilter";
 
 const currency = new Intl.NumberFormat("vi-VN", {
   style: "currency",
@@ -19,20 +19,29 @@ interface Props {
   customer: Customer;
 }
 
+/** Phase 1.6B: the revenue period is the app's Global Date Filter (same presets, same Vietnam-time semantics, same
+ * [start, end) range handed to getCustomerRevenue as before). "Toàn thời gian" = no bound. The card used to keep its own
+ * select with a 6-option subset and default to all time; it now follows the global period. */
 export default function CustomerRevenueSummary({ customer }: Props) {
-  const [filter, setFilter] = useState<CustomerDateFilterOption>("all_time");
-  const [customFrom, setCustomFrom] = useState("");
-  const [customTo, setCustomTo] = useState("");
-  const [summary, setSummary] = useState<CustomerPurchaseSummary | null>(null);
+  const { range, ready, periodKey, label } = useGlobalDateFilter();
+  const [result, setResult] = useState<{ key: string; summary: CustomerPurchaseSummary | null } | null>(null);
 
   useEffect(() => {
-    if (!customer.id) return;
-    // "all_time" -> no range at all (getCustomerRevenue treats null as no
-    // date filter). Every other value goes through reports.service.ts's own
-    // getDateRange() unchanged - same range Reports would compute for it.
-    const range = filter === "all_time" ? null : getDateRange(filter, customFrom, customTo);
-    getCustomerRevenue(customer.id, range).then(setSummary);
-  }, [customer.id, filter, customFrom, customTo]);
+    if (!customer.id || !ready) return; // never fetch before the stored period is known
+    let cancelled = false;
+    const key = `${customer.id}|${periodKey}`;
+    getCustomerRevenue(customer.id, range).then((summary) => {
+      if (!cancelled) setResult({ key, summary });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // range is fully described by periodKey
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer.id, ready, periodKey]);
+
+  // A result for another customer / period reads as "not loaded" - the previous period's number never stays on screen.
+  const summary = result && result.key === `${customer.id}|${periodKey}` ? result.summary : null;
 
   return (
     <Card>
@@ -41,18 +50,12 @@ export default function CustomerRevenueSummary({ customer }: Props) {
           <Wallet className="w-5 h-5 text-primary" />
           Doanh thu
         </h2>
-        <CustomerRevenueDateFilter
-          value={filter}
-          customFrom={customFrom}
-          customTo={customTo}
-          onChange={setFilter}
-          onCustomChange={(from, to) => {
-            setCustomFrom(from);
-            setCustomTo(to);
-          }}
-        />
+        <GlobalDateFilter />
       </div>
-      <p className="text-2xl font-bold text-foreground">
+      <p className="mb-2 text-sm text-muted-foreground" data-testid="customer-revenue-period">
+        Kỳ báo cáo: <span className="font-medium text-foreground">{label}</span>
+      </p>
+      <p className="text-2xl font-bold text-foreground" data-testid="customer-revenue-total">
         {summary ? currency.format(summary.totalRevenue) : "—"}
       </p>
       <p className="text-sm text-muted-foreground mt-1">{summary?.count || 0} giao dịch</p>

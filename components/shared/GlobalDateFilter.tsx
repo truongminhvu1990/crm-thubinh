@@ -10,12 +10,12 @@
 //
 // Phase 1.5A: the option list is the shared DATE_PRESETS (lib/dateFilter.ts), and a custom range is edited as a LOCAL
 // DRAFT that is committed only by "Áp dụng" - and only when both dates are real and FROM <= TO. Typing a date, or
-// choosing "Tùy chọn", therefore never changes the active period and never triggers a report request.
+// choosing "Tùy chọn ngày…", therefore never changes the active period and never triggers a report request.
 
 import { useState } from "react";
 import { DATE_PRESETS, DateFilterOption, addDaysToDateStr, validateCustomRange } from "@/lib/dateFilter";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
-import DateInput from "@/components/shared/DateInput";
+import DatePicker from "@/components/shared/DatePicker";
 
 const selectClass =
   "rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
@@ -84,9 +84,10 @@ export default function GlobalDateFilter() {
 
   return (
     <div className="flex flex-wrap items-start gap-2">
+      <span className="self-center text-sm font-medium text-muted-foreground">Kỳ báo cáo:</span>
       <select
         data-testid="report-date-filter"
-        aria-label="Chọn kỳ báo cáo"
+        aria-label="Kỳ báo cáo"
         value={editing ? "custom" : option}
         onChange={(e) => onPresetChange(e.target.value as DateFilterOption)}
         className={selectClass}
@@ -100,15 +101,18 @@ export default function GlobalDateFilter() {
       {showCustom && (
         <div className="flex flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">
-            <DateInput
+            <span className="text-sm text-muted-foreground">Từ</span>
+            <DatePicker
+              emitPartial
               data-testid="report-date-filter-from"
               aria-label="Từ ngày"
               value={fromValue}
               onChange={onFromChange}
               className={selectClass}
             />
-            <span className="text-muted-foreground text-sm">-</span>
-            <DateInput
+            <span className="text-sm text-muted-foreground">Đến</span>
+            <DatePicker
+              emitPartial
               data-testid="report-date-filter-to"
               aria-label="Đến ngày"
               value={toValue}
