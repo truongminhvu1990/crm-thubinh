@@ -1,6 +1,7 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import AppShell from "@/components/AppShell";
+import { ReportPreferencesProvider } from "@/lib/reportColumns/useReportColumns";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -25,7 +26,9 @@ export default function RootLayout({
   return (
     <html lang="vi" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body className="bg-background margin-0 font-sans antialiased">
-        <AppShell>{children}</AppShell>
+        <ReportPreferencesProvider>
+          <AppShell>{children}</AppShell>
+        </ReportPreferencesProvider>
       </body>
     </html>
   );
