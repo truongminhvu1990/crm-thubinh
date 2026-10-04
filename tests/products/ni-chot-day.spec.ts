@@ -68,6 +68,30 @@ async function loginAsOwner(page: Page) {
   await waitForLoading(page);
 }
 
+/**
+ * Clicks "Lưu" on the Products LIST page and resolves only after the
+ * post-save list refresh has fully settled.
+ *
+ * app/products/page.tsx's performSaveProduct() closes the modal first and
+ * then `await loadProducts()` (GET /api/products). The dialog turning hidden
+ * therefore does NOT mean the save flow is finished: navigating away right
+ * then aborts that in-flight fetch, the page's own catch block logs
+ * console.error(e), and the shared console-error fixture (correctly) fails
+ * the test. Waiting for the specific refresh response - registered BEFORE
+ * the click so it cannot be missed - plus the app's own loading-complete
+ * signal removes the race without hiding any console error.
+ */
+async function saveAndWaitForListRefresh(page: Page, products: ProductPage) {
+  const listRefresh = page.waitForResponse(
+    (r) => r.request().method() === "GET" && new URL(r.url()).pathname === "/api/products"
+  );
+  await products.save();
+  await expect(products.dialog()).toBeHidden();
+  const response = await listRefresh;
+  await response.finished(); // body fully received, so the app's res.json() cannot be cut off
+  await waitForLoading(page); // the page's own isLoading=false (spinner gone)
+}
+
 async function openEdit(page: Page, name: string, code: string) {
   const products = new ProductPage(page);
   await products.goto();
@@ -151,8 +175,7 @@ test.describe("Ni-Chột-Dày", () => {
         await loginAsOwner(page);
         const products = await openEdit(page, p.product_name, p.product_code);
         await dimensionInput(page).fill(text);
-        await products.save();
-        await expect(products.dialog()).toBeHidden();
+        await saveAndWaitForListRefresh(page, products);
 
         const saved = await getProductById(p.id!);
         expect([saved?.dimension_ni_mm, saved?.dimension_chot_mm, saved?.dimension_day_mm].map(Number)).toEqual([ni, chot, day]);
