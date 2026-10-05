@@ -12,13 +12,14 @@ import { formatNiChotDay } from "@/lib/productDimension";
  *
  * The 200 body is a top-level JSON array (no wrapper object).
  *
- * Whitelisted projection only (selected explicitly by name): product_code / product_name / status (the V1 contract) plus three ADDITIVE
+ * Whitelisted projection only (selected explicitly by name): product_code / product_name / status (the V1 contract) plus four ADDITIVE
  * enrichment fields, always present, null when the CRM has no value:
  *   dimensions  "Ni-Chột-Dày" in mm ("54.5-9.4-6.6"), built from dimension_ni_mm / dimension_chot_mm / dimension_day_mm ONLY when all
  *               three are present - otherwise null (never a partial string, never inferred, no decimal point ever inserted)
  *   color       products.color, verbatim
  *   jade_grade  products.jade_grade, verbatim (Mini Catalogue maps it to its Chủng)
- * No price (sale_price / cost_price) is exposed.
+ *   sale_price  products.sale_price, the product SELLING price in VND, verbatim (null when the CRM has none). Product Owner decision
+ *               (CRM Data Review): price is now CRM-owned for CRM-linked Catalogue products. cost_price is NEVER exposed.
  * Never cost_price, supplier, location, salesperson, source, notes, or any
  * other internal column - selected explicitly by name, never `select("*")`.
  * `status` is passed through verbatim, unvalidated: Mini Catalogue's own
@@ -35,6 +36,7 @@ type ProductRow = {
   dimension_day_mm: number | null;
   color: string | null;
   jade_grade: string | null;
+  sale_price: number | null;
 };
 
 function tokenMatches(presented: string, expected: string): boolean {
@@ -67,7 +69,7 @@ export async function GET(request: NextRequest) {
     throw err;
   }
 
-  const { data, error } = await client.from("products").select("product_code, product_name, status, dimension_ni_mm, dimension_chot_mm, dimension_day_mm, color, jade_grade").returns<ProductRow[]>();
+  const { data, error } = await client.from("products").select("product_code, product_name, status, dimension_ni_mm, dimension_chot_mm, dimension_day_mm, color, jade_grade, sale_price").returns<ProductRow[]>();
   if (error) {
     return NextResponse.json({ error: "Could not read products" }, { status: 500 });
   }
@@ -80,6 +82,7 @@ export async function GET(request: NextRequest) {
       dimensions: formatNiChotDay(p.dimension_ni_mm, p.dimension_chot_mm, p.dimension_day_mm),
       color: p.color ?? null,
       jade_grade: p.jade_grade ?? null,
+      sale_price: p.sale_price ?? null,
     })),
     { headers: { "Cache-Control": "no-store" } },
   );
