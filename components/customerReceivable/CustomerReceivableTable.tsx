@@ -33,6 +33,9 @@ interface Props {
   isLoading?: boolean;
   visibleColumns?: Set<CustomerReceivableColumnKey>;
   columnOrder?: CustomerReceivableColumnKey[];
+  /** Wave B1.1: the columns to render, already filtered and ordered by the shared column preference. When given it
+   * replaces visibleColumns/columnOrder. */
+  columnKeys?: CustomerReceivableColumnKey[];
 }
 
 /** Same "Compact Row + Detail" mobile pattern every other report/list table
@@ -45,9 +48,10 @@ export default function CustomerReceivableTable({
   isLoading = false,
   visibleColumns = DEFAULT_VISIBLE_CUSTOMER_RECEIVABLE_COLUMNS,
   columnOrder = CUSTOMER_RECEIVABLE_COLUMNS.map((c) => c.key),
+  columnKeys,
 }: Props) {
   const byKey = new Map(CUSTOMER_RECEIVABLE_COLUMNS.map((c) => [c.key, c]));
-  const orderedVisibleColumns = columnOrder.map((key) => byKey.get(key)).filter((c): c is NonNullable<typeof c> => !!c && visibleColumns.has(c.key));
+  const orderedVisibleColumns = (columnKeys ?? columnOrder).map((key) => byKey.get(key)).filter((c): c is NonNullable<typeof c> => !!c && (columnKeys ? true : visibleColumns.has(c.key)));
 
   if (isLoading) {
     return (

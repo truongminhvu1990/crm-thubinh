@@ -5,14 +5,14 @@ import { useEffect, useState } from "react";
 import { X, Wallet, AlertCircle, TrendingUp } from "lucide-react";
 import { CustomerReceivableFilters, CustomerReceivableRow, CustomerReceivableSummary } from "@/types/customerReceivable";
 import { FinancialSettlementState } from "@/lib/orders/order.rules";
-import { CustomerReceivableColumnKey, CUSTOMER_RECEIVABLE_COLUMNS } from "@/lib/customerReceivable/customerReceivableColumns";
-import { useReportColumnPreference } from "@/lib/hooks/useReportColumnPreference";
+import { CustomerReceivableColumnKey } from "@/lib/customerReceivable/customerReceivableColumns";
+import { useReportColumns } from "@/lib/reportColumns/useReportColumns";
 import { addDaysToDateStr } from "@/lib/dateFilter";
 import CurrentStateLabel from "@/components/shared/CurrentStateLabel";
 import ScopeIndicator from "@/components/shared/ScopeIndicator";
 import Button from "@/components/ui/Button";
 import StatCard from "@/components/ui/StatCard";
-import ColumnPicker from "@/components/reports/ColumnPicker";
+import ColumnManager from "@/components/shared/ColumnManager";
 import CustomerReceivableTable from "@/components/customerReceivable/CustomerReceivableTable";
 import CustomerReceivablePagination from "@/components/customerReceivable/CustomerReceivablePagination";
 
@@ -66,11 +66,10 @@ export default function CustomerReceivablePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchInput, setSearchInput] = useState("");
 
-  const availableColumnKeys = CUSTOMER_RECEIVABLE_COLUMNS.map((c) => c.key);
-  const { visibleColumns, setVisibleColumns } = useReportColumnPreference<CustomerReceivableColumnKey>(
-    "customer_receivable",
-    availableColumnKeys
-  );
+  // Phase 1.6 Wave B1.1: shared column management (B0). Only presentation: which columns, in which order. Nothing here
+  // is part of the data request below, so changing columns never refetches.
+  const columnPreference = useReportColumns("customer_receivable");
+  const columnKeys = columnPreference.columns.map((c) => c.key as CustomerReceivableColumnKey);
 
   async function load() {
     setIsLoading(true);
@@ -122,12 +121,10 @@ export default function CustomerReceivablePage() {
             <CurrentStateLabel note="(không dùng Kỳ báo cáo chung; bộ lọc ngày bên dưới chỉ áp dụng riêng cho trang này)" />
           </div>
         </div>
-        <ColumnPicker
-          testId="customer-receivable-columns-button"
-          columns={CUSTOMER_RECEIVABLE_COLUMNS}
-          visibleKeys={visibleColumns}
-          onChange={setVisibleColumns}
-        />
+        {/* shown only where the desktop table is (the mobile card list is not column-driven and stays as is) */}
+        <div className="hidden lg:block">
+          <ColumnManager columns={columnPreference} testId="customer-receivable-columns-button" />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
@@ -207,7 +204,7 @@ export default function CustomerReceivablePage() {
         </div>
       </div>
 
-      <CustomerReceivableTable rows={rows} isLoading={isLoading} visibleColumns={visibleColumns} />
+      <CustomerReceivableTable rows={rows} isLoading={isLoading} columnKeys={columnKeys} />
 
       <div className="print:hidden">
         <CustomerReceivablePagination page={filters.page ?? 1} totalCount={totalCount} onPageChange={(page) => update({ page })} />
