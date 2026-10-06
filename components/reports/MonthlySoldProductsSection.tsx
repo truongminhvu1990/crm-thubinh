@@ -6,20 +6,16 @@ import { useEffect, useRef, useState } from "react";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
 import { Download, Printer } from "lucide-react";
 import { MonthlySoldProductsFilters as Filters, MonthlySoldProductRow, MonthlySoldProductsSummary as Summary } from "@/types/monthlySoldProducts";
-import { ExcelColumn, exportRowsToExcel, downloadBlob } from "@/lib/reports/reportsBIExport";
-import {
-  MonthlySoldProductsColumnKey,
-  getAvailableMonthlySoldProductsColumns,
-  recognitionLabel,
-} from "@/lib/monthlySoldProducts/monthlySoldProductsColumns";
+import { exportRowsToExcel, downloadBlob } from "@/lib/reports/reportsBIExport";
 import { useIsOwnerOrManager } from "@/lib/hooks/useIsOwnerOrManager";
-import { useReportColumnPreference } from "@/lib/hooks/useReportColumnPreference";
+import { useReportColumns } from "@/lib/reportColumns/useReportColumns";
 import ScopeIndicator from "@/components/shared/ScopeIndicator";
 import Button from "@/components/ui/Button";
 import MonthlySoldProductsFilters from "@/components/reports/monthlySoldProducts/MonthlySoldProductsFilters";
 import MonthlySoldProductsSummary from "@/components/reports/monthlySoldProducts/MonthlySoldProductsSummary";
 import MonthlySoldProductsTable from "@/components/reports/monthlySoldProducts/MonthlySoldProductsTable";
-import MonthlySoldProductsColumnPicker from "@/components/reports/monthlySoldProducts/MonthlySoldProductsColumnPicker";
+import ColumnManager from "@/components/shared/ColumnManager";
+import { buildMonthlySoldProductsExportColumns } from "@/components/reports/monthlySoldProducts/exportColumns";
 import MonthlySoldProductsPagination from "@/components/reports/monthlySoldProducts/MonthlySoldProductsPagination";
 import ExpenseManagementSection from "@/components/reports/monthlySoldProducts/ExpenseManagementSection";
 
@@ -90,18 +86,10 @@ export default function MonthlySoldProductsSection() {
 
   const canViewGrossProfit = useIsOwnerOrManager();
 
-  // Per-User Report Column Preferences (Product Owner task, 2026-08-14) -
-  // own visibility state, own column definitions
-  // (lib/monthlySoldProducts/monthlySoldProductsColumns.ts), deliberately
-  // not shared with Sales Ledger's - persisted independently per
-  // (staff, "monthly_sold_products"), superseding the previous
-  // session-only React state.
-  const availableColumnKeys = getAvailableMonthlySoldProductsColumns({ canViewGrossProfit }).map((c) => c.key);
-  const {
-    visibleColumns,
-    setVisibleColumns,
-    saveError: columnPreferenceSaveError,
-  } = useReportColumnPreference<MonthlySoldProductsColumnKey>("monthly_sold_products", availableColumnKeys);
+  // Phase 1.6 Wave B1.2: shared column management (B0) - visibility AND order, persisted per (staff, "monthly_sold_products").
+  // Presentation only: this state is deliberately NOT part of `filters` / `filtersKey`, so changing a column never refetches the report.
+  const columnPreference = useReportColumns("monthly_sold_products", { owner_or_manager: canViewGrossProfit });
+  const columnKeys = columnPreference.columns.map((c) => c.key);
 
   const loadSeq = useRef(0);
   async function load() {
@@ -139,19 +127,9 @@ export default function MonthlySoldProductsSection() {
       if (!exportRes.ok) throw new Error(`Export failed: ${exportRes.status}`);
       const { rows: allRows }: { rows: MonthlySoldProductRow[] } = await exportRes.json();
 
-      // Locked Decision 2A (Task 3 precedent) - export contains exactly the
-      // columns currently visible in the table, same order, same labels:
-      // intersect the user's visibility choice with what's actually
-      // available right now (canViewGrossProfit), same as the table's own
-      // `show()` check. Reuses the existing shared Excel writer
-      // (reportsBIExport.ts) rather than a bespoke one - unlike Sales
-      // Ledger's Cost/Profit, gross_profit needs no export-time lookup
-      // (already resolved per row, server-side).
-      const exportColumns: ExcelColumn<MonthlySoldProductRow>[] = getAvailableMonthlySoldProductsColumns({ canViewGrossProfit })
-        .filter((c) => visibleColumns.has(c.key))
-        .map((c) => ({ header: c.label, width: c.width, value: c.exportValue }));
-      // Recognition status is always exported, same as it is always shown.
-      exportColumns.push({ header: "Ghi nhận doanh thu", width: 30, value: (r) => recognitionLabel(r) });
+      // Export columns (see exportColumns.ts): the VISIBLE set comes from the current column preference, the ORDER stays the registry
+      // order - the export never follows the order the user chose in the table (locked Product Owner decision, Wave B1.2).
+      const exportColumns = buildMonthlySoldProductsExportColumns(canViewGrossProfit, columnPreference.isVisible);
 
       const blob = await exportRowsToExcel<MonthlySoldProductRow>("San pham da ban", exportColumns, allRows);
       downloadBlob(blob, `san-pham-da-ban-theo-thang-${BusinessTime.todayString()}.xlsx`);
@@ -182,16 +160,7 @@ export default function MonthlySoldProductsSection() {
           <ScopeIndicator resource="revenue" />
         </p>
         <div className="flex items-center gap-2 flex-wrap">
-          <MonthlySoldProductsColumnPicker
-            columns={getAvailableMonthlySoldProductsColumns({ canViewGrossProfit })}
-            visibleColumns={visibleColumns}
-            onChange={setVisibleColumns}
-          />
-          {columnPreferenceSaveError && (
-            <span className="text-xs text-destructive" data-testid="monthly-sold-products-column-preference-save-error">
-              Không thể lưu tùy chỉnh cột
-            </span>
-          )}
+          <ColumnManager columns={columnPreference} testId="monthly-sold-products-columns-button" />
           <Button
             data-testid="monthly-sold-products-export-excel-button"
             variant="secondary"
@@ -219,7 +188,7 @@ export default function MonthlySoldProductsSection() {
         rows={rows}
         isLoading={isLoading}
         canViewGrossProfit={canViewGrossProfit}
-        visibleColumns={visibleColumns}
+        columnKeys={columnKeys}
       />
 
       <div className="print:hidden">
