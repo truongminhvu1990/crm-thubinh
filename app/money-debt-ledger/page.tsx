@@ -17,6 +17,9 @@ import CorrectionModal from "@/components/moneyDebtLedger/CorrectionModal";
 import Button from "@/components/ui/Button";
 import GlobalDateFilter from "@/components/shared/GlobalDateFilter";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
+import { useHasPermission } from "@/lib/hooks/useHasPermission";
+import { useReportColumns } from "@/lib/reportColumns/useReportColumns";
+import ColumnManager from "@/components/shared/ColumnManager";
 import { addDaysToDateStr } from "@/lib/dateFilter";
 import SearchInput from "@/components/ui/SearchInput";
 import SearchToolbar from "@/components/ui/SearchToolbar";
@@ -63,6 +66,13 @@ export default function MoneyDebtLedgerPage() {
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [correctionTarget, setCorrectionTarget] = useState<MoneyDebtLedgerEntry | null>(null);
   const [detailEntry, setDetailEntry] = useState<MoneyDebtLedgerEntry | null>(null);
+
+  // Phase 1.6 Wave B1.4: shared column management (B0) for the transaction table only, persisted per (staff, "money_debt_ledger").
+  // The "Thao tác" column (and every edit entry point) exists only with money_debt_ledger.create - the same permission the
+  // correction API enforces. Presentation only: this state is NOT in the data-request effects below, so a column action never refetches.
+  const canEdit = useHasPermission("money_debt_ledger.create");
+  const columnPreference = useReportColumns("money_debt_ledger", { has_edit: canEdit });
+  const columnKeys = columnPreference.columns.map((c) => c.key);
 
   const hasActiveFilters =
     searchTerm !== "" ||
@@ -325,7 +335,14 @@ export default function MoneyDebtLedgerPage() {
           </div>
 
           {/* D. Transaction ledger table */}
-          <MoneyDebtLedgerTable entries={entries} isLoading={isLoading} onEdit={setCorrectionTarget} onRowClick={setDetailEntry} />
+          <MoneyDebtLedgerTable
+            entries={entries}
+            isLoading={isLoading}
+            onEdit={canEdit ? setCorrectionTarget : undefined}
+            onRowClick={setDetailEntry}
+            columnKeys={columnKeys}
+            toolbar={<ColumnManager columns={columnPreference} testId="money-debt-ledger-columns-button" />}
+          />
         </>
       )}
 
@@ -343,7 +360,7 @@ export default function MoneyDebtLedgerPage() {
         entry={detailEntry}
         allEntries={entries}
         onClose={() => setDetailEntry(null)}
-        onEdit={(e) => setCorrectionTarget(e)}
+        onEdit={canEdit ? (e) => setCorrectionTarget(e) : undefined}
       />
     </div>
   );
