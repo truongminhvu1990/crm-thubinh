@@ -8,7 +8,7 @@ import { NextRequest } from "next/server";
  * route file for the locked contract this proves: token auth (fail closed
  * when unconfigured, 401 when wrong/missing), and a strict whitelist
  * projection (the V1 product_code / product_name / status plus the additive
- * dimensions / color / jade_grade) that never leaks internal columns or price.
+ * dimensions / color / jade_grade / sale_price) that never leaks internal columns or cost_price.
  */
 
 const PRODUCTS: Record<string, unknown>[] = [
@@ -78,20 +78,20 @@ test("401s with a non-Bearer scheme", async () => {
   assert.equal(res.status, 401);
 });
 
-test("200s with the correct token and returns only the 6 whitelisted fields per product - no price/cost_price/supplier/location/salesperson/source/notes", async () => {
+test("200s with the correct token and returns only the 7 whitelisted fields per product - no cost_price/supplier/location/salesperson/source/notes", async () => {
   const res = await GET(req({ authorization: `Bearer ${TOKEN}` }));
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.ok(Array.isArray(body), "top-level body must be an array, not a { products } wrapper");
   assert.equal(body.length, 2);
   for (const p of body) {
-    assert.deepEqual(Object.keys(p).sort(), ["color", "dimensions", "jade_grade", "product_code", "product_name", "status"]);
+    assert.deepEqual(Object.keys(p).sort(), ["color", "dimensions", "jade_grade", "product_code", "product_name", "sale_price", "status"]);
   }
   assert.equal(body[0].product_code, PRODUCTS[0].product_code);
   assert.equal(body[0].product_name, PRODUCTS[0].product_name);
   assert.equal(body[0].status, PRODUCTS[0].status);
   const raw = JSON.stringify(body);
-  for (const leaked of ["cost_price", "sale_price", "12000000", "5000000", "Supplier X", "Kho A", "staff-1", "wholesale", "internal note"]) {
+  for (const leaked of ["cost_price", "5000000", "Supplier X", "Kho A", "staff-1", "wholesale", "internal note"]) {
     assert.ok(!raw.includes(leaked), `response must not leak ${leaked}`);
   }
 });
@@ -102,9 +102,9 @@ test("an unrecognized/garbage status string is passed through verbatim, not reje
   assert.equal(body[1].status, "SomeUnrecognizedStatus");
 });
 
-test("only the whitelisted columns are ever requested from the database (never select(\"*\")) - no sale_price / cost_price", async () => {
+test("only the whitelisted columns are ever requested from the database (never select(\"*\")) - no cost_price", async () => {
   await GET(req({ authorization: `Bearer ${TOKEN}` }));
-  assert.equal(selectedColumns, "product_code, product_name, status, dimension_ni_mm, dimension_chot_mm, dimension_day_mm, color, jade_grade");
+  assert.equal(selectedColumns, "product_code, product_name, status, dimension_ni_mm, dimension_chot_mm, dimension_day_mm, color, jade_grade, sale_price");
 });
 
 test("the response disables caching so a poll always sees fresh state", async () => {
@@ -114,7 +114,7 @@ test("the response disables caching so a poll always sees fresh state", async ()
 
 async function bodyFor(row: Record<string, unknown>) {
   const saved = [...PRODUCTS];
-  PRODUCTS.splice(0, PRODUCTS.length, { product_code: "D-1", product_name: "Dim", status: "Available", dimension_ni_mm: null, dimension_chot_mm: null, dimension_day_mm: null, color: null, jade_grade: null, ...row });
+  PRODUCTS.splice(0, PRODUCTS.length, { product_code: "D-1", product_name: "Dim", status: "Available", dimension_ni_mm: null, dimension_chot_mm: null, dimension_day_mm: null, color: null, jade_grade: null, sale_price: null, ...row });
   try {
     const res = await GET(req({ authorization: `Bearer ${TOKEN}` }));
     assert.equal(res.status, 200);
@@ -182,8 +182,20 @@ test("backward compatible: product_code / product_name / status are unchanged an
   assert.equal(body[0].jade_grade, "Băng");
 });
 
-test("price is not part of the contract: no sale_price / cost_price / price key or value in any response", async () => {
+test("sale_price is the product SELLING price, returned verbatim as a number; null when the CRM has none", async () => {
+  assert.equal((await bodyFor({ sale_price: 24_800_000 })).sale_price, 24_800_000);
+  assert.equal((await bodyFor({ sale_price: 1_500_000 })).sale_price, 1_500_000);
+  assert.equal((await bodyFor({})).sale_price, null);
+  assert.equal((await bodyFor({ sale_price: undefined })).sale_price, null);
+});
+
+test("cost_price is never exposed: not as a key, not as a value, and never substituted for the price", async () => {
   const res = await GET(req({ authorization: `Bearer ${TOKEN}` }));
-  const raw = JSON.stringify(await res.json());
-  for (const leaked of ["sale_price", "cost_price", "price", "12000000", "2000000", "5000000"]) assert.ok(!raw.includes(leaked), `must not expose ${leaked}`);
+  const body = await res.json();
+  const raw = JSON.stringify(body);
+  for (const leaked of ["cost_price", "5000000", "1000000"]) assert.ok(!raw.includes(leaked), `must not expose ${leaked}`);
+  assert.equal(body[0].sale_price, 12_000_000, "sale_price comes from sale_price, not from cost_price");
+  const onlyCost = await bodyFor({ sale_price: null, cost_price: 7_000_000 });
+  assert.equal(onlyCost.sale_price, null, "a missing selling price stays null even when a cost exists");
+  assert.ok(!("cost_price" in onlyCost));
 });
