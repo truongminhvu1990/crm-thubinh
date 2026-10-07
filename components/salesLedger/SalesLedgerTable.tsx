@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Receipt, ImageOff, AlertTriangle } from "lucide-react";
@@ -7,6 +8,7 @@ import { SalesLedgerRow } from "@/types/salesLedger";
 import { COMMISSION_STATUS_LABEL, COMMISSION_STATUS_BADGE_VARIANT } from "@/lib/commission/commission.constants";
 import { formatDate } from "@/lib/utils";
 import {
+  SALES_LEDGER_COLUMNS,
   SalesLedgerColumnKey,
   DEFAULT_VISIBLE_SALES_LEDGER_COLUMNS,
   getAvailableSalesLedgerColumns,
@@ -33,9 +35,13 @@ interface Props {
    * Columns) - so toggling Verification Mode off hides its columns exactly
    * as before, independent of whatever this set happens to contain.
    * Defaults to every column (all visible), matching this table's own
-   * behavior before column visibility existed - existing callers that don't
-   * pass this prop (e.g. Data Verification's page) are unaffected. */
+   * behavior before column visibility existed. Only used when `columnKeys` is not given. */
   visibleColumns?: Set<SalesLedgerColumnKey>;
+  /** Phase 1.6 Wave B1.3: the columns to render, ALREADY normalised, visibility-filtered and ordered by the shared column preference
+   * (useReportColumns). Header and cells are both produced from this one list, so their order can never differ. When given it replaces
+   * `visibleColumns`. Presentation only: it is never part of the data request. The desktop table only - the mobile card list below is
+   * not column-driven and is unaffected. */
+  columnKeys?: string[];
 }
 
 const currency = new Intl.NumberFormat("vi-VN", {
@@ -44,6 +50,136 @@ const currency = new Intl.NumberFormat("vi-VN", {
   maximumFractionDigits: 0,
 });
 
+const TH = "px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide";
+
+interface ColumnRenderer {
+  label: string;
+  td: (r: SalesLedgerRow) => ReactNode;
+}
+
+/** One entry per Sales Ledger column: its header text and its cell, side by side, so a reorder moves both. */
+function buildColumns(costByProductId: Map<string, number>): Record<SalesLedgerColumnKey, ColumnRenderer> {
+  return {
+    sale_date: { label: "Ngày bán", td: (r) => <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">{formatDate(r.sale_date)}</td> },
+    // Order Number - customer_purchases has no linkage to Orders in this schema, so this column is always empty rather than fabricated.
+    order_number: { label: "Số đơn", td: () => <td className="px-4 py-3.5 text-sm text-muted-foreground">—</td> },
+    product_code: {
+      label: "Mã sản phẩm",
+      td: (r) => (
+        <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
+          <EntityLink type="product" id={r.product_id}>{r.product_code || "—"}</EntityLink>
+        </td>
+      ),
+    },
+    product_name: {
+      label: "Tên sản phẩm",
+      td: (r) => (
+        <td className="px-4 py-3.5">
+          <div className="flex items-center gap-2.5">
+            {r.product_image_url ? (
+              <img
+                src={r.product_image_url}
+                alt={r.product_name || ""}
+                className="w-9 h-9 rounded-md object-cover border border-border shrink-0"
+              />
+            ) : (
+              <div className="w-9 h-9 rounded-md border border-border bg-muted flex items-center justify-center shrink-0">
+                <ImageOff className="w-4 h-4 text-muted-foreground" />
+              </div>
+            )}
+            <div className="min-w-0 font-medium text-foreground truncate"><EntityLink type="product" id={r.product_id}>{r.product_name || "—"}</EntityLink></div>
+          </div>
+        </td>
+      ),
+    },
+    customer: {
+      label: "Khách hàng",
+      td: (r) => (
+        <td className="px-4 py-3.5">
+          <div className="text-sm font-medium text-foreground"><EntityLink type="customer" id={r.customer_id}>{r.customer_name}</EntityLink></div>
+          <div className="text-xs text-muted-foreground">{r.customer_code}</div>
+        </td>
+      ),
+    },
+    salesperson: { label: "Nhân viên", td: (r) => <td className="px-4 py-3.5 text-sm text-muted-foreground">{r.salesperson || "—"}</td> },
+    sale_amount: { label: "Giá trị bán", td: (r) => <td className="px-4 py-3.5 text-sm text-foreground whitespace-nowrap">{currency.format(r.sale_amount)}</td> },
+    commission_amount: {
+      label: "Hoa hồng",
+      td: (r) => (
+        <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
+          {r.commission_amount !== null ? currency.format(r.commission_amount) : "—"}
+        </td>
+      ),
+    },
+    cost_price: {
+      label: "Giá vốn",
+      td: (r) => (
+        <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
+          {r.product_id && costByProductId.has(r.product_id) ? currency.format(costByProductId.get(r.product_id)!) : "—"}
+        </td>
+      ),
+    },
+    profit: {
+      label: "Lãi / Lỗ",
+      td: (r) => (
+        <td className="px-4 py-3.5 text-sm text-foreground whitespace-nowrap">
+          {r.product_id && costByProductId.has(r.product_id) ? currency.format(r.sale_amount - costByProductId.get(r.product_id)!) : "—"}
+        </td>
+      ),
+    },
+    commission_status: {
+      label: "Trạng thái hoa hồng",
+      td: (r) => (
+        <td className="px-4 py-3.5">
+          {r.commission_status ? (
+            <Badge variant={COMMISSION_STATUS_BADGE_VARIANT[r.commission_status]}>{COMMISSION_STATUS_LABEL[r.commission_status]}</Badge>
+          ) : (
+            <span className="text-sm text-muted-foreground">—</span>
+          )}
+        </td>
+      ),
+    },
+    entry_source: {
+      label: "Nguồn nhập",
+      td: (r) => (
+        <td className="px-4 py-3.5">
+          {r.entry_source ? (
+            <Badge variant={r.entry_source === "Historical Import" ? "muted" : "secondary"}>
+              {r.entry_source === "Historical Import" ? "Historical Import" : "Live Sale"}
+            </Badge>
+          ) : (
+            <span className="text-sm text-muted-foreground">—</span>
+          )}
+        </td>
+      ),
+    },
+    audit_info: {
+      label: "Thông tin ghi nhận",
+      td: (r) => (
+        <td className="px-4 py-3.5 text-xs text-muted-foreground whitespace-nowrap">
+          <div>Tạo: {r.created_by || "—"} · {formatDate(r.purchase_created_at)}</div>
+          <div>Sửa: {r.updated_by || "—"} · {r.updated_at ? formatDate(r.updated_at) : "—"}</div>
+        </td>
+      ),
+    },
+    duplicate: {
+      label: "Trùng lặp",
+      td: (r) => (
+        <td className="px-4 py-3.5">
+          {r.is_duplicate ? (
+            <Badge variant="warning">
+              <AlertTriangle className="w-3 h-3" />
+              Possible Duplicate
+            </Badge>
+          ) : (
+            <span className="text-sm text-muted-foreground">—</span>
+          )}
+        </td>
+      ),
+    },
+  };
+}
+
 export default function SalesLedgerTable({
   rows,
   isLoading = false,
@@ -51,13 +187,19 @@ export default function SalesLedgerTable({
   canViewCostAndProfit = false,
   costByProductId = new Map(),
   visibleColumns = DEFAULT_VISIBLE_SALES_LEDGER_COLUMNS,
+  columnKeys,
 }: Props) {
   const router = useRouter();
 
-  const availableKeys = new Set(
+  const availableKeys = new Set<string>(
     getAvailableSalesLedgerColumns({ canViewCostAndProfit, verificationMode, costByProductId }).map((c) => c.key)
   );
-  const show = (key: SalesLedgerColumnKey) => availableKeys.has(key) && visibleColumns.has(key);
+  const COLUMNS = buildColumns(costByProductId);
+  // Without `columnKeys` (legacy callers): registry order, filtered by the old visibility set.
+  const requested = columnKeys ?? SALES_LEDGER_COLUMNS.map((c) => c.key as string).filter((k) => visibleColumns.has(k as SalesLedgerColumnKey));
+  // A column renders only when it is available under the current permission / mode gates AND this table knows it - so a column the
+  // viewer may not see (cost_price / profit) is never drawn, whatever list a caller passes.
+  const keys = requested.filter((k): k is SalesLedgerColumnKey => availableKeys.has(k) && k in COLUMNS);
 
   if (isLoading) {
     return (
@@ -89,7 +231,8 @@ export default function SalesLedgerTable({
        * đơn" column is a hardcoded "—", not read from data), so there is
        * nothing to show and nothing to fabricate. Verification Mode's
        * admin-only columns (entry_source/audit_info/duplicate) are likewise
-       * left out - the existing Detail page doesn't surface them either. */}
+       * left out - the existing Detail page doesn't surface them either.
+       * The cards are NOT column-driven: the column preference never changes them. */}
       <div className="lg:hidden space-y-3">
         {rows.map((r) => (
           <Link
@@ -128,200 +271,31 @@ export default function SalesLedgerTable({
 
       <div className="hidden lg:block overflow-x-auto bg-card rounded-xl border border-border shadow-sm">
         <table data-testid="sales-ledger-table" className={`w-full ${verificationMode ? "min-w-[1560px]" : "min-w-[1200px]"}`}>
-        <thead>
-          <tr className="border-b border-border">
-            {show("sale_date") && (
-              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Ngày bán
-              </th>
-            )}
-            {show("order_number") && (
-              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Số đơn
-              </th>
-            )}
-            {show("product_code") && (
-              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Mã sản phẩm
-              </th>
-            )}
-            {show("product_name") && (
-              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Tên sản phẩm
-              </th>
-            )}
-            {show("customer") && (
-              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Khách hàng
-              </th>
-            )}
-            {show("salesperson") && (
-              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Nhân viên
-              </th>
-            )}
-            {show("sale_amount") && (
-              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Giá trị bán
-              </th>
-            )}
-            {show("commission_amount") && (
-              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Hoa hồng
-              </th>
-            )}
-            {show("cost_price") && (
-              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Giá vốn
-              </th>
-            )}
-            {show("profit") && (
-              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Lãi / Lỗ
-              </th>
-            )}
-            {show("commission_status") && (
-              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Trạng thái hoa hồng
-              </th>
-            )}
-            {show("entry_source") && (
-              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Nguồn nhập
-              </th>
-            )}
-            {show("audit_info") && (
-              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Thông tin ghi nhận
-              </th>
-            )}
-            {show("duplicate") && (
-              <th className="px-4 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Trùng lặp
-              </th>
-            )}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr
-              key={r.purchase_id}
-              onClick={() => router.push(`/reports/sales-ledger/${r.purchase_id}`)}
-              className={`border-b border-border last:border-0 hover:bg-muted/30 transition-colors cursor-pointer ${
-                verificationMode && r.is_duplicate ? "bg-amber-50" : ""
-              }`}
-            >
-              {show("sale_date") && (
-                <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
-                  {formatDate(r.sale_date)}
-                </td>
-              )}
-              {show("order_number") && (
-                // Order Number - customer_purchases has no linkage to Orders in
-                // this schema, so this column is always empty rather than
-                // fabricated.
-                <td className="px-4 py-3.5 text-sm text-muted-foreground">—</td>
-              )}
-              {show("product_code") && (
-                <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
-                  <EntityLink type="product" id={r.product_id}>{r.product_code || "—"}</EntityLink>
-                </td>
-              )}
-              {show("product_name") && (
-                <td className="px-4 py-3.5">
-                  <div className="flex items-center gap-2.5">
-                    {r.product_image_url ? (
-                      <img
-                        src={r.product_image_url}
-                        alt={r.product_name || ""}
-                        className="w-9 h-9 rounded-md object-cover border border-border shrink-0"
-                      />
-                    ) : (
-                      <div className="w-9 h-9 rounded-md border border-border bg-muted flex items-center justify-center shrink-0">
-                        <ImageOff className="w-4 h-4 text-muted-foreground" />
-                      </div>
-                    )}
-                    <div className="min-w-0 font-medium text-foreground truncate"><EntityLink type="product" id={r.product_id}>{r.product_name || "—"}</EntityLink></div>
-                  </div>
-                </td>
-              )}
-              {show("customer") && (
-                <td className="px-4 py-3.5">
-                  <div className="text-sm font-medium text-foreground"><EntityLink type="customer" id={r.customer_id}>{r.customer_name}</EntityLink></div>
-                  <div className="text-xs text-muted-foreground">{r.customer_code}</div>
-                </td>
-              )}
-              {show("salesperson") && (
-                <td className="px-4 py-3.5 text-sm text-muted-foreground">{r.salesperson || "—"}</td>
-              )}
-              {show("sale_amount") && (
-                <td className="px-4 py-3.5 text-sm text-foreground whitespace-nowrap">
-                  {currency.format(r.sale_amount)}
-                </td>
-              )}
-              {show("commission_amount") && (
-                <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
-                  {r.commission_amount !== null ? currency.format(r.commission_amount) : "—"}
-                </td>
-              )}
-              {show("cost_price") && (
-                <td className="px-4 py-3.5 text-sm text-muted-foreground whitespace-nowrap">
-                  {r.product_id && costByProductId.has(r.product_id)
-                    ? currency.format(costByProductId.get(r.product_id)!)
-                    : "—"}
-                </td>
-              )}
-              {show("profit") && (
-                <td className="px-4 py-3.5 text-sm text-foreground whitespace-nowrap">
-                  {r.product_id && costByProductId.has(r.product_id)
-                    ? currency.format(r.sale_amount - costByProductId.get(r.product_id)!)
-                    : "—"}
-                </td>
-              )}
-              {show("commission_status") && (
-                <td className="px-4 py-3.5">
-                  {r.commission_status ? (
-                    <Badge variant={COMMISSION_STATUS_BADGE_VARIANT[r.commission_status]}>
-                      {COMMISSION_STATUS_LABEL[r.commission_status]}
-                    </Badge>
-                  ) : (
-                    <span className="text-sm text-muted-foreground">—</span>
-                  )}
-                </td>
-              )}
-              {show("entry_source") && (
-                <td className="px-4 py-3.5">
-                  {r.entry_source ? (
-                    <Badge variant={r.entry_source === "Historical Import" ? "muted" : "secondary"}>
-                      {r.entry_source === "Historical Import" ? "Historical Import" : "Live Sale"}
-                    </Badge>
-                  ) : (
-                    <span className="text-sm text-muted-foreground">—</span>
-                  )}
-                </td>
-              )}
-              {show("audit_info") && (
-                <td className="px-4 py-3.5 text-xs text-muted-foreground whitespace-nowrap">
-                  <div>Tạo: {r.created_by || "—"} · {formatDate(r.purchase_created_at)}</div>
-                  <div>Sửa: {r.updated_by || "—"} · {r.updated_at ? formatDate(r.updated_at) : "—"}</div>
-                </td>
-              )}
-              {show("duplicate") && (
-                <td className="px-4 py-3.5">
-                  {r.is_duplicate ? (
-                    <Badge variant="warning">
-                      <AlertTriangle className="w-3 h-3" />
-                      Possible Duplicate
-                    </Badge>
-                  ) : (
-                    <span className="text-sm text-muted-foreground">—</span>
-                  )}
-                </td>
-              )}
+          <thead>
+            <tr className="border-b border-border">
+              {keys.map((k) => (
+                <th key={k} data-column-key={k} className={TH}>
+                  {COLUMNS[k].label}
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr
+                key={r.purchase_id}
+                onClick={() => router.push(`/reports/sales-ledger/${r.purchase_id}`)}
+                className={`border-b border-border last:border-0 hover:bg-muted/30 transition-colors cursor-pointer ${
+                  verificationMode && r.is_duplicate ? "bg-amber-50" : ""
+                }`}
+              >
+                {keys.map((k) => (
+                  <Fragment key={k}>{COLUMNS[k].td(r)}</Fragment>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </>
   );

@@ -13,6 +13,7 @@ import { getVerificationDashboard } from "@/lib/verification/verification.servic
 import { VERIFICATION_EXPORT_COLUMNS } from "@/lib/verification/verificationExport";
 import { exportRowsToExcel, downloadBlob } from "@/lib/reports/reportsBIExport";
 import { useGlobalDateFilter } from "@/lib/hooks/useGlobalDateFilter";
+import { useReportColumns } from "@/lib/reportColumns/useReportColumns";
 import GlobalDateFilter from "@/components/shared/GlobalDateFilter";
 import PageViewingLabel from "@/components/shared/PageViewingLabel";
 import StatCard from "@/components/ui/StatCard";
@@ -20,6 +21,7 @@ import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import SalesLedgerFilters from "@/components/salesLedger/SalesLedgerFilters";
 import SalesLedgerTable from "@/components/salesLedger/SalesLedgerTable";
+import ColumnManager from "@/components/shared/ColumnManager";
 import SalesLedgerPagination from "@/components/salesLedger/SalesLedgerPagination";
 import VerificationFilters from "@/components/verification/VerificationFilters";
 import ProgressBar from "@/components/verification/ProgressBar";
@@ -39,6 +41,12 @@ const DEFAULT_FILTERS: Filters = {
 
 export default function DataVerificationPage() {
   const { range, ready } = useGlobalDateFilter();
+
+  // Phase 1.6 Wave B1.3: shared column management (B0) for the transaction table only, persisted per (staff, "data_verification").
+  // Presentation only - it is never part of the data request, and it does NOT touch the Excel export, which stays the fixed
+  // VERIFICATION_EXPORT_COLUMNS list (locked Product Owner decision).
+  const columnPreference = useReportColumns("data_verification", {});
+  const columnKeys = columnPreference.columns.map((c) => c.key);
 
   const [dashboard, setDashboard] = useState<VerificationDashboardData | null>(null);
   const [localFilters, setLocalFilters] = useState<Filters>(DEFAULT_FILTERS);
@@ -216,16 +224,22 @@ export default function DataVerificationPage() {
             <ShieldCheck className="w-5 h-5 text-primary" />
             Giao dịch cần xác minh
           </h2>
-          <Button variant="secondary" size="md" onClick={handleExport} disabled={isExporting || rows.length === 0}>
-            <Download className="w-4 h-4" />
-            {isExporting ? "Đang xuất..." : "Xuất Excel"}
-          </Button>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* shown only where the desktop table is (the mobile card list is not column-driven and stays as is) */}
+            <div className="hidden lg:block">
+              <ColumnManager columns={columnPreference} testId="data-verification-columns-button" />
+            </div>
+            <Button data-testid="data-verification-export-button" variant="secondary" size="md" onClick={handleExport} disabled={isExporting || rows.length === 0}>
+              <Download className="w-4 h-4" />
+              {isExporting ? "Đang xuất..." : "Xuất Excel"}
+            </Button>
+          </div>
         </div>
 
         <SalesLedgerFilters filters={localFilters} onChange={setLocalFilters} />
         <VerificationFilters filters={localFilters} onChange={setLocalFilters} />
 
-        <SalesLedgerTable rows={rows} isLoading={isLoading} verificationMode />
+        <SalesLedgerTable rows={rows} isLoading={isLoading} verificationMode columnKeys={columnKeys} />
 
         <SalesLedgerPagination
           page={localFilters.page}
