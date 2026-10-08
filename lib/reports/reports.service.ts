@@ -255,6 +255,27 @@ const isRevenueRecognized = isPurchaseRecognized;
  * Scope call itself (applyDataScopeWithFallback, "revenue" resource,
  * salesperson_id/salesperson fields) changed - only how "current staff" is
  * identified. */
+/** Dashboard Wave A: the ONE place a purchase row's product cost is looked up. Σ over the RECOGNIZED rows of
+ * `costByProductId.get(product_id) ?? 0` is Total Cost (a product with no cost_price counts 0 - never guessed), which is
+ * what getPurchaseReportData has always done; the Dashboard analytics layer uses this same function so the trend's gross
+ * profit can never disagree with the KPI. Chunked AND paged (Phase 1.2). */
+export async function loadCostByProductId(
+  client: SupabaseClient,
+  rows: { product_id: string | null }[]
+): Promise<Map<string, number>> {
+  const productIds = Array.from(new Set(rows.map((r) => r.product_id).filter((id): id is string => !!id)));
+  const costByProductId = new Map<string, number>();
+  if (productIds.length > 0) {
+    // Phase 1.2: chunked AND paged (was one unbounded .in() over every
+    // distinct product id, which both overruns the URL and can exceed max-rows).
+    const productRows = await selectIn<{ id: string; cost_price: number | null }>(client, "products", "id, cost_price", "id", productIds);
+    for (const p of productRows) {
+      if (typeof p.cost_price === "number") costByProductId.set(p.id, p.cost_price);
+    }
+  }
+  return costByProductId;
+}
+
 export async function getPurchaseReportData(
   range: DateRange | null,
   client: SupabaseClient = supabase,
@@ -285,16 +306,7 @@ export async function getPurchaseReportData(
   // table (Reports reads Supabase tables directly by design - see this
   // file's header comment - so this isn't a new cross-module dependency),
   // scoped to just the id/cost_price columns actually needed.
-  const productIds = Array.from(new Set(rows.map((r) => r.product_id).filter((id): id is string => !!id)));
-  const costByProductId = new Map<string, number>();
-  if (productIds.length > 0) {
-    // Phase 1.2: chunked AND paged (was one unbounded .in() over every
-    // distinct product id, which both overruns the URL and can exceed max-rows).
-    const productRows = await selectIn<{ id: string; cost_price: number | null }>(client, "products", "id, cost_price", "id", productIds);
-    for (const p of productRows) {
-      if (typeof p.cost_price === "number") costByProductId.set(p.id, p.cost_price);
-    }
-  }
+  const costByProductId = await loadCostByProductId(client, rows);
 
   const sourceMap = new Map<string, { count: number; revenue: number }>();
   const salespersonMap = new Map<string, { count: number; revenue: number }>();

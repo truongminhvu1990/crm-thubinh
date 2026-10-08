@@ -96,7 +96,7 @@ const EMPTY_SUMMARY: OrderValueSummary = {
 /** One scoped, non-Lost order as the canonical loader returns it. Only
  * order_status / payment_status / total_amount feed any figure; the rest
  * identifies the order in the drill-down views. */
-interface OrderValueRow {
+export interface OrderValueRow {
   id?: string;
   order_number?: string;
   order_date?: string;
@@ -118,7 +118,7 @@ interface OrderValueRow {
  * a range holding more orders than PostgREST's max-rows cap (default 1000) is
  * still summed COMPLETELY instead of being silently truncated. Filters, data
  * scope and date basis are exactly what they were. */
-async function loadOrderValueOrders(
+export async function loadOrderValueOrders(
   range: DateRange | null,
   staff: ScopingStaff | null | undefined,
   client: SupabaseClient

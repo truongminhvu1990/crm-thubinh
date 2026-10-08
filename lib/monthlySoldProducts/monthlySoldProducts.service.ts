@@ -30,7 +30,7 @@ import { getSoldDataset, summarizeSoldLines, SoldOrderRow, SoldTotals } from "./
  * Context); an explicit `Staff | null` means "use this value, already
  * resolved" - what app/api/reports/monthly-sold-products/route.ts passes,
  * using the Server Authentication Context. */
-async function canViewCostAndProfit(staff?: Staff | null, client?: SupabaseClient): Promise<boolean> {
+export async function canViewCostAndProfit(staff?: Staff | null, client?: SupabaseClient): Promise<boolean> {
   const resolvedStaff = staff === undefined ? await getCurrentStaff() : staff;
   if (!resolvedStaff) return false;
   const role = await resolveRoleForStaff(resolvedStaff, client);

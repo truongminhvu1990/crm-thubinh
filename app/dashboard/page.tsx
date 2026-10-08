@@ -23,10 +23,12 @@ import FollowUpSummaryCard from "@/components/dashboard/FollowUpSummaryCard";
 import CommissionSummaryCard from "@/components/dashboard/CommissionSummaryCard";
 import TopSalesStaffCard from "@/components/dashboard/TopSalesStaffCard";
 import UnrecognizedOrderValueBreakdown from "@/components/dashboard/UnrecognizedOrderValueBreakdown";
+import PeriodComparison from "@/components/dashboard/PeriodComparison";
+import SalesTrendChart from "@/components/dashboard/SalesTrendChart";
 import ScopeIndicator from "@/components/shared/ScopeIndicator";
 
 export default function Dashboard() {
-  const { range, label, ready } = useGlobalDateFilter();
+  const { option, range, label, ready } = useGlobalDateFilter();
   // Phase 1.5A: the period a response belongs to. Period-dependent regions show a skeleton until the response for the
   // CURRENT period has arrived - never the previous period's numbers - and nothing is requested before the stored
   // period has been read (no wasted default-period calls on open).
@@ -357,6 +359,11 @@ export default function Dashboard() {
           />
         </div>
       )}
+
+      {/* Dashboard biểu đồ Wave A: F2 period comparison (+ F1 counts/average) and F3 canonical Sales Trend. Each region loads and
+          shows its own skeleton; both read only /api/reports/analytics/* and never reload inventory. */}
+      <PeriodComparison option={option} range={range} ready={ready} />
+      <SalesTrendChart range={range} ready={ready} canViewCostAndProfit={canViewCostAndProfit} />
 
       {/* Giá trị đơn chưa ghi nhận - drill-down (Revenue Management
           Visibility, 2026-08-29). Same visibility as the cards above (no
