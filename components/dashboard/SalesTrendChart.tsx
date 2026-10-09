@@ -60,22 +60,28 @@ export default function SalesTrendChart({ range, ready, canViewCostAndProfit }: 
 
   return (
     <section className="mb-6 rounded-xl border border-border bg-card p-4 shadow-sm" data-testid="dashboard-sales-trend" aria-label="Xu hướng bán hàng">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-lg font-semibold text-foreground">Xu hướng bán hàng</h2>
-        <div className="flex flex-wrap gap-2">
-          <label className="sr-only" htmlFor="trend-metric">Chỉ số</label>
-          <select
-            id="trend-metric"
-            data-testid="trend-metric"
-            value={activeMetric}
-            onChange={(e) => setMetric(e.target.value as TrendMetric)}
-            className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-          >
+      <h2 className="text-lg font-semibold text-foreground">Xu hướng bán hàng</h2>
+      <div className="mt-3 flex flex-col gap-3">
+        <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+          <span id="trend-metric-caption" className="text-sm font-medium text-muted-foreground sm:w-24">Chỉ số</span>
+          <div role="group" aria-labelledby="trend-metric-caption" className="flex flex-wrap gap-2" data-testid="trend-metric">
             {METRIC_OPTIONS.filter((m) => !m.costOnly || canViewCostAndProfit).map((m) => (
-              <option key={m.value} value={m.value}>{m.label}</option>
+              <button
+                key={m.value}
+                type="button"
+                aria-pressed={m.value === activeMetric}
+                data-testid={`trend-metric-${m.value}`}
+                onClick={() => setMetric(m.value)}
+                className={`rounded-md border px-3 py-1.5 text-sm ${m.value === activeMetric ? "border-primary bg-primary font-semibold text-primary-foreground" : "border-border bg-background text-foreground hover:bg-muted"}`}
+              >
+                {m.label}
+              </button>
             ))}
-          </select>
-          <div role="group" aria-label="Độ chi tiết" className="flex overflow-hidden rounded-md border border-border" data-testid="trend-granularity">
+          </div>
+        </div>
+        <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+          <span id="trend-granularity-caption" className="text-sm font-medium text-muted-foreground sm:w-24">Độ chi tiết</span>
+          <div role="group" aria-labelledby="trend-granularity-caption" className="flex w-fit max-w-full overflow-hidden rounded-md border border-border" data-testid="trend-granularity">
             {TREND_GRANULARITIES.map((g) => (
               <button
                 key={g}
@@ -83,7 +89,7 @@ export default function SalesTrendChart({ range, ready, canViewCostAndProfit }: 
                 aria-pressed={g === granularity}
                 data-testid={`trend-granularity-${g}`}
                 onClick={() => setPick({ key: rangeKey, g })}
-                className={`px-2.5 py-1.5 text-sm ${g === granularity ? "bg-primary text-primary-foreground" : "bg-background text-foreground"}`}
+                className={`px-2.5 py-1.5 text-sm ${g === granularity ? "bg-primary font-semibold text-primary-foreground" : "bg-background text-foreground"}`}
               >
                 {GRANULARITY_LABEL[g]}
               </button>
