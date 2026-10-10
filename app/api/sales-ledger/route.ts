@@ -4,6 +4,7 @@ import { EntrySource, SalesLedgerFilters, SalesLedgerSortField, SortDirection } 
 import { CommissionStatus } from "@/types/commission";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentStaffFromRequest, requirePermission } from "@/lib/permission/serverAuth";
+import { parseSalesLedgerDrilldownParams } from "@/lib/salesLedger/drilldownParams";
 
 /** Backend API Foundation (Package 4C, Wave 3) - Sales Ledger's server-side
  * read endpoint. Reuses getSalesLedgerPage()/getSalesLedgerSummary()
@@ -47,6 +48,11 @@ export async function GET(request: NextRequest) {
     sortDirection: (searchParams.get("sortDirection") as SortDirection | null) ?? "desc",
     page: Number(searchParams.get("page") ?? "1"),
   };
+
+  // Dashboard Wave B drill-down filters (whitelisted, additive: absent = no effect). A malformed value is rejected, never ignored.
+  const drilldown = parseSalesLedgerDrilldownParams(searchParams);
+  if ("error" in drilldown) return NextResponse.json({ error: drilldown.error }, { status: 400 });
+  Object.assign(filters, drilldown.filters);
 
   const client = await createClient();
   const staff = await getCurrentStaffFromRequest(request);

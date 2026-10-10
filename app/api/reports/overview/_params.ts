@@ -51,8 +51,12 @@ export function parseOrdersView(searchParams: URLSearchParams): { view: "orders"
 /** Optional inventory narrowing - the same three fields /inventory filters
  * by, minus the ones that are not part of the held/remaining definition. */
 export function parseInventoryFilters(searchParams: URLSearchParams): InventoryFilters {
+  // Wave B drill-down: `uncategorized=1` (or `true`) selects the products with no category and takes precedence over `category`. Only
+  // those two literal values switch it on; anything else is ignored, so the parameter can never carry a field name or an operator.
+  const uncategorized = searchParams.get("uncategorized") === "1" || searchParams.get("uncategorized") === "true";
   return {
-    category: searchParams.get("category") || undefined,
+    category: uncategorized ? undefined : searchParams.get("category") || undefined,
+    uncategorized: uncategorized || undefined,
     salesperson: searchParams.get("salesperson") || undefined,
     batchId: searchParams.get("batchId") || undefined,
   };

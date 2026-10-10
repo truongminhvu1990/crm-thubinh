@@ -70,6 +70,16 @@ export interface SalesLedgerFilters {
   productCategory?: string;
   minAmount?: number;
   maxAmount?: number;
+  /** Dashboard Wave B drill-down filters (additive; undefined = no effect, so every existing caller is unchanged). All four are set only
+   * from the Dashboard chart links and are validated server-side (see lib/salesLedger/drilldownParams.ts). */
+  /** Exact products.id (a product is not matched by a code substring). */
+  productId?: string;
+  /** Only purchases whose product has no category (null / blank) - the "Chưa phân loại" group. */
+  uncategorized?: boolean;
+  /** sale_amount strictly below this value (upper-EXCLUSIVE bound; the existing maxAmount is inclusive). Pairs with minAmount (inclusive). */
+  maxAmountExclusive?: number;
+  /** Only rows whose is_revenue_recognized is true (BR-001 / BR-002) - the population the Dashboard rankings are made of. */
+  recognizedOnly?: boolean;
   commissionStatus?: CommissionStatus;
   /** Sprint v2.3.0 (Data Verification Center), Feature 7 - only ever set
    * from Verification Mode's own filter panel; Normal Mode never sets
