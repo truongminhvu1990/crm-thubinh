@@ -26,6 +26,7 @@ import ColumnManager from "@/components/shared/ColumnManager";
 import { buildSalesLedgerExportColumns, exportNeedsCost } from "@/components/salesLedger/exportColumns";
 import SalesLedgerPagination from "@/components/salesLedger/SalesLedgerPagination";
 import VerificationFilters from "@/components/verification/VerificationFilters";
+import { parseSalesLedgerDrilldownParams } from "@/lib/salesLedger/drilldownParams";
 
 const DEFAULT_FILTERS: Filters = {
   sortField: "sale_date",
@@ -47,6 +48,11 @@ function buildSalesLedgerQuery(filters: Filters): string {
   if (filters.productCategory) params.set("productCategory", filters.productCategory);
   if (filters.minAmount !== undefined) params.set("minAmount", String(filters.minAmount));
   if (filters.maxAmount !== undefined) params.set("maxAmount", String(filters.maxAmount));
+  // Dashboard Wave B drill-down filters (additive; unset = nothing is sent, so the request is byte-for-byte what it was)
+  if (filters.productId) params.set("productId", filters.productId);
+  if (filters.uncategorized) params.set("uncategorized", "1");
+  if (filters.maxAmountExclusive !== undefined) params.set("maxAmountExclusive", String(filters.maxAmountExclusive));
+  if (filters.recognizedOnly) params.set("recognizedOnly", "1");
   if (filters.commissionStatus) params.set("commissionStatus", filters.commissionStatus);
   if (filters.entrySource) params.set("entrySource", filters.entrySource);
   if (filters.createdBy) params.set("createdBy", filters.createdBy);
@@ -91,13 +97,22 @@ function SalesLedgerPageInner() {
     const productCode = searchParams.get("productCode");
     const productCategory = searchParams.get("productCategory");
     const salespersonId = searchParams.get("salespersonId");
-    if (!customer && !productCode && !productCategory && !salespersonId) return DEFAULT_FILTERS;
+    // Dashboard Wave B: exact product / uncategorized / price-band / recognized-only filters (whitelisted; an invalid value is dropped here
+    // and rejected by the API). minAmount is the price band lower bound (inclusive) and reuses the existing amount filter.
+    const wave = parseSalesLedgerDrilldownParams(searchParams);
+    const waveFilters = "filters" in wave ? wave.filters : {};
+    const minRaw = searchParams.get("minAmount");
+    const minAmount = minRaw !== null && minRaw.trim() !== "" && Number.isFinite(Number(minRaw)) && Number(minRaw) >= 0 ? Number(minRaw) : undefined;
+    const hasWave = Object.keys(waveFilters).length > 0 || minAmount !== undefined;
+    if (!customer && !productCode && !productCategory && !salespersonId && !hasWave) return DEFAULT_FILTERS;
     return {
       ...DEFAULT_FILTERS,
       customer: customer || undefined,
       productCode: productCode || undefined,
       productCategory: productCategory || undefined,
       salespersonId: salespersonId || undefined,
+      minAmount,
+      ...waveFilters,
     };
   });
   const [rows, setRows] = useState<SalesLedgerRow[]>([]);
@@ -294,6 +309,28 @@ function SalesLedgerPageInner() {
           </Button>
         </div>
       </div>
+
+      {(localFilters.productId || localFilters.uncategorized || localFilters.maxAmountExclusive !== undefined || localFilters.recognizedOnly) && (
+        <p className="mb-3 flex flex-wrap items-center gap-2 text-sm text-foreground" data-testid="sales-ledger-dashboard-filter">
+          <span className="font-medium">Bộ lọc từ Dashboard:</span>
+          {localFilters.productId && <span className="rounded-md bg-muted px-2 py-0.5">Sản phẩm: {rows[0]?.product_code ?? "đã chọn"}</span>}
+          {localFilters.uncategorized && <span className="rounded-md bg-muted px-2 py-0.5">Loại sản phẩm: Chưa phân loại</span>}
+          {localFilters.maxAmountExclusive !== undefined && (
+            <span className="rounded-md bg-muted px-2 py-0.5">
+              Giá: {localFilters.minAmount !== undefined ? `từ ${localFilters.minAmount.toLocaleString("vi-VN")} ` : ""}đến dưới {localFilters.maxAmountExclusive.toLocaleString("vi-VN")}
+            </span>
+          )}
+          {localFilters.recognizedOnly && <span className="rounded-md bg-muted px-2 py-0.5">Chỉ doanh thu đã ghi nhận</span>}
+          <button
+            type="button"
+            className="text-xs text-primary underline underline-offset-2"
+            data-testid="sales-ledger-dashboard-filter-clear"
+            onClick={() => setLocalFilters({ ...localFilters, productId: undefined, uncategorized: undefined, maxAmountExclusive: undefined, recognizedOnly: undefined, page: 1 })}
+          >
+            Bỏ lọc từ Dashboard
+          </button>
+        </p>
+      )}
 
       <SalesLedgerSummary summary={summary} />
 

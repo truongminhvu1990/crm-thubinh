@@ -57,6 +57,12 @@ function InventoryReport() {
   const access = usePermission("reports.view");
   const canView = access === "allowed";
   const view = parseInventoryView(search.get("view"));
+  // Dashboard Wave B drill-down: `category=<exact products.category>` or `uncategorized=1` narrows the detail to one category. The values go to
+  // the API as plain query parameters (it whitelists them); this page never builds a filter expression from them.
+  const uncategorized = search.get("uncategorized") === "1" || search.get("uncategorized") === "true";
+  const categoryParam = uncategorized ? null : search.get("category") || null;
+  const filtered = uncategorized || categoryParam !== null;
+  const filterLabel = uncategorized ? "Chưa phân loại" : categoryParam;
 
   const setView = useCallback(
     (next: InventoryView) => {
@@ -68,9 +74,19 @@ function InventoryReport() {
   );
 
   const overviewState = useCanonicalFetch<{ overview: OverviewMetrics }>(canView ? "/api/dashboard/overview" : null);
+  const detailParams = new URLSearchParams();
+  if (uncategorized) detailParams.set("uncategorized", "1");
+  else if (categoryParam) detailParams.set("category", categoryParam);
+  const detailQuery = detailParams.toString();
   const detailState = useCanonicalFetch<InventoryDetailResponse<InventoryProductDetailRow | HeldInventoryRow>>(
-    canView ? `/api/reports/overview/${view === "held" ? "held-inventory" : "remaining-inventory"}` : null
+    canView ? `/api/reports/overview/${view === "held" ? "held-inventory" : "remaining-inventory"}${detailQuery ? `?${detailQuery}` : ""}` : null
   );
+  const clearFilter = useCallback(() => {
+    const p = new URLSearchParams(search.toString());
+    p.delete("category");
+    p.delete("uncategorized");
+    router.replace(`${pathname}?${p.toString()}`, { scroll: false });
+  }, [pathname, router, search]);
 
   const o = overviewState.data?.overview ?? null;
   const bucket = o ? (view === "held" ? o.held : o.remaining) : null;
@@ -146,12 +162,24 @@ function InventoryReport() {
           />
         </div>
 
+        {filtered && (
+          <p className="flex flex-wrap items-center gap-2 text-sm text-foreground" data-testid="inventory-category-filter">
+            <span className="font-medium">Đang lọc theo loại sản phẩm:</span>
+            <span className="rounded-md bg-muted px-2 py-0.5">{filterLabel}</span>
+            {detail && <span className="text-muted-foreground">{detail.count} sản phẩm · {currency.format(detail.total)}</span>}
+            <button type="button" className="text-xs text-primary underline underline-offset-2" onClick={clearFilter} data-testid="inventory-category-filter-clear">
+              Bỏ lọc
+            </button>
+          </p>
+        )}
+
         {detailState.error && <p className="text-sm text-destructive" role="alert">{detailState.error}</p>}
         {overviewState.error && <p className="text-sm text-destructive" role="alert">{overviewState.error}</p>}
 
         {detail && (
           <div className="space-y-1 text-sm" data-testid="inventory-reconcile">
-            <ReconcileLine view={status} detailTotal={detail.total} overviewTotal={bucket ? bucket.value : null} countLabel={`${detail.count} sản phẩm`} />
+            {/* the overview total is the whole inventory; a category-filtered detail is a part of it, so it is not compared with it */}
+            {!filtered && <ReconcileLine view={status} detailTotal={detail.total} overviewTotal={bucket ? bucket.value : null} countLabel={`${detail.count} sản phẩm`} />}
             {detail.summary.missingPriceCount > 0 && (
               <p className="text-amber-700" data-testid="inventory-missing-price">
                 {detail.summary.missingPriceCount} sản phẩm chưa có giá bán: vẫn được đếm, nhưng không được tính vào giá trị.

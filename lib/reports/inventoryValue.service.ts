@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { deriveOrderPaymentSummary } from "@/lib/reports/orderPaymentSummary";
 import { isSoldOrder } from "@/lib/reports/revenueDefinition";
 import { fetchAllRows, selectIn } from "@/lib/reports/selectIn";
+import { categoryOf, UNCATEGORIZED_LABEL } from "@/lib/reports/analytics/composition";
 
 // Phase 1 - Reporting Foundation: the canonical HELD / REMAINING inventory
 // data (Overview metrics "Hàng đang giữ" / "Hàng còn lại").
@@ -37,6 +38,9 @@ const OPEN_ORDER_STATUSES = ["Draft", "Reserved"];
 
 export interface InventoryFilters {
   category?: string;
+  /** Wave B drill-down: only products with NO category (null / blank) - the "Chưa phân loại" group. Exact, in memory, so it matches the
+   * Dashboard's own grouping rule (categoryOf) rather than a database approximation of it. */
+  uncategorized?: boolean;
   /** products.salesperson (the owner shown on /inventory). */
   salesperson?: string;
   batchId?: string;
@@ -104,7 +108,59 @@ async function loadInventoryProducts(client: SupabaseClient, filters: InventoryF
     if (error) console.error("Error fetching inventory products for reporting:", error);
     return null;
   }
-  return data;
+  return filters.uncategorized ? data.filter((r) => categoryOf(r.category) === null) : data;
+}
+
+// ---- Wave B (F9): current inventory by category --------------------------------------------------------------------------------
+// The SAME rows loadInventoryProducts feeds the Held / Remaining cards, grouped by products.category. Because the grouping is a
+// partition of those rows, Σ category held/remaining (count AND value) equals getInventoryValueSummary exactly. Quantity is a count of
+// product records by current status - never the legacy available / reserved / sold counter columns. Value is products.sale_price. No
+// date range, no cost, no profit.
+
+export interface InventoryCategoryRow {
+  /** The raw products.category, or null for "Chưa phân loại". Drill-downs filter on exactly this. */
+  category: string | null;
+  label: string;
+  held: InventoryBucket;
+  remaining: InventoryBucket;
+}
+
+export interface InventoryBreakdown extends InventoryValueSummary {
+  categories: InventoryCategoryRow[];
+}
+
+/** Pure. */
+export function summarizeInventoryByCategory(rows: InventoryProductRow[]): InventoryBreakdown {
+  const groups = new Map<string, { category: string | null; rows: InventoryProductRow[] }>();
+  for (const r of rows) {
+    const category = categoryOf(r.category);
+    const key = category ?? "";
+    const g = groups.get(key);
+    if (g) g.rows.push(r);
+    else groups.set(key, { category, rows: [r] });
+  }
+  const categories = [...groups.values()]
+    .map((g): InventoryCategoryRow => {
+      const s = summarizeInventoryRows(g.rows);
+      return { category: g.category, label: g.category ?? UNCATEGORIZED_LABEL, held: s.held, remaining: s.remaining };
+    })
+    // Largest total value first, then more products, then name: deterministic.
+    .sort((a, b) => {
+      const av = a.held.value + a.remaining.value;
+      const bv = b.held.value + b.remaining.value;
+      if (av !== bv) return bv - av;
+      const ac = a.held.count + a.remaining.count;
+      const bc = b.held.count + b.remaining.count;
+      if (ac !== bc) return bc - ac;
+      return a.label.localeCompare(b.label, "vi");
+    });
+  return { ...summarizeInventoryRows(rows), categories };
+}
+
+/** null when the read failed - the caller must report an error, never an empty chart. */
+export async function getInventoryBreakdown(client: SupabaseClient = supabase, filters: InventoryFilters = {}): Promise<InventoryBreakdown | null> {
+  const rows = await loadInventoryProducts(client, filters);
+  return rows ? summarizeInventoryByCategory(rows) : null;
 }
 
 /** Lean canonical figures for the Overview ("Hàng đang giữ" / "Hàng còn lại"). */

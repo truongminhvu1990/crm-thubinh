@@ -88,6 +88,14 @@ async function applyFilters(
   if (filters.minAmount !== undefined) query = query.gte("sale_amount", filters.minAmount);
   if (filters.maxAmount !== undefined) query = query.lte("sale_amount", filters.maxAmount);
 
+  // Dashboard Wave B drill-down filters (additive; each is a no-op when unset). Applied here, in the one shared helper, so the page, the
+  // summary cards and the export can never disagree about which rows a Dashboard chart click selected.
+  if (filters.productId) query = query.eq("product_id", filters.productId);
+  // "no category" = null, empty or whitespace-only - the same rule as the Dashboard grouping (categoryOf), so the click and the bar agree.
+  if (filters.uncategorized) query = query.or("product_category.is.null,product_category.match.^[[:space:]]*$");
+  if (filters.maxAmountExclusive !== undefined) query = query.lt("sale_amount", filters.maxAmountExclusive);
+  if (filters.recognizedOnly) query = query.eq("is_revenue_recognized", true);
+
   if (filters.commissionStatus) query = query.eq("commission_status", filters.commissionStatus);
 
   // Sprint v2.3.0 (Data Verification Center), Feature 7 - only ever set by

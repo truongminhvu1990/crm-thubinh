@@ -25,6 +25,8 @@ import TopSalesStaffCard from "@/components/dashboard/TopSalesStaffCard";
 import UnrecognizedOrderValueBreakdown from "@/components/dashboard/UnrecognizedOrderValueBreakdown";
 import PeriodComparison from "@/components/dashboard/PeriodComparison";
 import SalesTrendChart from "@/components/dashboard/SalesTrendChart";
+import SalesCompositionCharts from "@/components/dashboard/SalesCompositionCharts";
+import InventoryAnalytics from "@/components/dashboard/InventoryAnalytics";
 import ScopeIndicator from "@/components/shared/ScopeIndicator";
 
 export default function Dashboard() {
@@ -364,6 +366,10 @@ export default function Dashboard() {
           shows its own skeleton; both read only /api/reports/analytics/* and never reload inventory. */}
       <PeriodComparison option={option} range={range} ready={ready} />
       <SalesTrendChart range={range} ready={ready} canViewCostAndProfit={canViewCostAndProfit} />
+      {/* Dashboard biểu đồ Wave B: F4 Top sản phẩm, F5 Top loại sản phẩm, F8 Nhóm giá (one canonical request, by sale date) and F9 Tồn kho hiện tại
+          (current inventory: no date). Neither reads cost or profit. */}
+      <SalesCompositionCharts range={range} ready={ready} />
+      <InventoryAnalytics />
 
       {/* Giá trị đơn chưa ghi nhận - drill-down (Revenue Management
           Visibility, 2026-08-29). Same visibility as the cards above (no
