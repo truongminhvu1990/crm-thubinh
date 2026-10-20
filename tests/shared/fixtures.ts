@@ -1,9 +1,13 @@
 import { test as base, expect } from "@playwright/test";
 import {
-  watchConsoleErrors,
+  watchConsoleErrorEvents,
   watchNetworkErrors,
+  partitionDiagnostics,
+  createExpectedDiagnosticsRegistry,
   expectNoConsoleErrors,
   expectNoNetwork500,
+  expectDeclaredDiagnosticsOccurred,
+  type ExpectedDiagnosticsRegistry,
 } from "./utils/diagnostics";
 
 /**
@@ -13,18 +17,39 @@ import {
  * them into every test automatically - `page` is being watched before the
  * test body runs, and asserted right after it finishes.
  *
+ * A test that deliberately provokes a failure may declare it through the
+ * `expectedDiagnostics` fixture (see diagnostics.ts). Nothing is exempt by
+ * default; undeclared errors still fail, and so does a declaration that
+ * never occurred.
+ *
  * Spec files import `test`/`expect` from here instead of "@playwright/test".
  */
-export const test = base.extend<{ autoDiagnostics: void }>({
+export const test = base.extend<{
+  autoDiagnostics: void;
+  expectedDiagnostics: ExpectedDiagnosticsRegistry;
+}>({
+  expectedDiagnostics: [
+    async ({}, use) => {
+      await use(createExpectedDiagnosticsRegistry());
+    },
+    { scope: "test" },
+  ],
+
   autoDiagnostics: [
-    async ({ page }, use) => {
-      const consoleErrors = watchConsoleErrors(page);
+    async ({ page, expectedDiagnostics }, use) => {
+      const consoleErrors = watchConsoleErrorEvents(page);
       const networkFailures = watchNetworkErrors(page);
 
       await use();
 
-      expectNoConsoleErrors(consoleErrors);
-      expectNoNetwork500(networkFailures);
+      const { unexpectedConsole, unexpectedNetwork, missing } = partitionDiagnostics(
+        consoleErrors,
+        networkFailures,
+        expectedDiagnostics.declared
+      );
+      expectNoConsoleErrors(unexpectedConsole);
+      expectNoNetwork500(unexpectedNetwork);
+      expectDeclaredDiagnosticsOccurred(missing);
     },
     { auto: true },
   ],

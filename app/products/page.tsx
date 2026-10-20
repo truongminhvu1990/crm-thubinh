@@ -31,7 +31,11 @@ export default function ProductsPage() {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [sourceFilter, setSourceFilter] = useState("ALL");
   const [salespersonFilter, setSalespersonFilter] = useState("ALL");
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  // Set when a save/delete succeeded but the list refresh after it failed, so the banner can say the write went through.
+  const [writeNotice, setWriteNotice] = useState<"save" | "delete" | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [currentProduct, setCurrentProduct] = useState<Partial<Product>>(EMPTY_PRODUCT);
@@ -51,13 +55,27 @@ export default function ProductsPage() {
     sourceFilter !== "ALL" ||
     salespersonFilter !== "ALL";
 
-  async function loadProducts() {
+  /** Resolves true when the list was refreshed, false when the request failed (it never rejects). */
+  async function loadProducts(): Promise<boolean> {
     setIsLoading(true);
-    const res = await fetch("/api/products");
-    const data: Product[] = res.ok ? await res.json() : [];
-    setProducts(data);
-    filterProducts(data, searchTerm, categoryFilter, statusFilter, sourceFilter, salespersonFilter);
-    setIsLoading(false);
+    setLoadError(false);
+    try {
+      const res = await fetch("/api/products");
+      if (!res.ok) throw new Error(`Failed to load products: HTTP ${res.status}`);
+      const data: Product[] = await res.json();
+      setProducts(data);
+      filterProducts(data, searchTerm, categoryFilter, statusFilter, sourceFilter, salespersonFilter);
+      setHasLoaded(true);
+      setLoadError(false);
+      setWriteNotice(null);
+      return true;
+    } catch (error) {
+      console.error(error);
+      setLoadError(true);
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   function filterProducts(
@@ -183,7 +201,7 @@ export default function ProductsPage() {
       setModalOpen(false);
       setCurrentProduct(EMPTY_PRODUCT);
       setIsEditing(false);
-      await loadProducts();
+      if (!(await loadProducts())) setWriteNotice("save");
     } catch (error) {
       setFormError("Lỗi khi lưu sản phẩm");
       console.error(error);
@@ -247,7 +265,7 @@ export default function ProductsPage() {
     try {
       const error = await deleteProduct(product.id!);
       if (error) throw error;
-      await loadProducts();
+      if (!(await loadProducts())) setWriteNotice("delete");
     } catch (error) {
       const message = error instanceof Error || (error && typeof error === "object" && "message" in error)
         ? String((error as { message?: unknown }).message)
@@ -293,9 +311,11 @@ export default function ProductsPage() {
         <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">
           Sản phẩm
         </h1>
-        <p className="text-muted-foreground mt-1.5 text-sm">
-          {products.length} sản phẩm · Hiển thị {filteredProducts.length}
-        </p>
+        {hasLoaded && (
+          <p className="text-muted-foreground mt-1.5 text-sm">
+            {products.length} sản phẩm · Hiển thị {filteredProducts.length}
+          </p>
+        )}
       </div>
 
       <div className="bg-card border border-border rounded-xl shadow-sm p-4 mb-6">
@@ -391,12 +411,28 @@ export default function ProductsPage() {
         </SearchToolbar>
       </div>
 
-      <ProductTable
-        products={filteredProducts}
-        onEdit={handleEditProduct}
-        onDelete={handleDeleteProduct}
-        isLoading={isLoading}
-      />
+      {loadError && (
+        <p
+          className="mb-4 text-sm text-destructive"
+          role="alert"
+          data-testid={writeNotice ? "product-write-refresh-error" : hasLoaded ? "product-reload-error" : "product-load-error"}
+        >
+          {writeNotice
+            ? `Đã ${writeNotice === "save" ? "lưu" : "xóa"} sản phẩm thành công nhưng chưa làm mới được danh sách. Dữ liệu đang hiển thị có thể chưa phản ánh thay đổi gần nhất; bấm Làm mới để thử lại.`
+            : hasLoaded
+              ? "Không làm mới được danh sách sản phẩm. Đang hiển thị dữ liệu đã tải trước đó."
+              : "Không tải được danh sách sản phẩm. Vui lòng thử lại."}
+        </p>
+      )}
+
+      {(!loadError || hasLoaded) && (
+        <ProductTable
+          products={filteredProducts}
+          onEdit={handleEditProduct}
+          onDelete={handleDeleteProduct}
+          isLoading={isLoading}
+        />
+      )}
 
       <ProductModal
         open={modalOpen}
