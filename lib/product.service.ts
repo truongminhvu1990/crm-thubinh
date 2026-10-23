@@ -290,18 +290,18 @@ function buildProductsQuery(
   return query.order("created_at", { ascending: false });
 }
 
-/** `client` defaults to the browser Supabase client so every existing caller
- * (Inventory, Jade Intelligence, Market Intelligence, Orders' product
- * picker, ...) keeps its exact current behavior unchanged. Backend API
- * Foundation (Package 4C, Wave 1) passes a server client instead, from
- * app/api/products/**, so Products' own pages stop reading Postgres
- * directly - no other consumer needs to change. */
-export async function getProducts(
-  searchTerm?: string,
-  category?: string,
-  status?: string,
-  client: SupabaseClient = supabase
-): Promise<Product[]> {
+/** Raised by getProductsOrThrow() when the join query and its join-less fallback both fail. It deliberately
+ * carries nothing from the underlying error: the message is fixed, so it can never leak query details. */
+export class ProductsQueryError extends Error {
+  constructor() {
+    super("Products query failed");
+    this.name = "ProductsQueryError";
+  }
+}
+
+/** The query shared by getProducts() and getProductsOrThrow(): the join query first, then the join-less
+ * fallback. It neither logs nor throws - each caller decides what a failure means. */
+async function queryProducts(client: SupabaseClient, searchTerm?: string, category?: string, status?: string) {
   // The batch/images joins depend on migrations that may not have run yet
   // (product_batches, product_images) - PostgREST errors the whole query
   // if either relationship can't be resolved, so fall back to a join-less
@@ -318,9 +318,44 @@ export async function getProducts(
     ({ data, error } = await buildProductsQuery(client, "*", searchTerm, category, status));
   }
 
+  return { data, error };
+}
+
+/** `client` defaults to the browser Supabase client so every existing caller
+ * (Inventory, Jade Intelligence, Market Intelligence, Orders' product
+ * picker, ...) keeps its exact current behavior unchanged. Backend API
+ * Foundation (Package 4C, Wave 1) passes a server client instead, from
+ * app/api/products/**, so Products' own pages stop reading Postgres
+ * directly - no other consumer needs to change. */
+export async function getProducts(
+  searchTerm?: string,
+  category?: string,
+  status?: string,
+  client: SupabaseClient = supabase
+): Promise<Product[]> {
+  const { data, error } = await queryProducts(client, searchTerm, category, status);
+
   if (error) {
     console.error("Error fetching products:", error);
     return [];
+  }
+
+  return data as unknown as Product[];
+}
+
+/** Same query, filters, ordering and join fallback as getProducts(), but a failure is thrown as a
+ * ProductsQueryError instead of being turned into `[]`, so a failed query can be told apart from a valid
+ * empty result. Used only by GET /api/products; every other caller keeps getProducts(). */
+export async function getProductsOrThrow(
+  searchTerm?: string,
+  category?: string,
+  status?: string,
+  client: SupabaseClient = supabase
+): Promise<Product[]> {
+  const { data, error } = await queryProducts(client, searchTerm, category, status);
+
+  if (error) {
+    throw new ProductsQueryError();
   }
 
   return data as unknown as Product[];

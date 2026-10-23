@@ -325,6 +325,11 @@ test.describe("Products list load states", () => {
   };
   const emptyState = (page: Page) => page.getByText("Chưa có sản phẩm nào");
 
+  // What GET /api/products returns when its query fails. The page only reads the status, never this body.
+  const PRODUCTS_QUERY_FAILED_BODY = {
+    error: { code: "PRODUCTS_QUERY_FAILED", message: "Không tải được danh sách sản phẩm." },
+  };
+
   type ProductsApiMode = "list" | "empty" | "server-error" | "network-failure";
 
   /** Returns `setMode` to change what every later request receives. */
@@ -337,7 +342,7 @@ test.describe("Products list load states", () => {
         case "empty":
           return route.fulfill({ json: [] });
         case "server-error":
-          return route.fulfill({ status: 500, json: {} });
+          return route.fulfill({ status: 500, json: PRODUCTS_QUERY_FAILED_BODY });
         case "network-failure":
           return route.abort("failed");
       }
