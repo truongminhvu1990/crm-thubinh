@@ -1,15 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import { LogIn } from "lucide-react";
 
 export default function LoginPage() {
-  const router = useRouter();
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -31,7 +28,9 @@ export default function LoginPage() {
         return;
       }
 
-      router.push("/dashboard");
+      // Hard navigation: a soft router.push() reuses the client Router Cache, which
+      // may still hold the /login redirect from a pre-login prefetch of /dashboard.
+      window.location.assign("/dashboard");
     } catch (err) {
       setError("Có lỗi xảy ra, vui lòng thử lại");
       console.error(err);
